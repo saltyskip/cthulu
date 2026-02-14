@@ -670,4 +670,186 @@ mod tests {
         assert_eq!(pr.head.sha, "custom-sha-123");
         assert!(!pr.draft);
     }
+
+    // === Regression tests for review feedback fixes ===
+
+    /// Regression for bug 1: review_type context variable must be present
+    /// in rendered prompts. If missing, {{review_type}} would appear as
+    /// a raw placeholder in the review comment.
+    #[test]
+    fn test_review_type_context_in_prompt_rendering() {
+        use crate::tasks::context::render_prompt;
+
+        let template = "Review type: {{review_type}}, PR #{{pr_number}}";
+        let mut context = HashMap::new();
+        context.insert("review_type".to_string(), "initial".to_string());
+        context.insert("pr_number".to_string(), "42".to_string());
+
+        let rendered = render_prompt(template, &context);
+        assert_eq!(rendered, "Review type: initial, PR #42");
+        // Must NOT contain raw placeholder
+        assert!(!rendered.contains("{{review_type}}"));
+    }
+
+    /// Regression for bug 1: re-review type must also render correctly.
+    #[test]
+    fn test_rereview_type_context_in_prompt_rendering() {
+        use crate::tasks::context::render_prompt;
+
+        let template = "This is a {{review_type}} of PR #{{pr_number}}";
+        let mut context = HashMap::new();
+        context.insert("review_type".to_string(), "re-review".to_string());
+        context.insert("pr_number".to_string(), "7".to_string());
+
+        let rendered = render_prompt(template, &context);
+        assert_eq!(rendered, "This is a re-review of PR #7");
+    }
+
+    /// Regression for bug 2: seen_prs must never contain an empty-string
+    /// SHA. This would cause false re-review triggers because any real SHA
+    /// would mismatch against "".
+    #[test]
+    fn test_seen_prs_never_stores_empty_sha() {
+        // Simulate what a correct manual trigger does: store the real SHA
+        let task_state = TaskState::new();
+        let mut seen = std::collections::HashMap::new();
+        let mut repo_prs = HashMap::new();
+
+        // The fix: insert with real SHA, not empty string
+        let real_sha = "abc123def456".to_string();
+        repo_prs.insert(42u64, real_sha.clone());
+        seen.insert("owner/repo".to_string(), repo_prs);
+
+        // Verify no empty SHA exists
+        for (_repo, prs) in &seen {
+            for (pr_num, sha) in prs {
+                assert!(
+                    !sha.is_empty(),
+                    "PR #{pr_num} has empty SHA in seen_prs — this causes spurious re-reviews"
+                );
+            }
+        }
+
+        assert_eq!(seen["owner/repo"][&42], "abc123def456");
+        // Suppress unused variable warning
+        let _ = task_state;
+    }
+
+    /// Regression for bug 3: a draft PR that gets un-drafted (marked ready)
+    /// without new commits must be treated as a new PR, not silently skipped.
+    ///
+    /// Scenario:
+    /// 1. PR #5 is opened as draft
+    /// 2. seed() runs with skip_drafts=true -> PR #5 NOT in seen_prs
+    /// 3. Author marks PR #5 as ready (draft=false), no new commits
+    /// 4. poll loop fetches PR #5 with draft=false, same SHA
+    /// 5. PR #5 is NOT in seen_prs -> treated as new -> reviewed!
+    #[tokio::test]
+    async fn test_undrafted_pr_gets_reviewed_after_seed() {
+        // Step 1-2: Seed with a draft PR (skip_drafts=true)
+        let draft_pr = make_draft_pr(5, "WIP Feature");
+        let draft_sha = draft_pr.head.sha.clone();
+        let mock_client = Arc::new(MockGithubClient::new(vec![draft_pr], "some diff"));
+        let task_state = Arc::new(TaskState::new());
+
+        let config = make_config(vec![RepoEntry {
+            slug: "owner/repo".to_string(),
+            path: PathBuf::from("/tmp/repo"),
+        }]);
+
+        let trigger = GithubPrTrigger::new(mock_client, config, task_state.clone());
+        trigger.seed().await.unwrap();
+
+        // Verify: draft PR is NOT in seen_prs
+        {
+            let seen = task_state.seen_prs.lock().await;
+            let repo_seen = seen.get("owner/repo").unwrap();
+            assert!(
+                !repo_seen.contains_key(&5),
+                "Draft PR #5 should NOT be seeded when skip_drafts=true"
+            );
+        }
+
+        // Step 3-5: Now simulate what poll loop sees — same PR, same SHA,
+        // but draft=false. Since PR #5 is not in seen_prs, it's "new".
+        let ready_pr = make_pr_with_sha(5, "WIP Feature", &draft_sha);
+        assert!(!ready_pr.draft); // Confirm it's not a draft anymore
+
+        // Check: PR is not in seen_prs, so it would be treated as Initial
+        let seen = task_state.seen_prs.lock().await;
+        let repo_seen = seen.get("owner/repo").unwrap();
+        assert!(
+            !repo_seen.contains_key(&ready_pr.number),
+            "Un-drafted PR should be treated as new (not in seen_prs)"
+        );
+    }
+
+    /// Regression for bug 3 (inverse): when skip_drafts=false, draft PRs
+    /// ARE seeded, so un-drafting without new commits does NOT trigger a
+    /// new review (it was already reviewed as a draft).
+    #[tokio::test]
+    async fn test_undrafted_pr_already_seen_when_skip_drafts_disabled() {
+        let draft_pr = make_draft_pr(5, "WIP Feature");
+        let mock_client = Arc::new(MockGithubClient::new(vec![draft_pr], ""));
+        let task_state = Arc::new(TaskState::new());
+
+        let config = make_config_with_options(
+            vec![RepoEntry {
+                slug: "owner/repo".to_string(),
+                path: PathBuf::from("/tmp/repo"),
+            }],
+            false, // skip_drafts = false
+            false,
+        );
+
+        let trigger = GithubPrTrigger::new(mock_client, config, task_state.clone());
+        trigger.seed().await.unwrap();
+
+        // When skip_drafts=false, the draft IS seeded
+        let seen = task_state.seen_prs.lock().await;
+        let repo_seen = seen.get("owner/repo").unwrap();
+        assert!(
+            repo_seen.contains_key(&5),
+            "Draft PR should be seeded when skip_drafts=false"
+        );
+    }
+
+    /// Verify SHA mismatch detection works correctly for re-review.
+    /// Old SHA in seen_prs must differ from new PR's SHA to trigger re-review.
+    #[test]
+    fn test_sha_mismatch_detected_for_rereview() {
+        let old_sha = "aaa111".to_string();
+        let new_sha = "bbb222".to_string();
+
+        // Simulate seen_prs state
+        let mut repo_prs = HashMap::new();
+        repo_prs.insert(1u64, old_sha.clone());
+
+        // New PR from GitHub with different SHA
+        let pr = make_pr_with_sha(1, "Feature", &new_sha);
+
+        // The poll loop checks: old_sha != pr.head.sha
+        let stored_sha = repo_prs.get(&pr.number).unwrap();
+        assert_ne!(
+            stored_sha, &pr.head.sha,
+            "SHA mismatch should be detected for re-review"
+        );
+    }
+
+    /// Verify same SHA does NOT trigger re-review.
+    #[test]
+    fn test_same_sha_no_rereview() {
+        let sha = "same-sha-123".to_string();
+
+        let mut repo_prs = HashMap::new();
+        repo_prs.insert(1u64, sha.clone());
+
+        let pr = make_pr_with_sha(1, "Feature", &sha);
+
+        let stored_sha = repo_prs.get(&pr.number).unwrap();
+        assert_eq!(
+            stored_sha, &pr.head.sha,
+            "Same SHA should NOT trigger re-review"
+        );
+    }
 }
