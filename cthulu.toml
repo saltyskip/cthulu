@@ -1,0 +1,20 @@
+[server]
+port = 8081
+sentry_dsn_env = "SENTRY_DSN"
+environment = "local"
+
+[github]
+token_env = "GITHUB_TOKEN"
+
+[[tasks]]
+name = "pr-review"
+executor = "claude-code"
+prompt = "prompts/pr_review.md"
+permissions = ["Bash", "Read", "Grep", "Glob"]
+
+[tasks.trigger.github]
+event = "pull_request"
+repos = [
+  { slug = "bitcoin-portal/RustServer", path = "/Users/andrei/Developer/RustServer" },
+]
+poll_interval = 60

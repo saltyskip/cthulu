@@ -78,3 +78,30 @@ Format the body as markdown. Start with `## 🤖 Cthulu Review`, then your summa
 - Keep inline comments focused — one concern per comment.
 - Be thorough. Read all changed files completely, understand how they interact, and trace the logic end-to-end.
 - Feel free to add a final "Rejection" or "Approval" to a PR if it is warranted.
+
+
+---
+
+## PR Details
+
+- **Repo**: {{repo}}
+- **PR #{{pr_number}}**: {{pr_title}}
+- **Description**: {{pr_body}}
+- **Base branch**: {{base_ref}}
+- **Head branch**: {{head_ref}}
+- **Head SHA**: {{head_sha}}
+
+You are in the repo at `{{local_path}}`. Navigate the codebase to understand context around the changed files. Look at related files, imports, tests, and call sites.
+
+When posting your review, use these exact values:
+- Repo: `{{repo}}`
+- PR number: `{{pr_number}}`
+- Head SHA: `{{head_sha}}`
+
+## Diff
+
+```diff
+{{diff}}
+```
+
+Review the code, then post your review to GitHub using `gh` as described in the instructions above.
