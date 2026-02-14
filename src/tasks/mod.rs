@@ -5,12 +5,14 @@ pub mod triggers;
 use std::collections::HashSet;
 use std::sync::Arc;
 
+use anyhow::{Context, Result};
 use tokio::sync::Mutex;
 
 use crate::config::{ExecutorType, TaskConfig};
 use crate::github::client::{GithubClient, HttpGithubClient};
 use crate::tasks::executors::claude_code::ClaudeCodeExecutor;
 use crate::tasks::executors::Executor;
+use crate::tasks::triggers::cron::CronTrigger;
 use crate::tasks::triggers::github::GithubPrTrigger;
 
 pub struct TaskState {
@@ -29,6 +31,20 @@ impl TaskState {
     }
 }
 
+fn load_prompt_and_executor(task: &TaskConfig) -> Result<(String, Box<dyn Executor>)> {
+    let prompt_template = std::fs::read_to_string(&task.prompt)
+        .with_context(|| format!("failed to read prompt file: {}", task.prompt))?;
+
+    let executor: Box<dyn Executor> = match task.executor {
+        ExecutorType::ClaudeCode => Box::new(ClaudeCodeExecutor::new(task.permissions.clone())),
+        ExecutorType::ClaudeApi => {
+            anyhow::bail!("claude-api executor not yet implemented");
+        }
+    };
+
+    Ok((prompt_template, executor))
+}
+
 pub async fn spawn_task(
     task: TaskConfig,
     github_token: Option<String>,
@@ -41,18 +57,10 @@ pub async fn spawn_task(
             return;
         };
 
-        let prompt_template = match std::fs::read_to_string(&task.prompt) {
-            Ok(content) => content,
+        let (prompt_template, executor) = match load_prompt_and_executor(&task) {
+            Ok(v) => v,
             Err(e) => {
-                tracing::error!(task = %task.name, prompt = %task.prompt, error = %e, "Failed to read prompt file");
-                return;
-            }
-        };
-
-        let executor: Box<dyn Executor> = match task.executor {
-            ExecutorType::ClaudeCode => Box::new(ClaudeCodeExecutor::new(task.permissions.clone())),
-            ExecutorType::ClaudeApi => {
-                tracing::error!(task = %task.name, "claude-api executor not yet implemented");
+                tracing::error!(task = %task.name, error = %e, "Failed to initialize task");
                 return;
             }
         };
@@ -86,8 +94,35 @@ pub async fn spawn_task(
                 )
                 .await;
         });
-    } else if task.trigger.cron.is_some() {
-        tracing::warn!(task = %task.name, "Cron trigger not yet implemented -- skipping");
+    } else if let Some(cron_config) = &task.trigger.cron {
+        let (prompt_template, executor) = match load_prompt_and_executor(&task) {
+            Ok(v) => v,
+            Err(e) => {
+                tracing::error!(task = %task.name, error = %e, "Failed to initialize task");
+                return;
+            }
+        };
+
+        let trigger = match CronTrigger::new(cron_config.clone()) {
+            Ok(t) => t,
+            Err(e) => {
+                tracing::error!(task = %task.name, error = %e, "Failed to parse cron trigger");
+                return;
+            }
+        };
+
+        tracing::info!(
+            task = %task.name,
+            schedule = %cron_config.schedule,
+            "Starting cron trigger"
+        );
+
+        let task_name = task.name.clone();
+        tokio::spawn(async move {
+            trigger
+                .run_loop(&task_name, &prompt_template, executor.as_ref())
+                .await;
+        });
     } else if task.trigger.webhook.is_some() {
         tracing::warn!(task = %task.name, "Webhook trigger not yet implemented -- skipping");
     } else {

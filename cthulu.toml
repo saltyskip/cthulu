@@ -6,6 +6,8 @@ environment = "local"
 [github]
 token_env = "GITHUB_TOKEN"
 
+# --- PR Review (GitHub trigger) ---
+# Automatically reviews new pull requests as they are opened.
 [[tasks]]
 name = "pr-review"
 executor = "claude-code"
@@ -18,3 +20,16 @@ repos = [
   { slug = "bitcoin-portal/RustServer", path = "/Users/andrei/Developer/RustServer" },
 ]
 poll_interval = 60
+
+# --- Stale PR Checker (Cron trigger) ---
+# Runs every weekday at 9am UTC to find PRs that need attention.
+# Uses the `gh` CLI, so GITHUB_TOKEN must be set.
+[[tasks]]
+name = "stale-pr-check"
+executor = "claude-code"
+prompt = "prompts/stale_prs.md"
+permissions = ["Bash", "Read"]
+
+[tasks.trigger.cron]
+schedule = "0 9 * * MON-FRI"
+working_dir = "/Users/andrei/Developer/RustServer"
