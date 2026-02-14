@@ -62,6 +62,14 @@ pub struct GithubTriggerConfig {
     pub repos: Vec<RepoEntry>,
     #[serde(default = "default_poll_interval")]
     pub poll_interval: u64,
+    #[serde(default = "default_true")]
+    pub skip_drafts: bool,
+    #[serde(default)]
+    pub review_on_push: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 fn default_poll_interval() -> u64 {
@@ -304,5 +312,45 @@ mod tests {
             schedule = "daily"
         "#);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_github_trigger_defaults_skip_drafts_true() {
+        let config = parse(r#"
+            [server]
+
+            [[tasks]]
+            name = "review"
+            executor = "claude-code"
+            prompt = "test.md"
+
+            [tasks.trigger.github]
+            event = "pull_request"
+            repos = [{ slug = "o/r", path = "/tmp" }]
+        "#);
+        let gh = config.tasks[0].trigger.github.as_ref().unwrap();
+        assert!(gh.skip_drafts);
+        assert!(!gh.review_on_push);
+    }
+
+    #[test]
+    fn test_github_trigger_explicit_options() {
+        let config = parse(r#"
+            [server]
+
+            [[tasks]]
+            name = "review"
+            executor = "claude-code"
+            prompt = "test.md"
+
+            [tasks.trigger.github]
+            event = "pull_request"
+            repos = [{ slug = "o/r", path = "/tmp" }]
+            skip_drafts = false
+            review_on_push = true
+        "#);
+        let gh = config.tasks[0].trigger.github.as_ref().unwrap();
+        assert!(!gh.skip_drafts);
+        assert!(gh.review_on_push);
     }
 }

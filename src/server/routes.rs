@@ -135,9 +135,11 @@ async fn review_status(State(state): State<AppState>) -> Json<Value> {
     let seen_prs: serde_json::Map<String, Value> = seen
         .iter()
         .map(|(repo, prs)| {
-            let mut numbers: Vec<u64> = prs.iter().copied().collect();
-            numbers.sort();
-            (repo.clone(), json!(numbers))
+            let pr_map: serde_json::Map<String, Value> = prs
+                .iter()
+                .map(|(num, sha)| (num.to_string(), json!(sha)))
+                .collect();
+            (repo.clone(), json!(pr_map))
         })
         .collect();
 
@@ -214,10 +216,12 @@ async fn trigger_review(
     let repo_slug = body.repo.clone();
     let github_client = github_client.clone();
 
-    // Mark as seen
+    // Mark as seen (with placeholder SHA, will be updated after fetch)
     {
         let mut seen = task_state.seen_prs.lock().await;
-        seen.entry(repo_slug.clone()).or_default().insert(pr_number);
+        seen.entry(repo_slug.clone())
+            .or_default()
+            .insert(pr_number, String::new());
     }
 
     tokio::spawn(async move {
@@ -231,6 +235,14 @@ async fn trigger_review(
                 return;
             }
         };
+
+        // Update seen_prs with actual SHA
+        {
+            let mut seen = task_state.seen_prs.lock().await;
+            seen.entry(repo_slug.clone())
+                .or_default()
+                .insert(pr_number, pr.head.sha.clone());
+        }
 
         let diff = match github_client
             .fetch_pr_diff(&owner, &repo_name, pr_number)

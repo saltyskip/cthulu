@@ -20,6 +20,8 @@ pub struct PullRequest {
     pub title: String,
     #[serde(default)]
     pub body: Option<String>,
+    #[serde(default)]
+    pub draft: bool,
     pub head: PrRef,
     pub base: PrRef,
 }

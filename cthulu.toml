@@ -18,3 +18,5 @@ repos = [
   { slug = "bitcoin-portal/RustServer", path = "/Users/andrei/Developer/RustServer" },
 ]
 poll_interval = 60
+skip_drafts = true        # Don't review draft PRs (default: true)
+review_on_push = true     # Re-review when new commits are pushed

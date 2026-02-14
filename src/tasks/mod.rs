@@ -2,7 +2,7 @@ pub mod context;
 pub mod executors;
 pub mod triggers;
 
-use std::collections::HashSet;
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use tokio::sync::Mutex;
@@ -16,7 +16,7 @@ use crate::tasks::triggers::github::GithubPrTrigger;
 pub struct TaskState {
     pub reviews_completed: Mutex<u64>,
     pub active_reviews: Mutex<u64>,
-    pub seen_prs: Mutex<std::collections::HashMap<String, HashSet<u64>>>,
+    pub seen_prs: Mutex<HashMap<String, HashMap<u64, String>>>,
 }
 
 impl TaskState {
@@ -24,7 +24,7 @@ impl TaskState {
         Self {
             reviews_completed: Mutex::new(0),
             active_reviews: Mutex::new(0),
-            seen_prs: Mutex::new(std::collections::HashMap::new()),
+            seen_prs: Mutex::new(HashMap::new()),
         }
     }
 }
