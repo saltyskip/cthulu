@@ -83,6 +83,7 @@ impl RepoEntry {
 #[derive(Debug, Clone, Deserialize)]
 pub struct CronTriggerConfig {
     pub schedule: String,
+    pub working_dir: PathBuf,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -204,9 +205,11 @@ mod tests {
 
             [tasks.trigger.cron]
             schedule = "0 9 * * MON-FRI"
+            working_dir = "/tmp/project"
         "#);
         let cron = config.tasks[0].trigger.cron.as_ref().unwrap();
         assert_eq!(cron.schedule, "0 9 * * MON-FRI");
+        assert_eq!(cron.working_dir, PathBuf::from("/tmp/project"));
         assert!(config.tasks[0].trigger.github.is_none());
     }
 
@@ -237,7 +240,8 @@ mod tests {
             executor = "claude-code"
             prompt = "a.md"
             [tasks.trigger.cron]
-            schedule = "daily"
+            schedule = "0 0 * * *"
+            working_dir = "/tmp/a"
 
             [[tasks]]
             name = "task-b"
@@ -261,7 +265,8 @@ mod tests {
             executor = "claude-code"
             prompt = "test.md"
             [tasks.trigger.cron]
-            schedule = "daily"
+            schedule = "0 0 * * *"
+            working_dir = "/tmp/test"
         "#);
         assert!(config.tasks[0].permissions.is_empty());
     }
@@ -301,7 +306,8 @@ mod tests {
             executor = "claude-code"
             prompt = "test.md"
             [tasks.trigger.cron]
-            schedule = "daily"
+            schedule = "0 0 * * *"
+            working_dir = "/tmp/test"
         "#);
         assert!(result.is_err());
     }
