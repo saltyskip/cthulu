@@ -66,6 +66,8 @@ pub struct GithubTriggerConfig {
     pub skip_drafts: bool,
     #[serde(default)]
     pub review_on_push: bool,
+    #[serde(default = "default_max_diff_size")]
+    pub max_diff_size: usize,
 }
 
 fn default_true() -> bool {
@@ -74,6 +76,10 @@ fn default_true() -> bool {
 
 fn default_poll_interval() -> u64 {
     60
+}
+
+fn default_max_diff_size() -> usize {
+    50_000
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -331,6 +337,7 @@ mod tests {
         let gh = config.tasks[0].trigger.github.as_ref().unwrap();
         assert!(gh.skip_drafts);
         assert!(!gh.review_on_push);
+        assert_eq!(gh.max_diff_size, 50_000);
     }
 
     #[test]
@@ -348,9 +355,11 @@ mod tests {
             repos = [{ slug = "o/r", path = "/tmp" }]
             skip_drafts = false
             review_on_push = true
+            max_diff_size = 25000
         "#);
         let gh = config.tasks[0].trigger.github.as_ref().unwrap();
         assert!(!gh.skip_drafts);
         assert!(gh.review_on_push);
+        assert_eq!(gh.max_diff_size, 25000);
     }
 }

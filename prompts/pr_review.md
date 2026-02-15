@@ -100,6 +100,8 @@ When posting your review, use these exact values:
 
 ## Diff
 
+The diff may be provided inline below, or — for large PRs — as a list of per-file diff paths. If you see file paths instead of inline diff content, read each diff file using the Read tool before reviewing.
+
 ```diff
 {{diff}}
 ```

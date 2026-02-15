@@ -7,6 +7,7 @@ use crate::config::GithubTriggerConfig;
 use crate::github::client::GithubClient;
 use crate::github::models::RepoConfig;
 use crate::tasks::context::render_prompt;
+use crate::tasks::diff;
 use crate::tasks::executors::Executor;
 use crate::tasks::TaskState;
 
@@ -244,7 +245,14 @@ impl GithubPrTrigger {
 
                     // Build context
                     let mut context = HashMap::new();
-                    context.insert("diff".to_string(), diff);
+                    let diff_ctx = match diff::prepare_diff_context(&diff, pr.number, self.config.max_diff_size) {
+                        Ok(ctx) => ctx,
+                        Err(e) => {
+                            tracing::error!(error = %e, "Failed to prepare diff context");
+                            continue;
+                        }
+                    };
+                    context.insert("diff".to_string(), diff_ctx.text());
                     context.insert("pr_number".to_string(), pr.number.to_string());
                     context.insert("pr_title".to_string(), pr.title.clone());
                     context.insert(
@@ -308,6 +316,9 @@ impl GithubPrTrigger {
                             );
                         }
                     }
+
+                    // Clean up temp diff files
+                    diff::cleanup(&diff_ctx);
                 }
             }
         }
@@ -434,6 +445,7 @@ mod tests {
             poll_interval: 1,
             skip_drafts: true,
             review_on_push: false,
+            max_diff_size: 50_000,
         }
     }
 
@@ -444,6 +456,7 @@ mod tests {
             poll_interval: 1,
             skip_drafts,
             review_on_push,
+            max_diff_size: 50_000,
         }
     }
 

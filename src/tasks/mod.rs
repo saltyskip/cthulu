@@ -1,4 +1,5 @@
 pub mod context;
+pub mod diff;
 pub mod executors;
 pub mod triggers;
 
