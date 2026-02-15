@@ -16,6 +16,7 @@ use tokio_stream::StreamExt;
 
 use super::middleware;
 use super::AppState;
+use crate::tasks::diff;
 use crate::tasks::executors::Executor;
 
 pub fn build_router(state: AppState) -> Router {
@@ -248,19 +249,15 @@ async fn trigger_review(
             }
         };
 
-        let diff_ctx = match crate::tasks::diff::prepare_diff_context(&diff, pr_number, max_diff_size) {
+        let diff_ctx = match diff::prepare_diff_context(&diff, pr_number, max_diff_size) {
             Ok(ctx) => ctx,
             Err(e) => {
                 tracing::error!(error = %e, "Failed to prepare diff context for manual trigger");
                 return;
             }
         };
-        let diff_value = match &diff_ctx {
-            crate::tasks::diff::DiffContext::Inline(d) => d.clone(),
-            crate::tasks::diff::DiffContext::Chunked { manifest, .. } => manifest.clone(),
-        };
         let mut context = std::collections::HashMap::new();
-        context.insert("diff".to_string(), diff_value);
+        context.insert("diff".to_string(), diff_ctx.text());
         context.insert("pr_number".to_string(), pr.number.to_string());
         context.insert("pr_title".to_string(), pr.title.clone());
         context.insert("pr_body".to_string(), pr.body.unwrap_or_default());
@@ -299,7 +296,7 @@ async fn trigger_review(
             }
         }
 
-        crate::tasks::diff::cleanup(&diff_ctx);
+        diff::cleanup(&diff_ctx);
     });
 
     (

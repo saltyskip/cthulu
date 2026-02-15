@@ -7,7 +7,7 @@ use crate::config::GithubTriggerConfig;
 use crate::github::client::GithubClient;
 use crate::github::models::RepoConfig;
 use crate::tasks::context::render_prompt;
-use crate::tasks::diff::{self, DiffContext};
+use crate::tasks::diff;
 use crate::tasks::executors::Executor;
 use crate::tasks::TaskState;
 
@@ -252,11 +252,7 @@ impl GithubPrTrigger {
                             continue;
                         }
                     };
-                    let diff_value = match &diff_ctx {
-                        DiffContext::Inline(d) => d.clone(),
-                        DiffContext::Chunked { manifest, .. } => manifest.clone(),
-                    };
-                    context.insert("diff".to_string(), diff_value);
+                    context.insert("diff".to_string(), diff_ctx.text());
                     context.insert("pr_number".to_string(), pr.number.to_string());
                     context.insert("pr_title".to_string(), pr.title.clone());
                     context.insert(

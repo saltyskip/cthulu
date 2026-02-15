@@ -15,6 +15,15 @@ pub enum DiffContext {
     Chunked { manifest: String, dir: PathBuf },
 }
 
+impl DiffContext {
+    pub fn text(&self) -> String {
+        match self {
+            DiffContext::Inline(d) => d.clone(),
+            DiffContext::Chunked { manifest, .. } => manifest.clone(),
+        }
+    }
+}
+
 pub fn split_diff_by_file(diff: &str) -> Vec<FileDiff> {
     let mut files = Vec::new();
     let mut current_path = String::new();
@@ -88,7 +97,8 @@ pub fn prepare_diff_context(
     }
 
     let file_diffs = split_diff_by_file(diff);
-    let dir = PathBuf::from(format!("/tmp/cthulu-review/{pr_number}"));
+    let run_id = uuid::Uuid::new_v4();
+    let dir = PathBuf::from(format!("/tmp/cthulu-review/{pr_number}-{run_id}"));
 
     // Clean any previous run for this PR
     if dir.exists() {
@@ -250,8 +260,12 @@ diff --git a/src/b.rs b/src/b.rs
         }
 
         // Cleanup
+        let chunked_dir = match &result {
+            DiffContext::Chunked { dir, .. } => dir.clone(),
+            _ => unreachable!(),
+        };
         cleanup(&result);
-        assert!(!PathBuf::from("/tmp/cthulu-review/99999").exists());
+        assert!(!chunked_dir.exists());
     }
 
     #[test]
@@ -278,7 +292,10 @@ diff --git a/src/tasks/triggers/github.rs b/src/tasks/triggers/github.rs
     fn test_cleanup_removes_temp_dir() {
         let diff = "diff --git a/x.rs b/x.rs\n+line\n";
         let result = prepare_diff_context(diff, 77777, 5).unwrap();
-        let dir = PathBuf::from("/tmp/cthulu-review/77777");
+        let dir = match &result {
+            DiffContext::Chunked { dir, .. } => dir.clone(),
+            _ => panic!("expected Chunked"),
+        };
         assert!(dir.exists());
         cleanup(&result);
         assert!(!dir.exists());
