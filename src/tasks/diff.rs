@@ -100,10 +100,6 @@ pub fn prepare_diff_context(
     let run_id = uuid::Uuid::new_v4();
     let dir = PathBuf::from(format!("/tmp/cthulu-review/{pr_number}-{run_id}"));
 
-    // Clean any previous run for this PR
-    if dir.exists() {
-        std::fs::remove_dir_all(&dir).ok();
-    }
     std::fs::create_dir_all(&dir)
         .with_context(|| format!("failed to create diff dir: {}", dir.display()))?;
 
@@ -138,8 +134,10 @@ pub fn prepare_diff_context(
     for file_diff in &file_diffs {
         let filename = format!("{}.diff", sanitize_path(&file_diff.path));
         let file_path = dir.join(&filename);
-        std::fs::write(&file_path, &file_diff.content)
-            .with_context(|| format!("failed to write diff chunk: {}", file_path.display()))?;
+        if let Err(e) = std::fs::write(&file_path, &file_diff.content) {
+            let _ = std::fs::remove_dir_all(&dir);
+            return Err(e).with_context(|| format!("failed to write diff chunk: {}", file_path.display()));
+        }
 
         writeln!(
             manifest,
