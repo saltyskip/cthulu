@@ -12,6 +12,7 @@ pub struct AppState {
     pub task_state: Arc<TaskState>,
     pub config: Arc<crate::config::Config>,
     pub github_client: Option<Arc<dyn GithubClient>>,
+    pub http_client: Arc<reqwest::Client>,
 }
 
 pub fn create_app(state: AppState) -> Router {

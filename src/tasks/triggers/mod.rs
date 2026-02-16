@@ -1,3 +1,4 @@
+pub mod cron;
 pub mod github;
 
 use std::collections::HashMap;

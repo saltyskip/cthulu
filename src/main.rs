@@ -78,6 +78,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         task_state,
         config: config.clone(),
         github_client,
+        http_client,
     };
 
     let app = server::create_app(app_state)

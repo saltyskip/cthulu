@@ -294,15 +294,19 @@ impl GithubPrTrigger {
                     }
 
                     match result {
-                        Ok(()) => {
+                        Ok(exec_result) => {
                             let mut completed = task_state.reviews_completed.lock().await;
                             *completed += 1;
                             tracing::info!(
                                 task = %task_name,
                                 repo = %repo.full_name(),
                                 pr = pr.number,
-                                "Review completed for PR #{}",
-                                pr.number
+                                cost_usd = exec_result.cost_usd,
+                                turns = exec_result.num_turns,
+                                "Review completed for PR #{} ({} turns, ${:.4})",
+                                pr.number,
+                                exec_result.num_turns,
+                                exec_result.cost_usd
                             );
                         }
                         Err(e) => {
@@ -400,12 +404,16 @@ mod tests {
 
     #[async_trait::async_trait]
     impl Executor for MockExecutor {
-        async fn execute(&self, prompt: &str, working_dir: &std::path::Path) -> anyhow::Result<()> {
+        async fn execute(&self, prompt: &str, working_dir: &std::path::Path) -> anyhow::Result<crate::tasks::executors::ExecutionResult> {
             self.calls
                 .lock()
                 .unwrap()
                 .push((prompt.to_string(), working_dir.to_path_buf()));
-            Ok(())
+            Ok(crate::tasks::executors::ExecutionResult {
+                text: String::new(),
+                cost_usd: 0.0,
+                num_turns: 0,
+            })
         }
     }
 
