@@ -24,27 +24,37 @@ Your response will be posted to Slack with Block Kit formatting and threading. S
 - 2-4 key bullet points highlighting the most impactful user-facing changes
 
 **Part 2 (below the delimiter):** Full details posted as a thread reply.
-- Grouped by feature area with `##` headers
+- Grouped by feature area with `###` headers
+- Use `---` dividers between each feature area for clean visual separation
 - All user-facing changes with context
 
 ### Example structure:
 
-# Product Updates, Week of {{timestamp}}
+# What Shipped This Week
 
 - **Trading**: Brief highlight of biggest user-facing change
 - **Wallet**: Brief highlight
-- [N] user-facing improvements shipped this week
+
+[N] user-facing improvements shipped this week
 
 ---THREAD---
 
-## What Shipped
-
-### [Feature Area]
+### Trading
 - **Feature/fix name**: What changed from the user's perspective and why it matters
 - ...
 
-### [Next Feature Area]
+---
+
+### Wallet
+- **Feature/fix name**: What changed from the user's perspective and why it matters
 - ...
+
+---
+
+### Performance
+- **Improvement**: What users will notice
+
+---
 
 ## Coming Soon
 - [Optional: 1-2 things in progress based on open PRs or patterns you notice]
