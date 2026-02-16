@@ -109,6 +109,7 @@ pub async fn spawn_task(
             task.sink.clone(),
             cron_config.working_dir.clone(),
             http_client,
+            github_token,
         ) {
             Ok(t) => t,
             Err(e) => {

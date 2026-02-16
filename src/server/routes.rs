@@ -361,12 +361,15 @@ async fn trigger_task(
         task.permissions.clone(),
     );
 
+    let github_token = state.config.github_token();
+
     let cron_trigger = match CronTrigger::new(
         &cron_config.schedule,
         task.sources.clone(),
         task.sink.clone(),
         cron_config.working_dir.clone(),
         state.http_client.clone(),
+        github_token,
     ) {
         Ok(t) => t,
         Err(e) => {

@@ -61,3 +61,49 @@ limit = 10
 [tasks.sink]
 type = "slack"
 webhook_url_env = "SLACK_WEBHOOK_URL"
+
+[[tasks]]
+name = "dev-changelog"
+executor = "claude-code"
+prompt = "prompts/dev_changelog.md"
+permissions = []
+
+[tasks.trigger.cron]
+schedule = "0 9 * * MON"
+
+[[tasks.sources]]
+type = "github-merged-prs"
+repos = [
+  "bitcoin-portal/RustServer",
+  "bitcoin-portal/OrangeRockIOS",
+  "bitcoin-portal/RustMultiplatformCore",
+  "saltyskip/cthulu",
+]
+since_days = 7
+
+[tasks.sink]
+type = "slack"
+webhook_url_env = "SLACK_DEV_WEBHOOK_URL"
+
+[[tasks]]
+name = "product-updates"
+executor = "claude-code"
+prompt = "prompts/product_updates.md"
+permissions = []
+
+[tasks.trigger.cron]
+schedule = "0 10 * * MON"
+
+[[tasks.sources]]
+type = "github-merged-prs"
+repos = [
+  "bitcoin-portal/RustServer",
+  "bitcoin-portal/OrangeRockIOS",
+  "bitcoin-portal/RustMultiplatformCore",
+  "saltyskip/cthulu",
+]
+since_days = 7
+
+[tasks.sink]
+type = "slack"
+webhook_url_env = "SLACK_PRODUCT_WEBHOOK_URL"

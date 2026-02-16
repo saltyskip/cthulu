@@ -122,10 +122,19 @@ pub enum SourceConfig {
         #[serde(default = "default_rss_limit")]
         limit: usize,
     },
+    GithubMergedPrs {
+        repos: Vec<String>,
+        #[serde(default = "default_since_days")]
+        since_days: u64,
+    },
 }
 
 fn default_rss_limit() -> usize {
     10
+}
+
+fn default_since_days() -> u64 {
+    7
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -403,12 +412,14 @@ mod tests {
                 assert_eq!(url, "https://example.com/feed.xml");
                 assert_eq!(*limit, 5);
             }
+            _ => panic!("expected Rss source"),
         }
         match &task.sources[1] {
             SourceConfig::Rss { url, limit } => {
                 assert_eq!(url, "https://other.com/rss");
                 assert_eq!(*limit, 10); // default
             }
+            _ => panic!("expected Rss source"),
         }
         match task.sink.as_ref().unwrap() {
             SinkConfig::Slack { webhook_url_env } => {
@@ -434,6 +445,46 @@ mod tests {
         let task = &config.tasks[0];
         assert!(task.sources.is_empty());
         assert!(task.sink.is_none());
+    }
+
+    #[test]
+    fn test_github_merged_prs_source() {
+        let config = parse(r#"
+            [server]
+
+            [[tasks]]
+            name = "changelog"
+            executor = "claude-code"
+            prompt = "prompts/dev_changelog.md"
+
+            [tasks.trigger.cron]
+            schedule = "0 9 * * MON"
+
+            [[tasks.sources]]
+            type = "github-merged-prs"
+            repos = ["owner/repo-a", "owner/repo-b"]
+
+            [[tasks.sources]]
+            type = "github-merged-prs"
+            repos = ["owner/repo-c"]
+            since_days = 14
+        "#);
+        let task = &config.tasks[0];
+        assert_eq!(task.sources.len(), 2);
+        match &task.sources[0] {
+            SourceConfig::GithubMergedPrs { repos, since_days } => {
+                assert_eq!(repos, &["owner/repo-a", "owner/repo-b"]);
+                assert_eq!(*since_days, 7); // default
+            }
+            _ => panic!("expected GithubMergedPrs source"),
+        }
+        match &task.sources[1] {
+            SourceConfig::GithubMergedPrs { repos, since_days } => {
+                assert_eq!(repos, &["owner/repo-c"]);
+                assert_eq!(*since_days, 14);
+            }
+            _ => panic!("expected GithubMergedPrs source"),
+        }
     }
 
     #[test]

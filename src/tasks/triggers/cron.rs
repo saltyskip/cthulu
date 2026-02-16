@@ -18,6 +18,7 @@ pub struct CronTrigger {
     sink: Option<ResolvedSink>,
     working_dir: PathBuf,
     http_client: Arc<reqwest::Client>,
+    github_token: Option<String>,
 }
 
 enum ResolvedSink {
@@ -31,6 +32,7 @@ impl CronTrigger {
         sink: Option<SinkConfig>,
         working_dir: PathBuf,
         http_client: Arc<reqwest::Client>,
+        github_token: Option<String>,
     ) -> Result<Self> {
         let cron = Cron::new(schedule)
             .parse()
@@ -53,6 +55,7 @@ impl CronTrigger {
             sink: resolved_sink,
             working_dir,
             http_client,
+            github_token,
         })
     }
 
@@ -105,7 +108,7 @@ impl CronTrigger {
         tracing::info!(task = %task_name, "Cron task firing");
 
         // 1. Fetch content from sources
-        let items = sources::fetch_all(&self.sources, &self.http_client).await;
+        let items = sources::fetch_all(&self.sources, &self.http_client, self.github_token.as_deref()).await;
         tracing::info!(task = %task_name, items = items.len(), "Fetched content items");
 
         // 2. Format items and build template variables
@@ -203,6 +206,7 @@ mod tests {
             None,
             PathBuf::from("/tmp"),
             Arc::new(reqwest::Client::new()),
+            None,
         );
         assert!(trigger.is_ok());
     }
@@ -215,6 +219,7 @@ mod tests {
             None,
             PathBuf::from("/tmp"),
             Arc::new(reqwest::Client::new()),
+            None,
         );
         assert!(trigger.is_err());
     }
