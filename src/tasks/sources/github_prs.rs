@@ -15,8 +15,6 @@ struct SearchItem {
     html_url: String,
     body: Option<String>,
     pull_request: Option<PullRequestRef>,
-    #[serde(rename = "created_at")]
-    _created_at: Option<String>,
 }
 
 #[derive(Deserialize)]
