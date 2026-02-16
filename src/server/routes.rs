@@ -386,7 +386,7 @@ async fn trigger_task(
             .execute_once(&task_name, &prompt_template, &executor)
             .await
         {
-            tracing::error!(task = %task_name, error = %e, "Manual task trigger failed");
+            tracing::error!(task = %task_name, error = ?e, "Manual task trigger failed");
         }
     });
 
