@@ -1,3 +1,4 @@
+pub mod github_prs;
 pub mod rss;
 
 use chrono::{DateTime, Utc};
@@ -16,6 +17,7 @@ pub struct ContentItem {
 pub async fn fetch_all(
     sources: &[SourceConfig],
     http_client: &reqwest::Client,
+    github_token: Option<&str>,
 ) -> Vec<ContentItem> {
     let futures: Vec<_> = sources
         .iter()
@@ -29,6 +31,22 @@ pub async fn fetch_all(
                         }
                         Err(e) => {
                             tracing::error!(url = %url, error = %e, "Failed to fetch RSS feed");
+                            Vec::new()
+                        }
+                    }
+                }
+                SourceConfig::GithubMergedPrs { repos, since_days } => {
+                    let Some(token) = github_token else {
+                        tracing::error!("GithubMergedPrs source requires GITHUB_TOKEN but none is set");
+                        return Vec::new();
+                    };
+                    match github_prs::fetch_merged_prs(http_client, token, repos, *since_days).await {
+                        Ok(items) => {
+                            tracing::info!(repos = ?repos, count = items.len(), "Fetched merged PRs");
+                            items
+                        }
+                        Err(e) => {
+                            tracing::error!(repos = ?repos, error = %e, "Failed to fetch merged PRs");
                             Vec::new()
                         }
                     }
