@@ -20,3 +20,31 @@ repos = [
 poll_interval = 60
 skip_drafts = true        # Don't review draft PRs (default: true)
 review_on_push = true     # Re-review when new commits are pushed
+
+[[tasks]]
+name = "orangerock-market-brief"
+executor = "claude-code"
+prompt = "prompts/orangerock_brief.md"
+permissions = []
+
+[tasks.trigger.cron]
+schedule = "0 */4 * * *"
+
+[[tasks.sources]]
+type = "rss"
+url = "https://www.coindesk.com/arc/outboundfeeds/rss/"
+limit = 10
+
+[[tasks.sources]]
+type = "rss"
+url = "https://www.theblock.co/rss.xml"
+limit = 10
+
+[[tasks.sources]]
+type = "rss"
+url = "https://cointelegraph.com/rss"
+limit = 10
+
+[tasks.sink]
+type = "slack"
+webhook_url_env = "SLACK_WEBHOOK_URL"

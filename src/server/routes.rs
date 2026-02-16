@@ -286,10 +286,17 @@ async fn trigger_review(
         }
 
         match result {
-            Ok(()) => {
+            Ok(exec_result) => {
                 let mut completed = task_state.reviews_completed.lock().await;
                 *completed += 1;
-                tracing::info!(pr = pr_number, "Manual review completed");
+                tracing::info!(
+                    pr = pr_number,
+                    cost_usd = exec_result.cost_usd,
+                    turns = exec_result.num_turns,
+                    "Manual review completed ({} turns, ${:.4})",
+                    exec_result.num_turns,
+                    exec_result.cost_usd
+                );
             }
             Err(e) => {
                 tracing::error!(pr = pr_number, error = %e, "Manual review failed");

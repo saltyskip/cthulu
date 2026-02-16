@@ -40,6 +40,10 @@ pub struct TaskConfig {
     #[serde(default)]
     pub permissions: Vec<String>,
     pub trigger: TriggerConfig,
+    #[serde(default)]
+    pub sources: Vec<SourceConfig>,
+    #[serde(default)]
+    pub sink: Option<SinkConfig>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -102,6 +106,26 @@ pub struct CronTriggerConfig {
 #[derive(Debug, Clone, Deserialize)]
 pub struct WebhookTriggerConfig {
     pub path: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(tag = "type", rename_all = "kebab-case")]
+pub enum SourceConfig {
+    Rss {
+        url: String,
+        #[serde(default = "default_rss_limit")]
+        limit: usize,
+    },
+}
+
+fn default_rss_limit() -> usize {
+    10
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(tag = "type", rename_all = "kebab-case")]
+pub enum SinkConfig {
+    Slack { webhook_url_env: String },
 }
 
 impl Config {
@@ -338,6 +362,72 @@ mod tests {
         assert!(gh.skip_drafts);
         assert!(!gh.review_on_push);
         assert_eq!(gh.max_diff_size, 50_000);
+    }
+
+    #[test]
+    fn test_task_with_sources_and_sink() {
+        let config = parse(r#"
+            [server]
+
+            [[tasks]]
+            name = "content-task"
+            executor = "claude-code"
+            prompt = "prompts/brief.md"
+
+            [tasks.trigger.cron]
+            schedule = "0 */4 * * *"
+
+            [[tasks.sources]]
+            type = "rss"
+            url = "https://example.com/feed.xml"
+            limit = 5
+
+            [[tasks.sources]]
+            type = "rss"
+            url = "https://other.com/rss"
+
+            [tasks.sink]
+            type = "slack"
+            webhook_url_env = "SLACK_WEBHOOK_URL"
+        "#);
+        let task = &config.tasks[0];
+        assert_eq!(task.sources.len(), 2);
+        match &task.sources[0] {
+            SourceConfig::Rss { url, limit } => {
+                assert_eq!(url, "https://example.com/feed.xml");
+                assert_eq!(*limit, 5);
+            }
+        }
+        match &task.sources[1] {
+            SourceConfig::Rss { url, limit } => {
+                assert_eq!(url, "https://other.com/rss");
+                assert_eq!(*limit, 10); // default
+            }
+        }
+        match task.sink.as_ref().unwrap() {
+            SinkConfig::Slack { webhook_url_env } => {
+                assert_eq!(webhook_url_env, "SLACK_WEBHOOK_URL");
+            }
+        }
+    }
+
+    #[test]
+    fn test_task_without_sources_or_sink() {
+        let config = parse(r#"
+            [server]
+
+            [[tasks]]
+            name = "pr-review"
+            executor = "claude-code"
+            prompt = "test.md"
+
+            [tasks.trigger.github]
+            event = "pull_request"
+            repos = [{ slug = "o/r", path = "/tmp" }]
+        "#);
+        let task = &config.tasks[0];
+        assert!(task.sources.is_empty());
+        assert!(task.sink.is_none());
     }
 
     #[test]

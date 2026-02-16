@@ -5,7 +5,7 @@ use std::process::Stdio;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 
-use super::Executor;
+use super::{ExecutionResult, Executor};
 
 pub struct ClaudeCodeExecutor {
     permissions: Vec<String>,
@@ -38,7 +38,7 @@ impl ClaudeCodeExecutor {
 
 #[async_trait]
 impl Executor for ClaudeCodeExecutor {
-    async fn execute(&self, prompt: &str, working_dir: &Path) -> Result<()> {
+    async fn execute(&self, prompt: &str, working_dir: &Path) -> Result<ExecutionResult> {
         let args = self.build_args();
 
         let mut child = Command::new("claude")
@@ -74,9 +74,13 @@ impl Executor for ClaudeCodeExecutor {
             }
         });
 
-        // Stream stdout JSON events to tracing
+        // Stream stdout JSON events to tracing, capture result
         let stdout = child.stdout.take().expect("stdout piped");
         let stdout_handle = tokio::spawn(async move {
+            let mut result_text: Option<String> = None;
+            let mut total_cost: f64 = 0.0;
+            let mut total_turns: u64 = 0;
+
             let reader = BufReader::new(stdout);
             let mut lines = reader.lines();
             while let Ok(Some(line)) = lines.next_line().await {
@@ -148,38 +152,50 @@ impl Executor for ClaudeCodeExecutor {
                             }
                         }
                         "result" => {
-                            let cost = event
+                            total_cost = event
                                 .get("total_cost_usd")
                                 .and_then(|v| v.as_f64())
                                 .unwrap_or(0.0);
-                            let turns = event
+                            total_turns = event
                                 .get("num_turns")
                                 .and_then(|v| v.as_u64())
                                 .unwrap_or(0);
+                            result_text = event
+                                .get("result")
+                                .and_then(|v| v.as_str())
+                                .map(|s| s.to_string());
                             tracing::info!(
                                 source = "claude",
-                                cost_usd = cost,
-                                turns,
+                                cost_usd = total_cost,
+                                turns = total_turns,
                                 "Claude finished - {} turns, ${:.4}",
-                                turns,
-                                cost
+                                total_turns,
+                                total_cost
                             );
                         }
                         _ => {}
                     }
                 }
             }
+
+            (result_text, total_cost, total_turns)
         });
 
         let status = child.wait().await.context("failed to wait on claude")?;
         let _ = stderr_handle.await;
-        let _ = stdout_handle.await;
+        let (result_text, cost_usd, num_turns) = stdout_handle
+            .await
+            .unwrap_or((None, 0.0, 0));
 
         if !status.success() {
             anyhow::bail!("claude exited with {}", status);
         }
 
-        Ok(())
+        Ok(ExecutionResult {
+            text: result_text.unwrap_or_default(),
+            cost_usd,
+            num_turns,
+        })
     }
 }
 
