@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
@@ -14,8 +15,13 @@ use crate::tasks::sources::{self, ContentItem};
 pub struct CronTrigger {
     cron: Cron,
     sources: Vec<SourceConfig>,
-    sink: Option<SinkConfig>,
+    sink: Option<ResolvedSink>,
+    working_dir: PathBuf,
     http_client: Arc<reqwest::Client>,
+}
+
+enum ResolvedSink {
+    Slack { webhook_url: String },
 }
 
 impl CronTrigger {
@@ -23,23 +29,29 @@ impl CronTrigger {
         schedule: &str,
         sources: Vec<SourceConfig>,
         sink: Option<SinkConfig>,
+        working_dir: PathBuf,
         http_client: Arc<reqwest::Client>,
     ) -> Result<Self> {
         let cron = Cron::new(schedule)
             .parse()
             .map_err(|e| anyhow::anyhow!("invalid cron expression '{}': {}", schedule, e))?;
 
-        // Validate sink env var at startup so we fail fast
-        if let Some(SinkConfig::Slack { webhook_url_env }) = &sink {
-            std::env::var(webhook_url_env).with_context(|| {
-                format!("sink requires env var {webhook_url_env} but it is not set")
-            })?;
-        }
+        // Resolve sink env var at startup so we fail fast
+        let resolved_sink = match sink {
+            Some(SinkConfig::Slack { webhook_url_env }) => {
+                let webhook_url = std::env::var(&webhook_url_env).with_context(|| {
+                    format!("sink requires env var {webhook_url_env} but it is not set")
+                })?;
+                Some(ResolvedSink::Slack { webhook_url })
+            }
+            None => None,
+        };
 
         Ok(Self {
             cron,
             sources,
-            sink,
+            sink: resolved_sink,
+            working_dir,
             http_client,
         })
     }
@@ -70,6 +82,13 @@ impl CronTrigger {
                 "Sleeping until next cron fire"
             );
             tokio::time::sleep(duration).await;
+
+            // Guard against premature wake from sleep imprecision
+            let now_after = Utc::now();
+            if now_after < next {
+                let remaining = (next - now_after).to_std().unwrap_or_default();
+                tokio::time::sleep(remaining).await;
+            }
 
             if let Err(e) = self.execute_once(task_name, prompt_template, executor).await {
                 tracing::error!(task = %task_name, error = %e, "Cron task execution failed");
@@ -102,9 +121,8 @@ impl CronTrigger {
         let rendered = render_prompt(prompt_template, &vars);
 
         // 4. Execute via Claude Code
-        let working_dir = std::env::current_dir().context("failed to get current directory")?;
         let exec_result = executor
-            .execute(&rendered, &working_dir)
+            .execute(&rendered, &self.working_dir)
             .await
             .context("executor failed")?;
 
@@ -120,9 +138,13 @@ impl CronTrigger {
         // 5. Deliver to sink if configured
         if let Some(sink) = &self.sink {
             if !exec_result.text.is_empty() {
-                sinks::deliver(sink, &exec_result.text, &self.http_client)
-                    .await
-                    .context("failed to deliver to sink")?;
+                match sink {
+                    ResolvedSink::Slack { webhook_url } => {
+                        sinks::slack::post_to_url(&self.http_client, webhook_url, &exec_result.text)
+                            .await
+                            .context("failed to deliver to Slack")?;
+                    }
+                }
             } else {
                 tracing::warn!(task = %task_name, "Executor returned empty text, skipping sink delivery");
             }
@@ -179,6 +201,7 @@ mod tests {
             "0 */4 * * *",
             vec![],
             None,
+            PathBuf::from("/tmp"),
             Arc::new(reqwest::Client::new()),
         );
         assert!(trigger.is_ok());
@@ -190,6 +213,7 @@ mod tests {
             "not a cron",
             vec![],
             None,
+            PathBuf::from("/tmp"),
             Arc::new(reqwest::Client::new()),
         );
         assert!(trigger.is_err());

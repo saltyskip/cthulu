@@ -18,6 +18,7 @@ use super::middleware;
 use super::AppState;
 use crate::tasks::diff;
 use crate::tasks::executors::Executor;
+use crate::tasks::triggers::cron::CronTrigger;
 
 pub fn build_router(state: AppState) -> Router {
     let health_routes = Router::new().route(
@@ -34,6 +35,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/claude", post(run_claude))
         .route("/reviews/status", get(review_status))
         .route("/reviews/trigger", post(trigger_review))
+        .route("/tasks/trigger", post(trigger_task))
         .fallback(not_found)
         .with_state(state)
         .layer(axum::middleware::from_fn(middleware::strip_trailing_slash))
@@ -312,6 +314,84 @@ async fn trigger_review(
             "status": "review_started",
             "repo": body.repo,
             "pr": body.pr,
+        })),
+    )
+}
+
+// --- Task trigger (cron jobs) ---
+
+#[derive(Deserialize)]
+struct TaskTriggerRequest {
+    task: String,
+}
+
+async fn trigger_task(
+    State(state): State<AppState>,
+    Json(body): Json<TaskTriggerRequest>,
+) -> (StatusCode, Json<Value>) {
+    let config = &state.config;
+
+    let matching_task = config.tasks.iter().find(|t| t.name == body.task);
+
+    let Some(task) = matching_task else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": format!("no task named '{}'", body.task) })),
+        );
+    };
+
+    let Some(cron_config) = &task.trigger.cron else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": format!("task '{}' has no cron trigger", body.task) })),
+        );
+    };
+
+    let prompt_template = match std::fs::read_to_string(&task.prompt) {
+        Ok(c) => c,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": format!("failed to read prompt: {e}") })),
+            );
+        }
+    };
+
+    let executor = crate::tasks::executors::claude_code::ClaudeCodeExecutor::new(
+        task.permissions.clone(),
+    );
+
+    let cron_trigger = match CronTrigger::new(
+        &cron_config.schedule,
+        task.sources.clone(),
+        task.sink.clone(),
+        cron_config.working_dir.clone(),
+        state.http_client.clone(),
+    ) {
+        Ok(t) => t,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": format!("failed to build cron trigger: {e}") })),
+            );
+        }
+    };
+
+    let task_name = body.task.clone();
+    tokio::spawn(async move {
+        if let Err(e) = cron_trigger
+            .execute_once(&task_name, &prompt_template, &executor)
+            .await
+        {
+            tracing::error!(task = %task_name, error = %e, "Manual task trigger failed");
+        }
+    });
+
+    (
+        StatusCode::ACCEPTED,
+        Json(json!({
+            "status": "task_started",
+            "task": body.task,
         })),
     )
 }

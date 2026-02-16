@@ -10,6 +10,7 @@ pub async fn fetch_feed(
 ) -> Result<Vec<ContentItem>> {
     let bytes = client
         .get(url)
+        .timeout(std::time::Duration::from_secs(30))
         .send()
         .await
         .context("failed to fetch feed")?

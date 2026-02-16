@@ -33,6 +33,26 @@ impl TaskState {
     }
 }
 
+fn load_prompt_and_executor(task: &TaskConfig) -> Option<(String, Box<dyn Executor>)> {
+    let prompt_template = match std::fs::read_to_string(&task.prompt) {
+        Ok(content) => content,
+        Err(e) => {
+            tracing::error!(task = %task.name, prompt = %task.prompt, error = %e, "Failed to read prompt file");
+            return None;
+        }
+    };
+
+    let executor: Box<dyn Executor> = match task.executor {
+        ExecutorType::ClaudeCode => Box::new(ClaudeCodeExecutor::new(task.permissions.clone())),
+        ExecutorType::ClaudeApi => {
+            tracing::error!(task = %task.name, "claude-api executor not yet implemented");
+            return None;
+        }
+    };
+
+    Some((prompt_template, executor))
+}
+
 pub async fn spawn_task(
     task: TaskConfig,
     github_token: Option<String>,
@@ -45,20 +65,8 @@ pub async fn spawn_task(
             return;
         };
 
-        let prompt_template = match std::fs::read_to_string(&task.prompt) {
-            Ok(content) => content,
-            Err(e) => {
-                tracing::error!(task = %task.name, prompt = %task.prompt, error = %e, "Failed to read prompt file");
-                return;
-            }
-        };
-
-        let executor: Box<dyn Executor> = match task.executor {
-            ExecutorType::ClaudeCode => Box::new(ClaudeCodeExecutor::new(task.permissions.clone())),
-            ExecutorType::ClaudeApi => {
-                tracing::error!(task = %task.name, "claude-api executor not yet implemented");
-                return;
-            }
+        let Some((prompt_template, executor)) = load_prompt_and_executor(&task) else {
+            return;
         };
 
         let github_client: Arc<dyn GithubClient> = Arc::new(HttpGithubClient::new(
@@ -91,26 +99,15 @@ pub async fn spawn_task(
                 .await;
         });
     } else if let Some(cron_config) = &task.trigger.cron {
-        let prompt_template = match std::fs::read_to_string(&task.prompt) {
-            Ok(content) => content,
-            Err(e) => {
-                tracing::error!(task = %task.name, prompt = %task.prompt, error = %e, "Failed to read prompt file");
-                return;
-            }
-        };
-
-        let executor: Box<dyn Executor> = match task.executor {
-            ExecutorType::ClaudeCode => Box::new(ClaudeCodeExecutor::new(task.permissions.clone())),
-            ExecutorType::ClaudeApi => {
-                tracing::error!(task = %task.name, "claude-api executor not yet implemented");
-                return;
-            }
+        let Some((prompt_template, executor)) = load_prompt_and_executor(&task) else {
+            return;
         };
 
         let cron_trigger = match CronTrigger::new(
             &cron_config.schedule,
             task.sources.clone(),
             task.sink.clone(),
+            cron_config.working_dir.clone(),
             http_client,
         ) {
             Ok(t) => t,

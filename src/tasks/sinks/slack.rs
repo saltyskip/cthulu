@@ -9,8 +9,16 @@ pub async fn post_message(
     let webhook_url = std::env::var(webhook_url_env)
         .with_context(|| format!("environment variable {webhook_url_env} not set"))?;
 
+    post_to_url(client, &webhook_url, text).await
+}
+
+pub async fn post_to_url(
+    client: &reqwest::Client,
+    webhook_url: &str,
+    text: &str,
+) -> Result<()> {
     let response = client
-        .post(&webhook_url)
+        .post(webhook_url)
         .json(&json!({ "text": text }))
         .send()
         .await

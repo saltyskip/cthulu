@@ -101,6 +101,12 @@ impl RepoEntry {
 #[derive(Debug, Clone, Deserialize)]
 pub struct CronTriggerConfig {
     pub schedule: String,
+    #[serde(default = "default_working_dir")]
+    pub working_dir: PathBuf,
+}
+
+fn default_working_dir() -> PathBuf {
+    std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
 }
 
 #[derive(Debug, Clone, Deserialize)]
