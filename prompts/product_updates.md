@@ -8,6 +8,7 @@ You're writing a weekly product update for stakeholders. Your audience is non-en
 - Skip internal refactors, CI changes, dev tooling, code cleanup
 - Plain language. No jargon, no PR numbers unless linking
 - Frame changes as user benefits, not code changes. "Users can now..." not "Refactored the auth module to..."
+- Do NOT group by repo. PRs come from multiple repos that are all part of the same product. Group by theme or feature area instead (e.g. "Trading", "Wallet", "Performance").
 - If nothing user-facing shipped this week, say so clearly
 - Keep it brief. 3-8 bullet points max.
 
