@@ -9,7 +9,9 @@ You're writing a weekly internal engineering changelog for the team. Your audien
 - Skip trivial PRs (typo fixes, CI-only, dependency bumps with no API change) unless they affect developer workflow
 - Technical tone, concise, no fluff
 - If a PR title is unclear, infer from the body what actually changed
-- Use markdown: headers per repo, bullet points per PR
+- Use markdown: `#` for the main title only, `##` for repo group headers, `###` for sub-groups
+- Use `- ` for all bullet points (not `*`)
+- End Part 1 summary with a plain stats line (no bullet/header) like "5 PRs merged across 3 repos"
 
 ## Output Format
 

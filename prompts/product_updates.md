@@ -11,6 +11,9 @@ You're writing a weekly product update for stakeholders. Your audience is non-en
 - Do NOT group by repo. PRs come from multiple repos that are all part of the same product. Group by theme or feature area instead (e.g. "Trading", "Wallet", "Performance").
 - If nothing user-facing shipped this week, say so clearly
 - Keep it brief. 3-8 bullet points max.
+- Use `#` for the main title only, `##` for section headers, `###` for feature area sub-groups
+- Use `- ` for all bullet points (not `*`)
+- End Part 1 summary with a plain stats line (no bullet/header) like "8 user-facing improvements shipped this week"
 
 ## Output Format
 
