@@ -206,6 +206,8 @@ fn heading_block(kind: &str, text: &str) -> Value {
     })
 }
 
+const NOTION_MAX_TEXT_LENGTH: usize = 2000;
+
 /// Parse inline markdown: **bold**, `code`, [text](url)
 fn parse_inline(text: &str) -> Vec<Value> {
     let mut spans = Vec::new();
@@ -294,7 +296,45 @@ fn parse_inline(text: &str) -> Vec<Value> {
         spans.push(rich_text_plain(""));
     }
 
-    spans
+    chunk_rich_text(spans)
+}
+
+/// Split any rich_text span exceeding Notion's 2000-char limit into multiple
+/// spans, preserving annotations and links.
+fn chunk_rich_text(spans: Vec<Value>) -> Vec<Value> {
+    let mut out = Vec::with_capacity(spans.len());
+    for span in spans {
+        let content = span["text"]["content"].as_str().unwrap_or("");
+        if content.len() <= NOTION_MAX_TEXT_LENGTH {
+            out.push(span);
+            continue;
+        }
+
+        // Clone annotations / link from the original span
+        let annotations = span.get("annotations").cloned();
+        let link = span["text"].get("link").cloned();
+
+        let mut remaining = content;
+        while !remaining.is_empty() {
+            let mut end = remaining.len().min(NOTION_MAX_TEXT_LENGTH);
+            while end < remaining.len() && !remaining.is_char_boundary(end) {
+                end -= 1;
+            }
+            let chunk = &remaining[..end];
+            remaining = &remaining[end..];
+
+            let mut text_obj = json!({ "content": chunk });
+            if let Some(l) = &link {
+                text_obj["link"] = l.clone();
+            }
+            let mut s = json!({ "type": "text", "text": text_obj });
+            if let Some(a) = &annotations {
+                s["annotations"] = a.clone();
+            }
+            out.push(s);
+        }
+    }
+    out
 }
 
 fn rich_text_plain(text: &str) -> Value {
@@ -377,6 +417,31 @@ mod tests {
         assert_eq!(spans.len(), 3);
         assert_eq!(spans[1]["text"]["content"], "here");
         assert_eq!(spans[1]["text"]["link"]["url"], "https://example.com");
+    }
+
+    #[test]
+    fn test_long_text_chunked() {
+        let long = "a".repeat(4500);
+        let spans = parse_inline(&long);
+        assert!(spans.len() >= 3);
+        for span in &spans {
+            let content = span["text"]["content"].as_str().unwrap();
+            assert!(content.len() <= NOTION_MAX_TEXT_LENGTH);
+        }
+        // Total content preserved
+        let total: usize = spans.iter().map(|s| s["text"]["content"].as_str().unwrap().len()).sum();
+        assert_eq!(total, 4500);
+    }
+
+    #[test]
+    fn test_long_bold_chunked_preserves_annotations() {
+        let long = format!("**{}**", "b".repeat(3000));
+        let spans = parse_inline(&long);
+        assert!(spans.len() >= 2);
+        for span in &spans {
+            assert_eq!(span["annotations"]["bold"], true);
+            assert!(span["text"]["content"].as_str().unwrap().len() <= NOTION_MAX_TEXT_LENGTH);
+        }
     }
 
     #[test]
