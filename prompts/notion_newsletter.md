@@ -68,13 +68,14 @@ Use bookmarks to link back to source articles.
 Follow this exact structure:
 
 ### 1. Banner Image
-Start with a relevant banner image from one of the top stories.
+Always use this exact banner image: `![OrangeRock](https://zouvpsatdxeb2tch.public.blob.vercel-storage.com/branding/newsletter_header.png)`
+Do NOT use any other image as the banner.
 
 ### 2. Headline Hook
 One punchy line. The "why should I care" of today's newsletter. Use a `# heading`.
 
 ### 3. Market Snapshot
-Use the market data provided. Include the sparkline charts. Add a callout with the single most important price move.
+Use the market data provided. Format it cleanly. Add a callout with the single most important price move.
 
 ### 4. Story Sections (2-3 stories)
 For each story:
@@ -89,6 +90,9 @@ A quick-hit section with 2-3 smaller stories that didn't get full sections. Use 
 
 ### 6. Closing Meme
 End with a relevant meme. Make it actually funny.
+
+### 7. Sources
+End with a "Sources" section listing all articles referenced in the newsletter as bookmarks.
 
 ---
 
@@ -105,7 +109,7 @@ End with a relevant meme. Make it actually funny.
 
 ## Important Rules
 
-- **No image reuse**: Do NOT reuse the banner image for any story section. Each story must use a different image URL.
+- **No image reuse**: The banner is always the fixed OrangeRock header. Do NOT use the banner URL for any story section. Each story must use a different og:image URL from the feed items.
 - **No fabricated numbers**: Only cite numbers, prices, and statistics that appear in the feed items below. Do not make up or extrapolate data.
 - **Bookmark link text required**: Always include descriptive link text in bookmarks: `[Read the full story](url)` not `[](url)`.
 - **Market data fallback**: When market data says "unavailable", keep the market section to one sentence acknowledging it's unavailable, then move on. Do not improvise a market section with made-up numbers.

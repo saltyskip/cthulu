@@ -1,4 +1,4 @@
-pub mod coingecko;
+pub mod market;
 pub mod github_prs;
 pub mod rss;
 

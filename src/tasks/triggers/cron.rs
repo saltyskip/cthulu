@@ -169,7 +169,7 @@ impl CronTrigger {
         if prompt_template.contains("{{market_data}}") {
             let market_data = match tokio::time::timeout(
                 std::time::Duration::from_secs(15),
-                sources::coingecko::fetch_market_snapshot(&self.http_client),
+                sources::market::fetch_market_snapshot(&self.http_client),
             )
             .await
             {
