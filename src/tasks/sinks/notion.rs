@@ -126,9 +126,29 @@ fn extract_title(text: &str) -> String {
 fn markdown_to_notion_blocks(text: &str) -> Vec<Value> {
     let mut blocks = Vec::new();
     let mut paragraph_lines: Vec<&str> = Vec::new();
+    let mut table_rows: Vec<Vec<&str>> = Vec::new();
 
     for line in text.lines() {
         let trimmed = line.trim();
+
+        // Markdown table row: | col | col | col |
+        if trimmed.starts_with('|') && trimmed.ends_with('|') {
+            let cells: Vec<&str> = trimmed[1..trimmed.len() - 1]
+                .split('|')
+                .map(|c| c.trim())
+                .collect();
+            // Skip separator rows like |---|---|---|
+            if !cells.iter().all(|c| c.chars().all(|ch| ch == '-' || ch == ':')) {
+                flush_paragraph(&mut paragraph_lines, &mut blocks);
+                table_rows.push(cells);
+            }
+            continue;
+        }
+
+        // If we were accumulating table rows and hit a non-table line, flush the table
+        if !table_rows.is_empty() {
+            flush_table(&mut table_rows, &mut blocks);
+        }
 
         // Horizontal rule
         if trimmed == "---" || trimmed == "***" || trimmed == "___" {
@@ -284,7 +304,43 @@ fn markdown_to_notion_blocks(text: &str) -> Vec<Value> {
     }
 
     flush_paragraph(&mut paragraph_lines, &mut blocks);
+    if !table_rows.is_empty() {
+        flush_table(&mut table_rows, &mut blocks);
+    }
     blocks
+}
+
+fn flush_table(rows: &mut Vec<Vec<&str>>, blocks: &mut Vec<Value>) {
+    if rows.is_empty() {
+        return;
+    }
+    let table_width = rows.iter().map(|r| r.len()).max().unwrap_or(0);
+    let children: Vec<Value> = rows
+        .iter()
+        .map(|row| {
+            let cells: Vec<Value> = (0..table_width)
+                .map(|i| {
+                    let cell_text = row.get(i).copied().unwrap_or("");
+                    json!(parse_inline(cell_text))
+                })
+                .collect();
+            json!({
+                "type": "table_row",
+                "table_row": { "cells": cells },
+            })
+        })
+        .collect();
+    blocks.push(json!({
+        "object": "block",
+        "type": "table",
+        "table": {
+            "table_width": table_width,
+            "has_column_header": true,
+            "has_row_header": false,
+            "children": children,
+        }
+    }));
+    rows.clear();
 }
 
 fn is_likely_emoji(c: char) -> bool {
@@ -799,5 +855,20 @@ https://example.com/source
         assert_eq!(blocks[4]["type"], "bookmark");   // bare URL
         assert_eq!(blocks[5]["type"], "bookmark");   // [Source](url)
         assert_eq!(blocks[6]["type"], "image");      // meme
+    }
+
+    #[test]
+    fn test_table_block() {
+        let md = "| Asset | Price | 24h |\n|-------|-------|-----|\n| BTC | $97,000 | {green:+2.3%} |\n| ETH | $3,200 | {red:-1.2%} |";
+        let blocks = markdown_to_notion_blocks(md);
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0]["type"], "table");
+        assert_eq!(blocks[0]["table"]["table_width"], 3);
+        assert_eq!(blocks[0]["table"]["has_column_header"], true);
+        let rows = blocks[0]["table"]["children"].as_array().unwrap();
+        assert_eq!(rows.len(), 3); // header + 2 data rows
+        // Check that color parsing works inside table cells
+        let last_cell = &rows[1]["table_row"]["cells"][2];
+        assert_eq!(last_cell[0]["annotations"]["color"], "green");
     }
 }

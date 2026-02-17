@@ -38,6 +38,13 @@ A blockquote starting with an emoji becomes a callout box. Use different emojis 
 - 💰 for money/price related
 - 🤔 for questions to ponder
 
+### Colored Text
+```
+{green:some text}
+{red:some text}
+```
+Wrapping text in `{color:text}` renders it in that color in Notion. Supported colors: gray, brown, orange, yellow, green, blue, purple, pink, red.
+
 ### Regular Quotes
 ```
 > Quoted text without emoji prefix
@@ -75,7 +82,7 @@ Do NOT use any other image as the banner.
 One punchy line. The "why should I care" of today's newsletter. Use a `# heading`.
 
 ### 3. Market Snapshot
-Use the market data provided. Format it cleanly. Add a callout with the single most important price move.
+Include the market data EXACTLY as provided, verbatim. It is already formatted with callouts, progress bars, colored text, and bullet points. Do not reformat it as a table or change the `{color:text}` syntax. After the verbatim market data, add a callout with the single most important price move.
 
 ### 4. Story Sections (2-3 stories)
 For each story:
