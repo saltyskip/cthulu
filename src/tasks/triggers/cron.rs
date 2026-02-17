@@ -10,23 +10,80 @@ use crate::config::{SinkConfig, SourceConfig};
 use crate::tasks::context::render_prompt;
 use crate::tasks::executors::Executor;
 use crate::tasks::sinks::Sink;
+use crate::tasks::sinks::notion::NotionSink;
 use crate::tasks::sinks::slack::{SlackApiSink, SlackWebhookSink};
 use crate::tasks::sources::{self, ContentItem};
 
 pub struct CronTrigger {
     cron: Cron,
     sources: Vec<SourceConfig>,
-    sink: Option<Arc<dyn Sink>>,
+    sinks: Vec<Arc<dyn Sink>>,
     working_dir: PathBuf,
     http_client: Arc<reqwest::Client>,
     github_token: Option<String>,
+}
+
+pub fn resolve_sinks(
+    configs: &[SinkConfig],
+    http_client: &Arc<reqwest::Client>,
+) -> Result<Vec<Arc<dyn Sink>>> {
+    let mut sinks: Vec<Arc<dyn Sink>> = Vec::with_capacity(configs.len());
+
+    for config in configs {
+        match config {
+            SinkConfig::Slack {
+                webhook_url_env,
+                bot_token_env,
+                channel,
+            } => {
+                if let Some(token_env) = bot_token_env {
+                    let bot_token = std::env::var(token_env).with_context(|| {
+                        format!("sink requires env var {token_env} but it is not set")
+                    })?;
+                    let channel = channel.as_ref().with_context(|| {
+                        "slack bot_token_env requires a channel to be set"
+                    })?;
+                    sinks.push(Arc::new(SlackApiSink::new(
+                        Arc::clone(http_client),
+                        bot_token,
+                        channel.clone(),
+                    )));
+                } else if let Some(webhook_env) = webhook_url_env {
+                    let webhook_url = std::env::var(webhook_env).with_context(|| {
+                        format!("sink requires env var {webhook_env} but it is not set")
+                    })?;
+                    sinks.push(Arc::new(SlackWebhookSink::new(
+                        Arc::clone(http_client),
+                        webhook_url,
+                    )));
+                } else {
+                    anyhow::bail!("slack sink requires either webhook_url_env or bot_token_env");
+                }
+            }
+            SinkConfig::Notion {
+                token_env,
+                database_id,
+            } => {
+                let token = std::env::var(token_env).with_context(|| {
+                    format!("sink requires env var {token_env} but it is not set")
+                })?;
+                sinks.push(Arc::new(NotionSink::new(
+                    Arc::clone(http_client),
+                    token,
+                    database_id.clone(),
+                )));
+            }
+        }
+    }
+
+    Ok(sinks)
 }
 
 impl CronTrigger {
     pub fn new(
         schedule: &str,
         sources: Vec<SourceConfig>,
-        sink: Option<SinkConfig>,
+        sinks: Vec<SinkConfig>,
         working_dir: PathBuf,
         http_client: Arc<reqwest::Client>,
         github_token: Option<String>,
@@ -35,44 +92,12 @@ impl CronTrigger {
             .parse()
             .map_err(|e| anyhow::anyhow!("invalid cron expression '{}': {}", schedule, e))?;
 
-        // Resolve sink env vars at startup so we fail fast
-        let resolved_sink: Option<Arc<dyn Sink>> = match sink {
-            Some(SinkConfig::Slack {
-                webhook_url_env,
-                bot_token_env,
-                channel,
-            }) => {
-                if let Some(token_env) = bot_token_env {
-                    let bot_token = std::env::var(&token_env).with_context(|| {
-                        format!("sink requires env var {token_env} but it is not set")
-                    })?;
-                    let channel = channel.with_context(|| {
-                        "slack bot_token_env requires a channel to be set"
-                    })?;
-                    Some(Arc::new(SlackApiSink::new(
-                        Arc::clone(&http_client),
-                        bot_token,
-                        channel,
-                    )))
-                } else if let Some(webhook_env) = webhook_url_env {
-                    let webhook_url = std::env::var(&webhook_env).with_context(|| {
-                        format!("sink requires env var {webhook_env} but it is not set")
-                    })?;
-                    Some(Arc::new(SlackWebhookSink::new(
-                        Arc::clone(&http_client),
-                        webhook_url,
-                    )))
-                } else {
-                    anyhow::bail!("slack sink requires either webhook_url_env or bot_token_env");
-                }
-            }
-            None => None,
-        };
+        let resolved_sinks = resolve_sinks(&sinks, &http_client)?;
 
         Ok(Self {
             cron,
             sources,
-            sink: resolved_sink,
+            sinks: resolved_sinks,
             working_dir,
             http_client,
             github_token,
@@ -158,15 +183,15 @@ impl CronTrigger {
             exec_result.cost_usd
         );
 
-        // 5. Deliver to sink if configured
-        if let Some(sink) = &self.sink {
-            if !exec_result.text.is_empty() {
-                sink.deliver(&exec_result.text)
-                    .await
-                    .context("failed to deliver to sink")?;
-            } else {
-                tracing::warn!(task = %task_name, "Executor returned empty text, skipping sink delivery");
+        // 5. Deliver to all sinks (best-effort — one failure doesn't block others)
+        if !exec_result.text.is_empty() {
+            for sink in &self.sinks {
+                if let Err(e) = sink.deliver(&exec_result.text).await {
+                    tracing::error!(task = %task_name, error = %e, "Failed to deliver to sink");
+                }
             }
+        } else if !self.sinks.is_empty() {
+            tracing::warn!(task = %task_name, "Executor returned empty text, skipping sink delivery");
         }
 
         Ok(())
@@ -219,7 +244,7 @@ mod tests {
         let trigger = CronTrigger::new(
             "0 */4 * * *",
             vec![],
-            None,
+            vec![],
             PathBuf::from("/tmp"),
             Arc::new(reqwest::Client::new()),
             None,
@@ -232,7 +257,7 @@ mod tests {
         let trigger = CronTrigger::new(
             "not a cron",
             vec![],
-            None,
+            vec![],
             PathBuf::from("/tmp"),
             Arc::new(reqwest::Client::new()),
             None,

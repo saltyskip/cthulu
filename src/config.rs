@@ -43,7 +43,7 @@ pub struct TaskConfig {
     #[serde(default)]
     pub sources: Vec<SourceConfig>,
     #[serde(default)]
-    pub sink: Option<SinkConfig>,
+    pub sinks: Vec<SinkConfig>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -145,7 +145,13 @@ pub enum SinkConfig {
         bot_token_env: Option<String>,
         channel: Option<String>,
     },
+    Notion {
+        token_env: String,
+        database_id: String,
+    },
 }
+
+
 
 impl Config {
     pub fn load(path: &Path) -> Result<Self> {
@@ -405,7 +411,7 @@ mod tests {
             type = "rss"
             url = "https://other.com/rss"
 
-            [tasks.sink]
+            [[tasks.sinks]]
             type = "slack"
             webhook_url_env = "SLACK_WEBHOOK_URL"
         "#);
@@ -425,12 +431,14 @@ mod tests {
             }
             _ => panic!("expected Rss source"),
         }
-        match task.sink.as_ref().unwrap() {
+        assert_eq!(task.sinks.len(), 1);
+        match &task.sinks[0] {
             SinkConfig::Slack { webhook_url_env, bot_token_env, channel } => {
                 assert_eq!(webhook_url_env.as_deref(), Some("SLACK_WEBHOOK_URL"));
                 assert!(bot_token_env.is_none());
                 assert!(channel.is_none());
             }
+            _ => panic!("expected Slack sink"),
         }
     }
 
@@ -450,7 +458,7 @@ mod tests {
         "#);
         let task = &config.tasks[0];
         assert!(task.sources.is_empty());
-        assert!(task.sink.is_none());
+        assert!(task.sinks.is_empty());
     }
 
     #[test]
@@ -506,18 +514,54 @@ mod tests {
             [tasks.trigger.cron]
             schedule = "0 9 * * MON"
 
-            [tasks.sink]
+            [[tasks.sinks]]
             type = "slack"
             bot_token_env = "SLACK_BOT_TOKEN"
             channel = "#dev-updates"
         "##);
         let task = &config.tasks[0];
-        match task.sink.as_ref().unwrap() {
+        assert_eq!(task.sinks.len(), 1);
+        match &task.sinks[0] {
             SinkConfig::Slack { webhook_url_env, bot_token_env, channel } => {
                 assert!(webhook_url_env.is_none());
                 assert_eq!(bot_token_env.as_deref(), Some("SLACK_BOT_TOKEN"));
                 assert_eq!(channel.as_deref(), Some("#dev-updates"));
             }
+            _ => panic!("expected Slack sink"),
+        }
+    }
+
+    #[test]
+    fn test_multiple_sinks() {
+        let config = parse(r#"
+            [server]
+
+            [[tasks]]
+            name = "multi-sink"
+            executor = "claude-code"
+            prompt = "test.md"
+
+            [tasks.trigger.cron]
+            schedule = "0 9 * * MON"
+
+            [[tasks.sinks]]
+            type = "slack"
+            webhook_url_env = "SLACK_WEBHOOK_URL"
+
+            [[tasks.sinks]]
+            type = "notion"
+            token_env = "NOTION_TOKEN"
+            database_id = "abc-123"
+        "#);
+        let task = &config.tasks[0];
+        assert_eq!(task.sinks.len(), 2);
+        assert!(matches!(&task.sinks[0], SinkConfig::Slack { .. }));
+        match &task.sinks[1] {
+            SinkConfig::Notion { token_env, database_id } => {
+                assert_eq!(token_env, "NOTION_TOKEN");
+                assert_eq!(database_id, "abc-123");
+            }
+            _ => panic!("expected Notion sink"),
         }
     }
 

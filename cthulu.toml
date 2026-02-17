@@ -58,9 +58,14 @@ type = "rss"
 url = "https://unchainedcrypto.com/feed/"
 limit = 10
 
-[tasks.sink]
+[[tasks.sinks]]
 type = "slack"
 webhook_url_env = "SLACK_WEBHOOK_URL"
+
+[[tasks.sinks]]
+type = "notion"
+token_env = "NOTION_TOKEN"
+database_id = "your-database-id"
 
 [[tasks]]
 name = "dev-changelog"
@@ -81,7 +86,7 @@ repos = [
 ]
 since_days = 7
 
-[tasks.sink]
+[[tasks.sinks]]
 type = "slack"
 bot_token_env = "SLACK_BOT_TOKEN"
 channel = "#dev-updates"
@@ -105,7 +110,7 @@ repos = [
 ]
 since_days = 7
 
-[tasks.sink]
+[[tasks.sinks]]
 type = "slack"
 bot_token_env = "SLACK_BOT_TOKEN"
 channel = "#product-updates"

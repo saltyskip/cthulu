@@ -1,3 +1,4 @@
+pub mod notion;
 pub mod slack;
 
 use anyhow::Result;

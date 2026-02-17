@@ -106,7 +106,7 @@ pub async fn spawn_task(
         let cron_trigger = match CronTrigger::new(
             &cron_config.schedule,
             task.sources.clone(),
-            task.sink.clone(),
+            task.sinks.clone(),
             cron_config.working_dir.clone(),
             http_client,
             github_token,
