@@ -396,8 +396,9 @@ fn parse_inline(text: &str) -> Vec<Value> {
         let next_bold = remaining.find("**");
         let next_code = remaining.find('`');
         let next_link = remaining.find('[');
+        let next_color = remaining.find('{');
 
-        let earliest = [next_bold, next_code, next_link]
+        let earliest = [next_bold, next_code, next_link, next_color]
             .into_iter()
             .flatten()
             .min();
@@ -465,6 +466,26 @@ fn parse_inline(text: &str) -> Vec<Value> {
             }
         }
 
+        // Color: {color:text}
+        if after.starts_with('{') {
+            if let Some(colon) = after[1..].find(':') {
+                let color_name = &after[1..1 + colon];
+                if is_notion_color(color_name) {
+                    let inner_start = 1 + colon + 1;
+                    if let Some(close_brace) = after[inner_start..].find('}') {
+                        let inner_text = &after[inner_start..inner_start + close_brace];
+                        spans.push(json!({
+                            "type": "text",
+                            "text": { "content": inner_text },
+                            "annotations": { "color": color_name },
+                        }));
+                        remaining = &after[inner_start + close_brace + 1..];
+                        continue;
+                    }
+                }
+            }
+        }
+
         // Token didn't match a complete pattern — emit the character as plain text
         spans.push(rich_text_plain(&after[..1]));
         remaining = &after[1..];
@@ -513,6 +534,13 @@ fn chunk_rich_text(spans: Vec<Value>) -> Vec<Value> {
         }
     }
     out
+}
+
+fn is_notion_color(name: &str) -> bool {
+    matches!(
+        name,
+        "default" | "gray" | "brown" | "orange" | "yellow" | "green" | "blue" | "purple" | "pink" | "red"
+    )
 }
 
 fn rich_text_plain(text: &str) -> Value {
@@ -709,6 +737,41 @@ mod tests {
         assert_eq!(blocks.len(), 1);
         // Empty link text should NOT create a bookmark — falls through to paragraph
         assert_eq!(blocks[0]["type"], "paragraph");
+    }
+
+    #[test]
+    fn test_inline_color() {
+        let spans = parse_inline("price {green:(+2.3%)}");
+        assert_eq!(spans.len(), 2);
+        assert_eq!(spans[0]["text"]["content"], "price ");
+        assert_eq!(spans[1]["text"]["content"], "(+2.3%)");
+        assert_eq!(spans[1]["annotations"]["color"], "green");
+    }
+
+    #[test]
+    fn test_inline_color_red() {
+        let spans = parse_inline("{red:-1.2%} drop");
+        assert_eq!(spans.len(), 2);
+        assert_eq!(spans[0]["text"]["content"], "-1.2%");
+        assert_eq!(spans[0]["annotations"]["color"], "red");
+        assert_eq!(spans[1]["text"]["content"], " drop");
+    }
+
+    #[test]
+    fn test_inline_color_invalid_color_passthrough() {
+        let spans = parse_inline("{nope:text}");
+        // Invalid color name — { is emitted as plain text, rest continues parsing
+        assert_eq!(spans[0]["text"]["content"], "{");
+    }
+
+    #[test]
+    fn test_inline_color_with_bold() {
+        let spans = parse_inline("**BTC**: $97,000 {green:(+2.3%)}");
+        assert_eq!(spans[0]["text"]["content"], "BTC");
+        assert_eq!(spans[0]["annotations"]["bold"], true);
+        assert_eq!(spans[1]["text"]["content"], ": $97,000 ");
+        assert_eq!(spans[2]["text"]["content"], "(+2.3%)");
+        assert_eq!(spans[2]["annotations"]["color"], "green");
     }
 
     #[test]

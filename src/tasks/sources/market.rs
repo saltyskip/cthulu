@@ -74,25 +74,31 @@ pub async fn fetch_market_snapshot(client: &reqwest::Client) -> Result<String> {
 
     let mut lines = Vec::new();
 
-    // Fear & Greed callout
-    let cnn_part = match cnn_result {
-        Ok((score, rating)) => Some(format!("CNN: {score:.0} ({rating})")),
+    // Fear & Greed callouts — each index gets its own line with a progress bar
+    match cnn_result {
+        Ok((score, rating)) => {
+            let bar = progress_bar(score);
+            let color = score_color(score);
+            lines.push(format!(
+                "> 😱 **CNN Fear & Greed** {bar} {{{color}:{score:.0} — {rating}}}"
+            ));
+        }
         Err(e) => {
             tracing::warn!(error = %e, "CNN Fear & Greed fetch failed");
-            None
         }
-    };
-    let crypto_part = match crypto_fng_result {
-        Ok((value, classification)) => Some(format!("Crypto: {value} ({classification})")),
+    }
+    match crypto_fng_result {
+        Ok((value, classification)) => {
+            let score: f64 = value.parse().unwrap_or(50.0);
+            let bar = progress_bar(score);
+            let color = score_color(score);
+            lines.push(format!(
+                "> 😱 **Crypto Fear & Greed** {bar} {{{color}:{value} — {classification}}}"
+            ));
+        }
         Err(e) => {
             tracing::warn!(error = %e, "Crypto Fear & Greed fetch failed");
-            None
         }
-    };
-
-    if cnn_part.is_some() || crypto_part.is_some() {
-        let parts: Vec<String> = [cnn_part, crypto_part].into_iter().flatten().collect();
-        lines.push(format!("> 😱 **Fear & Greed** | {}", parts.join(" | ")));
     }
 
     // Coin prices
@@ -103,7 +109,10 @@ pub async fn fetch_market_snapshot(client: &reqwest::Client) -> Result<String> {
                 let price = format_price(coin.current_price);
                 let change = coin.price_change_percentage_24h.unwrap_or(0.0);
                 let sign = if change >= 0.0 { "+" } else { "" };
-                lines.push(format!("- **{symbol}**: ${price} ({sign}{change:.1}%)"));
+                let color = change_color(change);
+                lines.push(format!(
+                    "- **{symbol}**: ${price} {{{color}:({sign}{change:.1}%)}}"
+                ));
             }
         }
         Err(e) => {
@@ -116,7 +125,10 @@ pub async fn fetch_market_snapshot(client: &reqwest::Client) -> Result<String> {
         Ok((price, change_pct)) => {
             let formatted = format_price(price);
             let sign = if change_pct >= 0.0 { "+" } else { "" };
-            lines.push(format!("- **S&P 500**: {formatted} ({sign}{change_pct:.1}%)"));
+            let color = change_color(change_pct);
+            lines.push(format!(
+                "- **S&P 500**: {formatted} {{{color}:({sign}{change_pct:.1}%)}}"
+            ));
         }
         Err(e) => {
             tracing::warn!(error = %e, "S&P 500 fetch failed");
@@ -213,6 +225,33 @@ async fn fetch_sp500(client: &reqwest::Client) -> Result<(f64, f64)> {
 
 // ── Formatting helpers ───────────────────────────────────────────
 
+fn score_color(score: f64) -> &'static str {
+    if score < 25.0 {
+        "red"
+    } else if score < 45.0 {
+        "orange"
+    } else if score < 55.0 {
+        "yellow"
+    } else {
+        "green"
+    }
+}
+
+fn progress_bar(score: f64) -> String {
+    let filled = ((score / 100.0) * 10.0).round() as usize;
+    let filled = filled.min(10);
+    let empty = 10 - filled;
+    format!("{}{}", "█".repeat(filled), "░".repeat(empty))
+}
+
+fn change_color(change: f64) -> &'static str {
+    if change >= 0.0 {
+        "green"
+    } else {
+        "red"
+    }
+}
+
 fn format_price(price: f64) -> String {
     if price >= 1.0 {
         // Integer with comma separators
@@ -260,5 +299,32 @@ mod tests {
         assert_eq!(format_with_commas(1000), "1,000");
         assert_eq!(format_with_commas(1000000), "1,000,000");
         assert_eq!(format_with_commas(97000), "97,000");
+    }
+
+    #[test]
+    fn test_score_color() {
+        assert_eq!(score_color(10.0), "red");
+        assert_eq!(score_color(24.9), "red");
+        assert_eq!(score_color(25.0), "orange");
+        assert_eq!(score_color(44.9), "orange");
+        assert_eq!(score_color(45.0), "yellow");
+        assert_eq!(score_color(54.9), "yellow");
+        assert_eq!(score_color(55.0), "green");
+        assert_eq!(score_color(90.0), "green");
+    }
+
+    #[test]
+    fn test_progress_bar() {
+        assert_eq!(progress_bar(0.0), "░░░░░░░░░░");
+        assert_eq!(progress_bar(50.0), "█████░░░░░");
+        assert_eq!(progress_bar(100.0), "██████████");
+        assert_eq!(progress_bar(30.0), "███░░░░░░░");
+    }
+
+    #[test]
+    fn test_change_color() {
+        assert_eq!(change_color(2.3), "green");
+        assert_eq!(change_color(0.0), "green");
+        assert_eq!(change_color(-1.2), "red");
     }
 }
