@@ -1,3 +1,4 @@
+pub mod coingecko;
 pub mod github_prs;
 pub mod rss;
 
@@ -12,6 +13,7 @@ pub struct ContentItem {
     pub url: String,
     pub summary: String,
     pub published: Option<DateTime<Utc>>,
+    pub image_url: Option<String>,
 }
 
 pub async fn fetch_all(

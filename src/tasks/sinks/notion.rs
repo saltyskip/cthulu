@@ -154,6 +154,112 @@ fn markdown_to_notion_blocks(text: &str) -> Vec<Value> {
             continue;
         }
 
+        // Image: ![caption](url)
+        if let Some((caption, url)) = parse_image_markdown(trimmed) {
+            flush_paragraph(&mut paragraph_lines, &mut blocks);
+            let mut block = json!({
+                "object": "block",
+                "type": "image",
+                "image": {
+                    "type": "external",
+                    "external": { "url": url },
+                }
+            });
+            if !caption.is_empty() {
+                block["image"]["caption"] = json!([{
+                    "type": "text",
+                    "text": { "content": caption },
+                }]);
+            }
+            blocks.push(block);
+            continue;
+        }
+
+        // Meme: [meme:template|top|bottom]
+        if let Some(url) = parse_meme_marker(trimmed) {
+            flush_paragraph(&mut paragraph_lines, &mut blocks);
+            blocks.push(json!({
+                "object": "block",
+                "type": "image",
+                "image": {
+                    "type": "external",
+                    "external": { "url": url },
+                }
+            }));
+            continue;
+        }
+
+        // Callout: > 🔥 text (blockquote where first char after > is emoji)
+        if let Some(rest) = trimmed.strip_prefix("> ") {
+            let mut chars = rest.chars();
+            if let Some(first_char) = chars.next() {
+                if is_likely_emoji(first_char) {
+                    // Consume trailing variation selector (U+FE0F) if present
+                    let mut emoji = first_char.to_string();
+                    let remaining = chars.as_str();
+                    let body = if remaining.starts_with('\u{FE0F}') {
+                        emoji.push('\u{FE0F}');
+                        chars.next();
+                        chars.as_str().trim()
+                    } else {
+                        remaining.trim()
+                    };
+                    flush_paragraph(&mut paragraph_lines, &mut blocks);
+                    blocks.push(json!({
+                        "object": "block",
+                        "type": "callout",
+                        "callout": {
+                            "rich_text": parse_inline(body),
+                            "icon": { "type": "emoji", "emoji": emoji },
+                        }
+                    }));
+                    continue;
+                }
+            }
+
+            // Plain blockquote → quote block
+            flush_paragraph(&mut paragraph_lines, &mut blocks);
+            blocks.push(json!({
+                "object": "block",
+                "type": "quote",
+                "quote": {
+                    "rich_text": parse_inline(rest),
+                }
+            }));
+            continue;
+        }
+
+        // Bookmark: bare URL on its own line
+        if trimmed.starts_with("https://") && !trimmed.contains(' ') {
+            flush_paragraph(&mut paragraph_lines, &mut blocks);
+            blocks.push(json!({
+                "object": "block",
+                "type": "bookmark",
+                "bookmark": { "url": trimmed },
+            }));
+            continue;
+        }
+
+        // Bookmark: [Title](url) alone on a line (not an image)
+        if trimmed.starts_with('[') && !trimmed.starts_with("[meme:") {
+            if let Some((link_text, url)) = parse_link_only(trimmed) {
+                flush_paragraph(&mut paragraph_lines, &mut blocks);
+                let mut block = json!({
+                    "object": "block",
+                    "type": "bookmark",
+                    "bookmark": { "url": url },
+                });
+                if !link_text.is_empty() {
+                    block["bookmark"]["caption"] = json!([{
+                        "type": "text",
+                        "text": { "content": link_text },
+                    }]);
+                }
+                blocks.push(block);
+                continue;
+            }
+        }
+
         // Bulleted list item
         if let Some(rest) = trimmed.strip_prefix("- ").or_else(|| trimmed.strip_prefix("* ")) {
             flush_paragraph(&mut paragraph_lines, &mut blocks);
@@ -179,6 +285,74 @@ fn markdown_to_notion_blocks(text: &str) -> Vec<Value> {
 
     flush_paragraph(&mut paragraph_lines, &mut blocks);
     blocks
+}
+
+fn is_likely_emoji(c: char) -> bool {
+    matches!(c as u32,
+        0x2600..=0x27BF |   // Misc symbols, dingbats
+        0x1F300..=0x1F9FF | // Main emoji blocks
+        0x1FA00..=0x1FAFF | // Extended-A
+        0xFE00..=0xFE0F     // Variation selectors
+    )
+}
+
+fn parse_image_markdown(line: &str) -> Option<(&str, &str)> {
+    let line = line.strip_prefix("![")?;
+    let close_bracket = line.find("](")?;
+    let caption = &line[..close_bracket];
+    let rest = &line[close_bracket + 2..];
+    let close_paren = rest.find(')')?;
+    let url = &rest[..close_paren];
+    // Ensure nothing follows the closing paren (it's the whole line)
+    if rest[close_paren + 1..].trim().is_empty() && !url.is_empty() {
+        Some((caption, url))
+    } else {
+        None
+    }
+}
+
+fn parse_meme_marker(line: &str) -> Option<String> {
+    let inner = line.strip_prefix("[meme:")?.strip_suffix(']')?;
+    let parts: Vec<&str> = inner.splitn(3, '|').collect();
+    if parts.len() < 2 {
+        return None;
+    }
+    let template = parts[0].trim();
+    let top = encode_meme_text(parts.get(1).unwrap_or(&"").trim());
+    let bottom = if parts.len() == 3 {
+        encode_meme_text(parts[2].trim())
+    } else {
+        "_".to_string()
+    };
+    Some(format!(
+        "https://api.memegen.link/images/{template}/{top}/{bottom}.png"
+    ))
+}
+
+fn encode_meme_text(text: &str) -> String {
+    if text.is_empty() {
+        return "_".to_string();
+    }
+    text.replace('%', "~p")
+        .replace('#', "~h")
+        .replace('/', "~s")
+        .replace('?', "~q")
+        .replace(' ', "_")
+}
+
+fn parse_link_only(line: &str) -> Option<(&str, &str)> {
+    // Match [text](url) where it's the entire line
+    let line = line.strip_prefix('[')?;
+    let close_bracket = line.find("](")?;
+    let text = &line[..close_bracket];
+    let rest = &line[close_bracket + 2..];
+    let close_paren = rest.find(')')?;
+    let url = &rest[..close_paren];
+    if rest[close_paren + 1..].trim().is_empty() && !url.is_empty() {
+        Some((text, url))
+    } else {
+        None
+    }
 }
 
 fn flush_paragraph(lines: &mut Vec<&str>, blocks: &mut Vec<Value>) {
@@ -453,5 +627,99 @@ mod tests {
         assert_eq!(blocks[2]["type"], "bulleted_list_item");
         assert_eq!(blocks[3]["type"], "divider");
         assert_eq!(blocks[4]["type"], "paragraph");
+    }
+
+    #[test]
+    fn test_image_block() {
+        let blocks = markdown_to_notion_blocks("![banner](https://example.com/img.jpg)");
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0]["type"], "image");
+        assert_eq!(blocks[0]["image"]["external"]["url"], "https://example.com/img.jpg");
+        assert_eq!(blocks[0]["image"]["caption"][0]["text"]["content"], "banner");
+    }
+
+    #[test]
+    fn test_image_no_caption() {
+        let blocks = markdown_to_notion_blocks("![](https://example.com/img.jpg)");
+        assert_eq!(blocks[0]["type"], "image");
+        assert!(blocks[0]["image"]["caption"].is_null());
+    }
+
+    #[test]
+    fn test_meme_block() {
+        let blocks = markdown_to_notion_blocks("[meme:drake|fiat money|bitcoin]");
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0]["type"], "image");
+        assert_eq!(
+            blocks[0]["image"]["external"]["url"],
+            "https://api.memegen.link/images/drake/fiat_money/bitcoin.png"
+        );
+    }
+
+    #[test]
+    fn test_meme_special_chars() {
+        assert_eq!(encode_meme_text("why not?"), "why_not~q");
+        assert_eq!(encode_meme_text("50% off"), "50~p_off");
+        assert_eq!(encode_meme_text("a/b"), "a~sb");
+        assert_eq!(encode_meme_text("tag #1"), "tag_~h1");
+    }
+
+    #[test]
+    fn test_callout_block() {
+        let blocks = markdown_to_notion_blocks("> \u{1f525} This is hot news");
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0]["type"], "callout");
+        assert_eq!(blocks[0]["callout"]["icon"]["emoji"], "\u{1f525}");
+    }
+
+    #[test]
+    fn test_quote_block() {
+        let blocks = markdown_to_notion_blocks("> Some quoted text");
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0]["type"], "quote");
+    }
+
+    #[test]
+    fn test_bookmark_bare_url() {
+        let blocks = markdown_to_notion_blocks("https://example.com/article");
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0]["type"], "bookmark");
+        assert_eq!(blocks[0]["bookmark"]["url"], "https://example.com/article");
+    }
+
+    #[test]
+    fn test_bookmark_link_syntax() {
+        let blocks = markdown_to_notion_blocks("[Read More](https://example.com/article)");
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0]["type"], "bookmark");
+        assert_eq!(blocks[0]["bookmark"]["url"], "https://example.com/article");
+        assert_eq!(blocks[0]["bookmark"]["caption"][0]["text"]["content"], "Read More");
+    }
+
+    #[test]
+    fn test_all_new_block_types() {
+        let md = "\
+![banner](https://img.com/banner.jpg)
+
+# Newsletter
+
+> \u{1f4a1} Key insight here
+
+> Plain quote
+
+https://example.com/source
+
+[Source](https://example.com/linked)
+
+[meme:buzz|rich notion pages|rich notion pages everywhere]";
+
+        let blocks = markdown_to_notion_blocks(md);
+        assert_eq!(blocks[0]["type"], "image");     // banner
+        assert_eq!(blocks[1]["type"], "heading_1");  // # Newsletter
+        assert_eq!(blocks[2]["type"], "callout");    // > 💡
+        assert_eq!(blocks[3]["type"], "quote");      // > Plain
+        assert_eq!(blocks[4]["type"], "bookmark");   // bare URL
+        assert_eq!(blocks[5]["type"], "bookmark");   // [Source](url)
+        assert_eq!(blocks[6]["type"], "image");      // meme
     }
 }
