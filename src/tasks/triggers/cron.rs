@@ -160,29 +160,31 @@ impl CronTrigger {
         let content = format_items(&items);
         let timestamp = Utc::now().format("%Y-%m-%d %H:%M UTC").to_string();
 
-        // Fetch market data (best-effort, 15s timeout)
-        let market_data = match tokio::time::timeout(
-            std::time::Duration::from_secs(15),
-            sources::coingecko::fetch_market_snapshot(&self.http_client),
-        )
-        .await
-        {
-            Ok(Ok(data)) => data,
-            Ok(Err(e)) => {
-                tracing::warn!(task = %task_name, error = %e, "Failed to fetch market data");
-                "Market data unavailable.".to_string()
-            }
-            Err(_) => {
-                tracing::warn!(task = %task_name, "Market data fetch timed out");
-                "Market data unavailable.".to_string()
-            }
-        };
-
         let mut vars = HashMap::new();
         vars.insert("content".to_string(), content);
         vars.insert("item_count".to_string(), items.len().to_string());
         vars.insert("timestamp".to_string(), timestamp);
-        vars.insert("market_data".to_string(), market_data);
+
+        // Only fetch market data if the prompt actually uses it
+        if prompt_template.contains("{{market_data}}") {
+            let market_data = match tokio::time::timeout(
+                std::time::Duration::from_secs(15),
+                sources::coingecko::fetch_market_snapshot(&self.http_client),
+            )
+            .await
+            {
+                Ok(Ok(data)) => data,
+                Ok(Err(e)) => {
+                    tracing::warn!(task = %task_name, error = %e, "Failed to fetch market data");
+                    "Market data unavailable.".to_string()
+                }
+                Err(_) => {
+                    tracing::warn!(task = %task_name, "Market data fetch timed out");
+                    "Market data unavailable.".to_string()
+                }
+            };
+            vars.insert("market_data".to_string(), market_data);
+        }
 
         // 3. Render prompt
         let rendered = render_prompt(prompt_template, &vars);

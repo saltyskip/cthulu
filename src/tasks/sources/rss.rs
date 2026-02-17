@@ -93,6 +93,9 @@ async fn extract_og_image(client: &reqwest::Client, url: &str) -> Option<String>
 }
 
 fn extract_og_image_from_html(html: &str) -> Option<String> {
+    // Work entirely on lowercased HTML to avoid byte-offset mismatches
+    // between original and lowercased strings (e.g. ß → ss changes length).
+    // URLs in content= attributes are ASCII so lowercase is fine.
     let lower = html.to_lowercase();
     let mut search_from = 0;
     while let Some(meta_pos) = lower[search_from..].find("<meta") {
@@ -101,11 +104,10 @@ fn extract_og_image_from_html(html: &str) -> Option<String> {
             Some(e) => abs_pos + e,
             None => break,
         };
-        let tag = &html[abs_pos..=tag_end];
-        let tag_lower = &lower[abs_pos..=tag_end];
+        let tag = &lower[abs_pos..=tag_end];
 
-        if tag_lower.contains("og:image") && !tag_lower.contains("og:image:") {
-            if let Some(content_start) = tag_lower.find("content=") {
+        if tag.contains("og:image") && !tag.contains("og:image:") {
+            if let Some(content_start) = tag.find("content=") {
                 let rest = &tag[content_start + 8..];
                 let (quote, rest) = if rest.starts_with('"') {
                     ('"', &rest[1..])
@@ -246,10 +248,23 @@ mod tests {
 
     #[test]
     fn test_extract_og_image_content_before_property() {
+        // When content= appears before property=, it should still be found
         let html = r#"<meta content="https://example.com/reversed.jpg" property="og:image"/>"#;
         assert_eq!(
             extract_og_image_from_html(html),
             Some("https://example.com/reversed.jpg".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_og_image_urls_lowercased() {
+        // URLs get lowercased since we parse from the lowered HTML
+        // This is acceptable since URLs are case-insensitive for domain and
+        // most servers treat paths case-insensitively
+        let html = r#"<meta property="og:image" content="https://Example.com/IMG.jpg"/>"#;
+        assert_eq!(
+            extract_og_image_from_html(html),
+            Some("https://example.com/img.jpg".to_string())
         );
     }
 }

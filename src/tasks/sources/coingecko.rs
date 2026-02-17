@@ -73,10 +73,34 @@ fn build_sparkline_url(_symbol: &str, prices: &[f64]) -> String {
         .collect::<Vec<_>>()
         .join(",");
 
+    let chart_config = format!(
+        r#"{{"type":"sparkline","data":{{"datasets":[{{"data":[{data}]}}]}}}}"#
+    );
+    let encoded = urlencoded(&chart_config);
+
     format!(
-        "https://quickchart.io/chart?c={{\"type\":\"sparkline\",\"data\":{{\"datasets\":[{{\"data\":[{data}]}}]}}}}&width=400&height=100&backgroundColor=transparent"
+        "https://quickchart.io/chart?c={encoded}&width=400&height=100&backgroundColor=transparent"
     )
 }
+
+fn urlencoded(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() * 3);
+    for b in s.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char);
+            }
+            _ => {
+                out.push('%');
+                out.push(char::from(HEX[(b >> 4) as usize]));
+                out.push(char::from(HEX[(b & 0x0F) as usize]));
+            }
+        }
+    }
+    out
+}
+
+const HEX: [u8; 16] = *b"0123456789ABCDEF";
 
 #[cfg(test)]
 mod tests {
@@ -86,7 +110,8 @@ mod tests {
     fn test_build_sparkline_url() {
         let prices = vec![100.0, 105.0, 102.0, 108.0, 110.0];
         let url = build_sparkline_url("BTC", &prices);
-        assert!(url.starts_with("https://quickchart.io/chart"));
+        assert!(url.starts_with("https://quickchart.io/chart?c=%7B"));
+        // Values are percent-encoded within the JSON config
         assert!(url.contains("100.00"));
         assert!(url.contains("110.00"));
     }

@@ -189,20 +189,28 @@ fn markdown_to_notion_blocks(text: &str) -> Vec<Value> {
             continue;
         }
 
-        // Callout: > 🔥 text (blockquote where first non-space char after > is emoji)
+        // Callout: > 🔥 text (blockquote where first char after > is emoji)
         if let Some(rest) = trimmed.strip_prefix("> ") {
             let mut chars = rest.chars();
             if let Some(first_char) = chars.next() {
-                if !first_char.is_ascii() && first_char != ' ' {
-                    // Emoji-prefixed blockquote → callout
-                    let body = chars.as_str().trim();
+                if is_likely_emoji(first_char) {
+                    // Consume trailing variation selector (U+FE0F) if present
+                    let mut emoji = first_char.to_string();
+                    let remaining = chars.as_str();
+                    let body = if remaining.starts_with('\u{FE0F}') {
+                        emoji.push('\u{FE0F}');
+                        chars.next();
+                        chars.as_str().trim()
+                    } else {
+                        remaining.trim()
+                    };
                     flush_paragraph(&mut paragraph_lines, &mut blocks);
                     blocks.push(json!({
                         "object": "block",
                         "type": "callout",
                         "callout": {
                             "rich_text": parse_inline(body),
-                            "icon": { "type": "emoji", "emoji": first_char.to_string() },
+                            "icon": { "type": "emoji", "emoji": emoji },
                         }
                     }));
                     continue;
@@ -277,6 +285,15 @@ fn markdown_to_notion_blocks(text: &str) -> Vec<Value> {
 
     flush_paragraph(&mut paragraph_lines, &mut blocks);
     blocks
+}
+
+fn is_likely_emoji(c: char) -> bool {
+    matches!(c as u32,
+        0x2600..=0x27BF |   // Misc symbols, dingbats
+        0x1F300..=0x1F9FF | // Main emoji blocks
+        0x1FA00..=0x1FAFF | // Extended-A
+        0xFE00..=0xFE0F     // Variation selectors
+    )
 }
 
 fn parse_image_markdown(line: &str) -> Option<(&str, &str)> {
