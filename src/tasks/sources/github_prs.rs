@@ -85,6 +85,7 @@ pub async fn fetch_merged_prs(
                 url: item.html_url,
                 summary: item.body.unwrap_or_default(),
                 published: merged_at,
+                image_url: None,
             });
         }
 

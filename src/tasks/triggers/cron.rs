@@ -160,10 +160,29 @@ impl CronTrigger {
         let content = format_items(&items);
         let timestamp = Utc::now().format("%Y-%m-%d %H:%M UTC").to_string();
 
+        // Fetch market data (best-effort, 15s timeout)
+        let market_data = match tokio::time::timeout(
+            std::time::Duration::from_secs(15),
+            sources::coingecko::fetch_market_snapshot(&self.http_client),
+        )
+        .await
+        {
+            Ok(Ok(data)) => data,
+            Ok(Err(e)) => {
+                tracing::warn!(task = %task_name, error = %e, "Failed to fetch market data");
+                "Market data unavailable.".to_string()
+            }
+            Err(_) => {
+                tracing::warn!(task = %task_name, "Market data fetch timed out");
+                "Market data unavailable.".to_string()
+            }
+        };
+
         let mut vars = HashMap::new();
         vars.insert("content".to_string(), content);
         vars.insert("item_count".to_string(), items.len().to_string());
         vars.insert("timestamp".to_string(), timestamp);
+        vars.insert("market_data".to_string(), market_data);
 
         // 3. Render prompt
         let rendered = render_prompt(prompt_template, &vars);
@@ -222,12 +241,19 @@ fn format_items(items: &[ContentItem]) -> String {
                 item.summary.clone()
             };
 
+            let image_line = item
+                .image_url
+                .as_deref()
+                .map(|u| format!("\n   Image: {u}"))
+                .unwrap_or_default();
+
             format!(
-                "{}. **{}**\n   URL: {}\n   Published: {}\n   {}\n",
+                "{}. **{}**\n   URL: {}\n   Published: {}{}\n   {}\n",
                 i + 1,
                 item.title,
                 item.url,
                 published,
+                image_line,
                 summary_short
             )
         })
@@ -279,17 +305,23 @@ mod tests {
                 url: "https://example.com/1".to_string(),
                 summary: "Bitcoin reached a new all-time high.".to_string(),
                 published: None,
+                image_url: None,
             },
             ContentItem {
                 title: "ETH Update".to_string(),
                 url: "https://example.com/2".to_string(),
                 summary: "Ethereum ships a major update.".to_string(),
                 published: None,
+                image_url: Some("https://example.com/eth.jpg".to_string()),
             },
         ];
         let result = format_items(&items);
         assert!(result.contains("1. **Bitcoin Hits ATH**"));
         assert!(result.contains("2. **ETH Update**"));
         assert!(result.contains("https://example.com/1"));
+        // Item without image_url should not have Image: line
+        assert!(!result.contains("Image: https://example.com/1"));
+        // Item with image_url should include it
+        assert!(result.contains("Image: https://example.com/eth.jpg"));
     }
 }

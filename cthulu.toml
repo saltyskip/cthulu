@@ -68,6 +68,45 @@ token_env = "NOTION_TOKEN"
 database_id = "your-database-id"
 
 [[tasks]]
+name = "orangerock-newsletter"
+executor = "claude-code"
+prompt = "prompts/notion_newsletter.md"
+permissions = []
+
+[tasks.trigger.cron]
+schedule = "0 8 * * *"
+
+[[tasks.sources]]
+type = "rss"
+url = "https://thedefiant.io/feed"
+limit = 10
+
+[[tasks.sources]]
+type = "rss"
+url = "https://blockworks.co/feed"
+limit = 10
+
+[[tasks.sources]]
+type = "rss"
+url = "https://www.dlnews.com/arc/outboundfeeds/rss/"
+limit = 10
+
+[[tasks.sources]]
+type = "rss"
+url = "https://www.theblock.co/rss.xml"
+limit = 10
+
+[[tasks.sources]]
+type = "rss"
+url = "https://unchainedcrypto.com/feed/"
+limit = 10
+
+[[tasks.sinks]]
+type = "notion"
+token_env = "NOTION_TOKEN"
+database_id = "your-newsletter-database-id"
+
+[[tasks]]
 name = "dev-changelog"
 executor = "claude-code"
 prompt = "prompts/dev_changelog.md"
