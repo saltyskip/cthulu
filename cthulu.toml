@@ -58,14 +58,14 @@ type = "rss"
 url = "https://unchainedcrypto.com/feed/"
 limit = 10
 
-[[tasks.sinks]]
-type = "slack"
-webhook_url_env = "SLACK_WEBHOOK_URL"
+#[[tasks.sinks]]
+#type = "slack"
+#webhook_url_env = "SLACK_WEBHOOK_URL"
 
 [[tasks.sinks]]
 type = "notion"
 token_env = "NOTION_TOKEN"
-database_id = "your-database-id"
+database_id = "30aac5ee2bf980728eaefe59a03ea940"
 
 [[tasks]]
 name = "orangerock-newsletter"
@@ -104,7 +104,7 @@ limit = 10
 [[tasks.sinks]]
 type = "notion"
 token_env = "NOTION_TOKEN"
-database_id = "your-newsletter-database-id"
+database_id = "30aac5ee2bf980728eaefe59a03ea940"
 
 [[tasks]]
 name = "dev-changelog"
