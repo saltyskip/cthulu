@@ -2,10 +2,14 @@ use anyhow::{Context, Result};
 use async_trait::async_trait;
 use std::path::Path;
 use std::process::Stdio;
+use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
+use tokio::time::timeout;
 
 use super::{ExecutionResult, Executor};
+
+const PROCESS_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 
 pub struct ClaudeCodeExecutor {
     permissions: Vec<String>,
@@ -56,10 +60,10 @@ impl Executor for ClaudeCodeExecutor {
         {
             use tokio::io::AsyncWriteExt;
             let mut stdin = child.stdin.take().expect("stdin piped");
-            stdin
-                .write_all(prompt.as_bytes())
-                .await
-                .context("failed to write prompt to stdin")?;
+            if let Err(e) = stdin.write_all(prompt.as_bytes()).await {
+                let _ = child.kill().await;
+                return Err(e).context("failed to write prompt to stdin");
+            }
         }
 
         // Stream stderr to tracing
@@ -181,7 +185,19 @@ impl Executor for ClaudeCodeExecutor {
             (result_text, total_cost, total_turns)
         });
 
-        let status = child.wait().await.context("failed to wait on claude")?;
+        let status = match timeout(PROCESS_TIMEOUT, child.wait()).await {
+            Ok(result) => result.context("failed to wait on claude")?,
+            Err(_elapsed) => {
+                tracing::error!(
+                    "claude process timed out after {}s, killing",
+                    PROCESS_TIMEOUT.as_secs()
+                );
+                let _ = child.kill().await;
+                stderr_handle.abort();
+                stdout_handle.abort();
+                anyhow::bail!("claude process timed out after {}s", PROCESS_TIMEOUT.as_secs());
+            }
+        };
         let _ = stderr_handle.await;
         let (result_text, cost_usd, num_turns) = stdout_handle
             .await

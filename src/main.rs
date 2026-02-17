@@ -3,7 +3,7 @@ mod github;
 mod server;
 mod tasks;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use axum::body::Body;
 use axum::extract::Request;
 use dotenvy::dotenv;
@@ -11,6 +11,7 @@ use sentry::integrations::tower::{NewSentryLayer, SentryHttpLayer};
 use std::error::Error;
 use std::path::Path;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::net::TcpListener;
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::layer::SubscriberExt;
@@ -53,7 +54,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
         },
     ));
 
-    let http_client = Arc::new(reqwest::Client::new());
+    let http_client = Arc::new(
+        reqwest::Client::builder()
+            .connect_timeout(Duration::from_secs(10))
+            .timeout(Duration::from_secs(30))
+            .build()
+            .context("failed to build HTTP client")?,
+    );
     let github_token = config.github_token();
     let task_state = Arc::new(tasks::TaskState::new());
 
