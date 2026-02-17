@@ -136,6 +136,7 @@ async fn fetch_cnn_fear_greed(client: &reqwest::Client) -> Result<(f64, String)>
     let resp: CnnFearGreedResponse = client
         .get("https://production.dataviz.cnn.io/index/fearandgreed/graphdata")
         .header("User-Agent", BROWSER_UA)
+        .header("Referer", "https://www.cnn.com/markets/fear-and-greed")
         .timeout(std::time::Duration::from_secs(10))
         .send()
         .await?
