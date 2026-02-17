@@ -89,7 +89,7 @@ since_days = 7
 [[tasks.sinks]]
 type = "slack"
 bot_token_env = "SLACK_BOT_TOKEN"
-channel = "#dev-updates"
+channel = "#the-ark"
 
 [[tasks]]
 name = "product-updates"
@@ -113,4 +113,4 @@ since_days = 7
 [[tasks.sinks]]
 type = "slack"
 bot_token_env = "SLACK_BOT_TOKEN"
-channel = "#product-updates"
+channel = "#the-ark"
