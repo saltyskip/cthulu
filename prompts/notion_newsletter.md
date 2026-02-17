@@ -103,4 +103,14 @@ End with a relevant meme. Make it actually funny.
 
 ---
 
+## Important Rules
+
+- **No image reuse**: Do NOT reuse the banner image for any story section. Each story must use a different image URL.
+- **No fabricated numbers**: Only cite numbers, prices, and statistics that appear in the feed items below. Do not make up or extrapolate data.
+- **Bookmark link text required**: Always include descriptive link text in bookmarks: `[Read the full story](url)` not `[](url)`.
+- **Market data fallback**: When market data says "unavailable", keep the market section to one sentence acknowledging it's unavailable, then move on. Do not improvise a market section with made-up numbers.
+- **Meme text constraints**: Keep meme text simple. Avoid `$`, `"`, and special characters. Use plain words.
+
+---
+
 Write the newsletter now. Make it visual, opinionated, and fun. Use images from the feed items (the Image: URLs provided). Every section should have visual elements. No em dashes anywhere.

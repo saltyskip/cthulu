@@ -15,8 +15,9 @@ struct SparklineData {
 }
 
 pub async fn fetch_market_snapshot(client: &reqwest::Client) -> Result<String> {
-    let coins: Vec<CoinMarket> = client
+    let response = client
         .get("https://api.coingecko.com/api/v3/coins/markets")
+        .header("User-Agent", "cthulu-bot")
         .query(&[
             ("vs_currency", "usd"),
             ("ids", "bitcoin,ethereum,solana"),
@@ -26,9 +27,16 @@ pub async fn fetch_market_snapshot(client: &reqwest::Client) -> Result<String> {
         .timeout(std::time::Duration::from_secs(10))
         .send()
         .await
-        .context("CoinGecko request failed")?
-        .error_for_status()
-        .context("CoinGecko returned error status")?
+        .context("CoinGecko request failed")?;
+
+    let status = response.status();
+    if !status.is_success() {
+        let body = response.text().await.unwrap_or_default();
+        tracing::error!(status = %status, body = %body, "CoinGecko API error");
+        anyhow::bail!("CoinGecko returned {status}: {body}");
+    }
+
+    let coins: Vec<CoinMarket> = response
         .json()
         .await
         .context("failed to parse CoinGecko response")?;

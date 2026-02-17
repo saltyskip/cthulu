@@ -337,6 +337,9 @@ fn encode_meme_text(text: &str) -> String {
         .replace('#', "~h")
         .replace('/', "~s")
         .replace('?', "~q")
+        .replace('$', "~d")
+        .replace('"', "''")
+        .replace('&', "~a")
         .replace(' ', "_")
 }
 
@@ -348,7 +351,8 @@ fn parse_link_only(line: &str) -> Option<(&str, &str)> {
     let rest = &line[close_bracket + 2..];
     let close_paren = rest.find(')')?;
     let url = &rest[..close_paren];
-    if rest[close_paren + 1..].trim().is_empty() && !url.is_empty() {
+    // Reject empty link text — let it fall through to paragraph handling
+    if rest[close_paren + 1..].trim().is_empty() && !url.is_empty() && !text.is_empty() {
         Some((text, url))
     } else {
         None
@@ -662,6 +666,9 @@ mod tests {
         assert_eq!(encode_meme_text("50% off"), "50~p_off");
         assert_eq!(encode_meme_text("a/b"), "a~sb");
         assert_eq!(encode_meme_text("tag #1"), "tag_~h1");
+        assert_eq!(encode_meme_text("$650M"), "~d650M");
+        assert_eq!(encode_meme_text(r#"the "gloom""#), "the_''gloom''");
+        assert_eq!(encode_meme_text("A & B"), "A_~a_B");
     }
 
     #[test]
@@ -694,6 +701,14 @@ mod tests {
         assert_eq!(blocks[0]["type"], "bookmark");
         assert_eq!(blocks[0]["bookmark"]["url"], "https://example.com/article");
         assert_eq!(blocks[0]["bookmark"]["caption"][0]["text"]["content"], "Read More");
+    }
+
+    #[test]
+    fn test_empty_link_text_falls_through_to_paragraph() {
+        let blocks = markdown_to_notion_blocks("[](https://example.com/article)");
+        assert_eq!(blocks.len(), 1);
+        // Empty link text should NOT create a bookmark — falls through to paragraph
+        assert_eq!(blocks[0]["type"], "paragraph");
     }
 
     #[test]
