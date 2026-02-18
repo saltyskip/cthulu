@@ -67,10 +67,14 @@ export default function Canvas({
   const [edges, setEdges, onEdgesChange] = useEdgesState(flowToRFEdges(flow));
   const reactFlowInstance = useRef<any>(null);
 
-  // Sync when flow changes
-  const prevFlowId = useRef(flow.id);
-  if (flow.id !== prevFlowId.current) {
-    prevFlowId.current = flow.id;
+  // Build a fingerprint of flow structure + data (excludes positions to avoid drag loops)
+  const flowFingerprint = `${flow.id}:${flow.nodes.length}:${flow.edges.length}:` +
+    flow.nodes.map((n) => `${n.id}|${n.label}|${n.kind}|${JSON.stringify(n.config)}`).join(",");
+
+  const prevFingerprint = useRef(flowFingerprint);
+
+  if (flowFingerprint !== prevFingerprint.current) {
+    prevFingerprint.current = flowFingerprint;
     setNodes(flowToRFNodes(flow));
     setEdges(flowToRFEdges(flow));
   }
