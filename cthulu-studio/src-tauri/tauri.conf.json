@@ -1,0 +1,26 @@
+{
+  "$schema": "https://raw.githubusercontent.com/niceda/tauri/dev/tooling/cli/schema.json",
+  "productName": "Cthulu Studio",
+  "version": "0.1.0",
+  "identifier": "com.cthulu.studio",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:1420",
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Cthulu Studio",
+        "width": 1400,
+        "height": 900,
+        "resizable": true,
+        "fullscreen": false
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  }
+}

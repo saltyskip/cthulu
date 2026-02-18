@@ -219,7 +219,7 @@ impl CronTrigger {
     }
 }
 
-fn format_items(items: &[ContentItem]) -> String {
+pub fn format_items(items: &[ContentItem]) -> String {
     if items.is_empty() {
         return "No items fetched.".to_string();
     }

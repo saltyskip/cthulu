@@ -1,4 +1,5 @@
 mod config;
+mod flows;
 mod github;
 mod server;
 mod tasks;
@@ -17,6 +18,8 @@ use tracing_subscriber::EnvFilter;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 
+use crate::flows::history::RunHistory;
+use crate::flows::storage::FlowStore;
 use crate::github::client::{GithubClient, HttpGithubClient};
 
 #[tokio::main]
@@ -70,6 +73,28 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let config = Arc::new(config);
 
+    // Initialize flow store
+    let flows_dir = dirs::home_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join(".cthulu")
+        .join("flows");
+    let flow_store = Arc::new(FlowStore::new(flows_dir));
+    flow_store
+        .load_all()
+        .await
+        .context("failed to load flows")?;
+
+    // Import TOML tasks as flows on first boot
+    if flow_store.is_empty().await && !config.tasks.is_empty() {
+        tracing::info!("No flows found, importing {} TOML tasks", config.tasks.len());
+        match flows::import::import_toml_tasks(&config.tasks, &flow_store).await {
+            Ok(count) => tracing::info!(count, "TOML tasks imported as flows"),
+            Err(e) => tracing::error!(error = %e, "Failed to import TOML tasks"),
+        }
+    }
+
+    let run_history = Arc::new(RunHistory::new());
+
     // Spawn all configured tasks
     for task in &config.tasks {
         tasks::spawn_task(
@@ -86,6 +111,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
         config: config.clone(),
         github_client,
         http_client,
+        flow_store,
+        run_history,
     };
 
     let app = server::create_app(app_state)
