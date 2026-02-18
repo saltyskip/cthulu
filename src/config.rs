@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 pub struct Config {
     pub server: ServerConfig,
     pub github: Option<GithubConfig>,
+    pub slack: Option<SlackInteractiveConfig>,
     #[serde(default)]
     pub tasks: Vec<TaskConfig>,
 }
@@ -30,6 +31,12 @@ fn default_environment() -> String {
 #[derive(Debug, Deserialize)]
 pub struct GithubConfig {
     pub token_env: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct SlackInteractiveConfig {
+    pub bot_token_env: String,
+    pub app_token_env: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -151,8 +158,6 @@ pub enum SinkConfig {
     },
 }
 
-
-
 impl Config {
     pub fn load(path: &Path) -> Result<Self> {
         let content = std::fs::read_to_string(path)
@@ -176,6 +181,20 @@ impl Config {
             .and_then(|env_key| std::env::var(env_key).ok())
             .unwrap_or_default()
     }
+
+    pub fn slack_bot_token(&self) -> Option<String> {
+        self.slack
+            .as_ref()
+            .and_then(|s| std::env::var(&s.bot_token_env).ok())
+            .filter(|t| !t.is_empty())
+    }
+
+    pub fn slack_app_token(&self) -> Option<String> {
+        self.slack
+            .as_ref()
+            .and_then(|s| std::env::var(&s.app_token_env).ok())
+            .filter(|t| !t.is_empty())
+    }
 }
 
 #[cfg(test)]
@@ -188,9 +207,11 @@ mod tests {
 
     #[test]
     fn test_minimal_config() {
-        let config = parse(r#"
+        let config = parse(
+            r#"
             [server]
-        "#);
+        "#,
+        );
         assert_eq!(config.server.port, 8081);
         assert_eq!(config.server.environment, "local");
         assert!(config.github.is_none());
@@ -199,7 +220,8 @@ mod tests {
 
     #[test]
     fn test_full_config() {
-        let config = parse(r#"
+        let config = parse(
+            r#"
             [server]
             port = 9090
             environment = "production"
@@ -220,7 +242,8 @@ mod tests {
               { slug = "owner/repo", path = "/tmp/repo" },
             ]
             poll_interval = 30
-        "#);
+        "#,
+        );
         assert_eq!(config.server.port, 9090);
         assert_eq!(config.server.environment, "production");
         assert_eq!(config.github.unwrap().token_env, "GH_TOKEN");
@@ -239,7 +262,8 @@ mod tests {
 
     #[test]
     fn test_default_poll_interval() {
-        let config = parse(r#"
+        let config = parse(
+            r#"
             [server]
 
             [[tasks]]
@@ -250,14 +274,16 @@ mod tests {
             [tasks.trigger.github]
             event = "pull_request"
             repos = [{ slug = "o/r", path = "/tmp" }]
-        "#);
+        "#,
+        );
         let gh = config.tasks[0].trigger.github.as_ref().unwrap();
         assert_eq!(gh.poll_interval, 60);
     }
 
     #[test]
     fn test_cron_trigger() {
-        let config = parse(r#"
+        let config = parse(
+            r#"
             [server]
 
             [[tasks]]
@@ -267,7 +293,8 @@ mod tests {
 
             [tasks.trigger.cron]
             schedule = "0 9 * * MON-FRI"
-        "#);
+        "#,
+        );
         let cron = config.tasks[0].trigger.cron.as_ref().unwrap();
         assert_eq!(cron.schedule, "0 9 * * MON-FRI");
         assert!(config.tasks[0].trigger.github.is_none());
@@ -275,7 +302,8 @@ mod tests {
 
     #[test]
     fn test_webhook_trigger() {
-        let config = parse(r#"
+        let config = parse(
+            r#"
             [server]
 
             [[tasks]]
@@ -285,14 +313,16 @@ mod tests {
 
             [tasks.trigger.webhook]
             path = "/hooks/deploy"
-        "#);
+        "#,
+        );
         let wh = config.tasks[0].trigger.webhook.as_ref().unwrap();
         assert_eq!(wh.path, "/hooks/deploy");
     }
 
     #[test]
     fn test_multiple_tasks() {
-        let config = parse(r#"
+        let config = parse(
+            r#"
             [server]
 
             [[tasks]]
@@ -308,7 +338,8 @@ mod tests {
             prompt = "b.md"
             [tasks.trigger.webhook]
             path = "/hooks/b"
-        "#);
+        "#,
+        );
         assert_eq!(config.tasks.len(), 2);
         assert_eq!(config.tasks[0].name, "task-a");
         assert_eq!(config.tasks[1].name, "task-b");
@@ -316,7 +347,8 @@ mod tests {
 
     #[test]
     fn test_empty_permissions_default() {
-        let config = parse(r#"
+        let config = parse(
+            r#"
             [server]
 
             [[tasks]]
@@ -325,7 +357,8 @@ mod tests {
             prompt = "test.md"
             [tasks.trigger.cron]
             schedule = "daily"
-        "#);
+        "#,
+        );
         assert!(config.tasks[0].permissions.is_empty());
     }
 
@@ -358,20 +391,23 @@ mod tests {
     #[test]
     fn test_missing_required_field_fails() {
         // name is required on tasks
-        let result: Result<Config, _> = toml::from_str(r#"
+        let result: Result<Config, _> = toml::from_str(
+            r#"
             [server]
             [[tasks]]
             executor = "claude-code"
             prompt = "test.md"
             [tasks.trigger.cron]
             schedule = "daily"
-        "#);
+        "#,
+        );
         assert!(result.is_err());
     }
 
     #[test]
     fn test_github_trigger_defaults_skip_drafts_true() {
-        let config = parse(r#"
+        let config = parse(
+            r#"
             [server]
 
             [[tasks]]
@@ -382,7 +418,8 @@ mod tests {
             [tasks.trigger.github]
             event = "pull_request"
             repos = [{ slug = "o/r", path = "/tmp" }]
-        "#);
+        "#,
+        );
         let gh = config.tasks[0].trigger.github.as_ref().unwrap();
         assert!(gh.skip_drafts);
         assert!(!gh.review_on_push);
@@ -391,7 +428,8 @@ mod tests {
 
     #[test]
     fn test_task_with_sources_and_sink() {
-        let config = parse(r#"
+        let config = parse(
+            r#"
             [server]
 
             [[tasks]]
@@ -414,7 +452,8 @@ mod tests {
             [[tasks.sinks]]
             type = "slack"
             webhook_url_env = "SLACK_WEBHOOK_URL"
-        "#);
+        "#,
+        );
         let task = &config.tasks[0];
         assert_eq!(task.sources.len(), 2);
         match &task.sources[0] {
@@ -433,7 +472,11 @@ mod tests {
         }
         assert_eq!(task.sinks.len(), 1);
         match &task.sinks[0] {
-            SinkConfig::Slack { webhook_url_env, bot_token_env, channel } => {
+            SinkConfig::Slack {
+                webhook_url_env,
+                bot_token_env,
+                channel,
+            } => {
                 assert_eq!(webhook_url_env.as_deref(), Some("SLACK_WEBHOOK_URL"));
                 assert!(bot_token_env.is_none());
                 assert!(channel.is_none());
@@ -444,7 +487,8 @@ mod tests {
 
     #[test]
     fn test_task_without_sources_or_sink() {
-        let config = parse(r#"
+        let config = parse(
+            r#"
             [server]
 
             [[tasks]]
@@ -455,7 +499,8 @@ mod tests {
             [tasks.trigger.github]
             event = "pull_request"
             repos = [{ slug = "o/r", path = "/tmp" }]
-        "#);
+        "#,
+        );
         let task = &config.tasks[0];
         assert!(task.sources.is_empty());
         assert!(task.sinks.is_empty());
@@ -463,7 +508,8 @@ mod tests {
 
     #[test]
     fn test_github_merged_prs_source() {
-        let config = parse(r#"
+        let config = parse(
+            r#"
             [server]
 
             [[tasks]]
@@ -482,7 +528,8 @@ mod tests {
             type = "github-merged-prs"
             repos = ["owner/repo-c"]
             since_days = 14
-        "#);
+        "#,
+        );
         let task = &config.tasks[0];
         assert_eq!(task.sources.len(), 2);
         match &task.sources[0] {
@@ -503,7 +550,8 @@ mod tests {
 
     #[test]
     fn test_slack_bot_token_sink() {
-        let config = parse(r##"
+        let config = parse(
+            r##"
             [server]
 
             [[tasks]]
@@ -518,11 +566,16 @@ mod tests {
             type = "slack"
             bot_token_env = "SLACK_BOT_TOKEN"
             channel = "#dev-updates"
-        "##);
+        "##,
+        );
         let task = &config.tasks[0];
         assert_eq!(task.sinks.len(), 1);
         match &task.sinks[0] {
-            SinkConfig::Slack { webhook_url_env, bot_token_env, channel } => {
+            SinkConfig::Slack {
+                webhook_url_env,
+                bot_token_env,
+                channel,
+            } => {
                 assert!(webhook_url_env.is_none());
                 assert_eq!(bot_token_env.as_deref(), Some("SLACK_BOT_TOKEN"));
                 assert_eq!(channel.as_deref(), Some("#dev-updates"));
@@ -533,7 +586,8 @@ mod tests {
 
     #[test]
     fn test_multiple_sinks() {
-        let config = parse(r#"
+        let config = parse(
+            r#"
             [server]
 
             [[tasks]]
@@ -552,12 +606,16 @@ mod tests {
             type = "notion"
             token_env = "NOTION_TOKEN"
             database_id = "abc-123"
-        "#);
+        "#,
+        );
         let task = &config.tasks[0];
         assert_eq!(task.sinks.len(), 2);
         assert!(matches!(&task.sinks[0], SinkConfig::Slack { .. }));
         match &task.sinks[1] {
-            SinkConfig::Notion { token_env, database_id } => {
+            SinkConfig::Notion {
+                token_env,
+                database_id,
+            } => {
                 assert_eq!(token_env, "NOTION_TOKEN");
                 assert_eq!(database_id, "abc-123");
             }
@@ -566,8 +624,35 @@ mod tests {
     }
 
     #[test]
+    fn test_slack_interactive_config() {
+        let config = parse(
+            r#"
+            [server]
+
+            [slack]
+            bot_token_env = "SLACK_BOT_TOKEN"
+            app_token_env = "SLACK_APP_TOKEN"
+        "#,
+        );
+        let slack = config.slack.unwrap();
+        assert_eq!(slack.bot_token_env, "SLACK_BOT_TOKEN");
+        assert_eq!(slack.app_token_env, "SLACK_APP_TOKEN");
+    }
+
+    #[test]
+    fn test_slack_interactive_config_optional() {
+        let config = parse(
+            r#"
+            [server]
+        "#,
+        );
+        assert!(config.slack.is_none());
+    }
+
+    #[test]
     fn test_github_trigger_explicit_options() {
-        let config = parse(r#"
+        let config = parse(
+            r#"
             [server]
 
             [[tasks]]
@@ -581,7 +666,8 @@ mod tests {
             skip_drafts = false
             review_on_push = true
             max_diff_size = 25000
-        "#);
+        "#,
+        );
         let gh = config.tasks[0].trigger.github.as_ref().unwrap();
         assert!(!gh.skip_drafts);
         assert!(gh.review_on_push);

@@ -1,0 +1,7 @@
+target/
+.git/
+.env
+*.p8
+.DS_Store
+*.md
+!prompts/*.md

@@ -1,11 +1,15 @@
 mod config;
 mod github;
+mod relay;
 mod server;
+mod setup;
+mod slack_socket;
 mod tasks;
 
 use anyhow::{Context, Result};
 use axum::body::Body;
 use axum::extract::Request;
+use clap::{Parser, Subcommand};
 use dotenvy::dotenv;
 use sentry::integrations::tower::{NewSentryLayer, SentryHttpLayer};
 use std::error::Error;
@@ -19,8 +23,52 @@ use tracing_subscriber::util::SubscriberInitExt;
 
 use crate::github::client::{GithubClient, HttpGithubClient};
 
+// ---------------------------------------------------------------------------
+// CLI
+// ---------------------------------------------------------------------------
+
+#[derive(Parser)]
+#[command(name = "cthulu", about = "AI automation daemon")]
+struct Cli {
+    #[command(subcommand)]
+    command: Option<Commands>,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    /// Start the server (default when no subcommand is given)
+    Serve,
+    /// Generate a Slack app manifest and print setup instructions
+    Setup {
+        /// Bot display name (prompted interactively if omitted)
+        #[arg(long)]
+        name: Option<String>,
+    },
+}
+
+// ---------------------------------------------------------------------------
+// Main
+// ---------------------------------------------------------------------------
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
+    let cli = Cli::parse();
+
+    // Handle the setup subcommand before loading config / starting the server
+    match cli.command.unwrap_or(Commands::Serve) {
+        Commands::Setup { name } => {
+            setup::run(name);
+            return Ok(());
+        }
+        Commands::Serve => {
+            // Fall through to server startup below
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Server startup (existing code, unchanged)
+    // -----------------------------------------------------------------------
+
     dotenv().ok();
 
     let config = config::Config::load(Path::new("cthulu.toml"))?;
@@ -85,8 +133,24 @@ async fn main() -> Result<(), Box<dyn Error>> {
         task_state,
         config: config.clone(),
         github_client,
-        http_client,
+        http_client: http_client.clone(),
+        bot_user_id: Arc::new(tokio::sync::RwLock::new(None)),
+        thread_sessions: relay::new_sessions(),
+        seen_event_ids: Arc::new(tokio::sync::RwLock::new(std::collections::VecDeque::new())),
     };
+
+    // Conditionally start Slack Socket Mode relay
+    if config.slack.is_some() {
+        let state_clone = app_state.clone();
+        tokio::spawn(async move {
+            relay::resolve_bot_user_id(&state_clone).await;
+        });
+        let state_clone = app_state.clone();
+        tokio::spawn(async move {
+            slack_socket::run(state_clone).await;
+        });
+        tracing::info!("Slack Socket Mode interactive relay enabled");
+    }
 
     let app = server::create_app(app_state)
         .layer(SentryHttpLayer::new().enable_transaction())

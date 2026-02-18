@@ -1,0 +1,18 @@
+services:
+  cthulu:
+    build:
+      context: .
+      platforms:
+        - linux/amd64
+    platform: linux/amd64
+    container_name: cthulu
+    ports:
+      - "8087:8081"
+    env_file:
+      - .env
+    volumes:
+      # Mount prompts for live editing without rebuild
+      - ./prompts:/app/prompts:ro
+      # Mount config for live editing without rebuild
+      - ./cthulu.toml:/app/cthulu.toml:ro
+    restart: unless-stopped

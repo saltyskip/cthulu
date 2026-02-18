@@ -6,6 +6,10 @@ environment = "local"
 [github]
 token_env = "GITHUB_TOKEN"
 
+[slack]
+bot_token_env = "SLACK_BOT_TOKEN"
+app_token_env = "SLACK_APP_TOKEN"
+
 [[tasks]]
 name = "pr-review"
 executor = "claude-code"
