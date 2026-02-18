@@ -5,6 +5,7 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use futures::stream::Stream;
 use hyper::StatusCode;
+use hyper::header;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::convert::Infallible;
@@ -13,7 +14,9 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 use tokio_stream::wrappers::LinesStream;
 use tokio_stream::StreamExt;
+use tower_http::cors::{Any, CorsLayer};
 
+use super::flow_routes;
 use super::middleware;
 use super::AppState;
 use crate::tasks::diff;
@@ -30,14 +33,21 @@ pub fn build_router(state: AppState) -> Router {
         }),
     );
 
+    let cors = CorsLayer::new()
+        .allow_origin(Any)
+        .allow_methods(Any)
+        .allow_headers(vec![header::CONTENT_TYPE, header::AUTHORIZATION]);
+
     Router::new()
         .nest("/health", health_routes)
         .route("/claude", post(run_claude))
         .route("/reviews/status", get(review_status))
         .route("/reviews/trigger", post(trigger_review))
         .route("/tasks/trigger", post(trigger_task))
+        .nest("/api", flow_routes::flow_router())
         .fallback(not_found)
         .with_state(state)
+        .layer(cors)
         .layer(axum::middleware::from_fn(middleware::strip_trailing_slash))
         .layer(axum::middleware::from_fn(
             middleware::enrich_current_span_middleware,

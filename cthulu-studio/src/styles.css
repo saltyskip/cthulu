@@ -1,0 +1,497 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+:root {
+  --bg: #0d1117;
+  --bg-secondary: #161b22;
+  --bg-tertiary: #21262d;
+  --border: #30363d;
+  --text: #e6edf3;
+  --text-secondary: #8b949e;
+  --accent: #58a6ff;
+  --success: #3fb950;
+  --danger: #f85149;
+  --warning: #d29922;
+
+  --trigger-color: #d29922;
+  --source-color: #58a6ff;
+  --executor-color: #bc8cff;
+  --sink-color: #3fb950;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  overflow: hidden;
+  height: 100vh;
+}
+
+#root {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.app-layout {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+/* Top Bar */
+.top-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border);
+  height: 48px;
+}
+
+.top-bar h1 {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.top-bar .flow-name {
+  font-size: 14px;
+  color: var(--text-secondary);
+  margin-left: 8px;
+}
+
+.top-bar .spacer {
+  flex: 1;
+}
+
+.connection-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.connection-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.connection-dot.connected {
+  background: var(--success);
+}
+
+.connection-dot.disconnected {
+  background: var(--danger);
+}
+
+/* Buttons */
+button {
+  font-family: inherit;
+  cursor: pointer;
+  border: none;
+  border-radius: 6px;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  transition: background 0.15s;
+}
+
+button.primary {
+  background: var(--accent);
+  color: #fff;
+}
+
+button.primary:hover {
+  background: #4c9aed;
+}
+
+button.danger {
+  background: var(--danger);
+  color: #fff;
+}
+
+button.danger:hover {
+  background: #e04040;
+}
+
+button.ghost {
+  background: transparent;
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+}
+
+button.ghost:hover {
+  background: var(--bg-tertiary);
+  color: var(--text);
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Sidebar */
+.sidebar {
+  width: 260px;
+  background: var(--bg-secondary);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.sidebar-header {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.sidebar-header h2 {
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  letter-spacing: 0.5px;
+}
+
+.flow-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+}
+
+.flow-item {
+  padding: 10px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  margin-bottom: 4px;
+  transition: background 0.15s;
+}
+
+.flow-item:hover {
+  background: var(--bg-tertiary);
+}
+
+.flow-item.active {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+}
+
+.flow-item .flow-item-name {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.flow-item .flow-item-meta {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-top: 2px;
+}
+
+/* Node Palette */
+.node-palette {
+  border-top: 1px solid var(--border);
+  padding: 12px;
+}
+
+.node-palette h3 {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+  letter-spacing: 0.5px;
+}
+
+.palette-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  cursor: grab;
+  font-size: 12px;
+  color: var(--text);
+  margin-bottom: 2px;
+  transition: background 0.15s;
+}
+
+.palette-item:hover {
+  background: var(--bg-tertiary);
+}
+
+.palette-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+/* Canvas */
+.canvas-container {
+  flex: 1;
+  position: relative;
+}
+
+/* Custom React Flow nodes */
+.custom-node {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 16px;
+  min-width: 180px;
+  max-width: 260px;
+  font-size: 12px;
+}
+
+.custom-node .node-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.custom-node .node-type-badge {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  padding: 2px 6px;
+  border-radius: 3px;
+  letter-spacing: 0.5px;
+}
+
+.custom-node .node-type-badge.trigger {
+  background: rgba(210, 153, 34, 0.2);
+  color: var(--trigger-color);
+}
+
+.custom-node .node-type-badge.source {
+  background: rgba(88, 166, 255, 0.2);
+  color: var(--source-color);
+}
+
+.custom-node .node-type-badge.executor {
+  background: rgba(188, 140, 255, 0.2);
+  color: var(--executor-color);
+}
+
+.custom-node .node-type-badge.sink {
+  background: rgba(63, 185, 80, 0.2);
+  color: var(--sink-color);
+}
+
+.custom-node .node-label {
+  font-weight: 500;
+  color: var(--text);
+  word-break: break-word;
+}
+
+.custom-node .node-kind {
+  color: var(--text-secondary);
+  font-size: 11px;
+  margin-top: 2px;
+}
+
+/* Property Panel */
+.property-panel {
+  width: 320px;
+  background: var(--bg-secondary);
+  border-left: 1px solid var(--border);
+  overflow-y: auto;
+  padding: 16px;
+}
+
+.property-panel h3 {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 16px;
+}
+
+.property-panel .form-group {
+  margin-bottom: 12px;
+}
+
+.property-panel label {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  margin-bottom: 4px;
+  letter-spacing: 0.5px;
+}
+
+.property-panel input,
+.property-panel textarea,
+.property-panel select {
+  width: 100%;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  color: var(--text);
+  font-size: 13px;
+  font-family: inherit;
+}
+
+.property-panel textarea {
+  min-height: 100px;
+  resize: vertical;
+  font-family: "SF Mono", "Fira Code", monospace;
+  font-size: 12px;
+}
+
+.property-panel input:focus,
+.property-panel textarea:focus,
+.property-panel select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+/* Run History */
+.run-history {
+  padding: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.run-history h3 {
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.run-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  font-size: 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.run-item .run-status {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.run-status.running {
+  background: var(--warning);
+  animation: pulse 1.5s infinite;
+}
+
+.run-status.success {
+  background: var(--success);
+}
+
+.run-status.failed {
+  background: var(--danger);
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.run-item .run-time {
+  color: var(--text-secondary);
+}
+
+/* React Flow overrides */
+.react-flow__background {
+  background: var(--bg) !important;
+}
+
+.react-flow__edge-path {
+  stroke: var(--border) !important;
+  stroke-width: 2 !important;
+}
+
+.react-flow__handle {
+  width: 8px !important;
+  height: 8px !important;
+  background: var(--border) !important;
+  border: 2px solid var(--bg-secondary) !important;
+}
+
+.react-flow__handle:hover {
+  background: var(--accent) !important;
+}
+
+.react-flow__minimap {
+  background: var(--bg-secondary) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 8px !important;
+}
+
+.react-flow__controls {
+  border: 1px solid var(--border) !important;
+  border-radius: 8px !important;
+  overflow: hidden;
+}
+
+.react-flow__controls-button {
+  background: var(--bg-secondary) !important;
+  border-bottom: 1px solid var(--border) !important;
+  fill: var(--text-secondary) !important;
+}
+
+.react-flow__controls-button:hover {
+  background: var(--bg-tertiary) !important;
+}
+
+/* Server URL modal */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+.modal {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 24px;
+  min-width: 400px;
+}
+
+.modal h2 {
+  font-size: 16px;
+  margin-bottom: 16px;
+}
+
+.modal .form-group {
+  margin-bottom: 16px;
+}
+
+.modal .modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--text-secondary);
+  gap: 12px;
+}
+
+.empty-state p {
+  font-size: 14px;
+}
