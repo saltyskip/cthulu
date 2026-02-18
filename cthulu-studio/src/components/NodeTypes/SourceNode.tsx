@@ -9,13 +9,13 @@ interface SourceNodeData {
 export default function SourceNode({ data }: { data: SourceNodeData }) {
   return (
     <div className="custom-node">
-      <Handle type="target" position={Position.Left} />
+      <Handle id="in" type="target" position={Position.Left} />
       <div className="node-header">
         <span className="node-type-badge source">Source</span>
       </div>
       <div className="node-label">{data.label}</div>
       <div className="node-kind">{data.kind}</div>
-      <Handle type="source" position={Position.Right} />
+      <Handle id="out" type="source" position={Position.Right} />
     </div>
   );
 }

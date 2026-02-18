@@ -5,23 +5,78 @@ import type { Flow, FlowNode, FlowEdge, FlowSummary, NodeTypeSchema } from "./ty
 import TopBar from "./components/TopBar";
 import FlowList from "./components/FlowList";
 import Sidebar from "./components/Sidebar";
-import Canvas from "./components/Canvas";
+import Canvas, { type CanvasHandle } from "./components/Canvas";
 import PropertyPanel from "./components/PropertyPanel";
 import RunHistory from "./components/RunHistory";
 import Console from "./components/Console";
+import ErrorBoundary from "./components/ErrorBoundary";
 
 export default function App() {
   const [flows, setFlows] = useState<FlowSummary[]>([]);
-  const [activeFlow, setActiveFlow] = useState<Flow | null>(null);
+  const [activeFlowId, setActiveFlowId] = useState<string | null>(null);
+  const [initialFlow, setInitialFlow] = useState<Flow | null>(null);
   const [nodeTypes, setNodeTypes] = useState<NodeTypeSchema[]>([]);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [showConsole, setShowConsole] = useState(false);
   const [errorCount, setErrorCount] = useState(0);
   const [serverUrl, setServerUrlState] = useState(api.getServerUrl());
+  // Keep a light reference for TopBar (name, enabled) without driving Canvas
+  const [activeFlowMeta, setActiveFlowMeta] = useState<{ id: string; name: string; description: string; enabled: boolean } | null>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const canvasRef = useRef<CanvasHandle>(null);
 
-  // Track error count for badge
+  // --- Drag-and-drop state (refs to avoid re-renders during drag) ---
+  const dragging = useRef<NodeTypeSchema | null>(null);
+  const ghostEl = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const onMouseMove = (e: MouseEvent) => {
+      if (!ghostEl.current) return;
+      ghostEl.current.style.left = `${e.clientX + 12}px`;
+      ghostEl.current.style.top = `${e.clientY + 12}px`;
+    };
+
+    const onMouseUp = (e: MouseEvent) => {
+      const nt = dragging.current;
+      if (!nt) return;
+      dragging.current = null;
+
+      // Clean up ghost
+      ghostEl.current?.remove();
+      ghostEl.current = null;
+      document.body.style.cursor = "";
+
+      // Hit-test: is the cursor over the canvas?
+      const el = document.elementFromPoint(e.clientX, e.clientY);
+      if (!el?.closest(".canvas-container")) return;
+
+      // Place the node — Canvas owns state, no need to update App
+      canvasRef.current?.addNodeAtScreen(
+        nt.node_type, nt.kind, nt.label, e.clientX, e.clientY
+      );
+    };
+
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
+    return () => {
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+    };
+  }, []);
+
+  const handleGrab = useCallback((nodeType: NodeTypeSchema) => {
+    dragging.current = nodeType;
+    document.body.style.cursor = "grabbing";
+
+    const ghost = document.createElement("div");
+    ghost.className = "drag-ghost";
+    ghost.textContent = nodeType.label;
+    document.body.appendChild(ghost);
+    ghostEl.current = ghost;
+  }, []);
+
+  // --- Error count badge ---
   useEffect(() => {
     return subscribe(() => {
       const errors = getEntries().filter((e) => e.level === "error").length;
@@ -29,7 +84,7 @@ export default function App() {
     });
   }, []);
 
-  // Load on mount
+  // --- Boot ---
   const initialized = useRef(false);
   useEffect(() => {
     if (initialized.current) return;
@@ -40,32 +95,23 @@ export default function App() {
     loadNodeTypes();
   }, []);
 
+  // --- API helpers ---
   const loadFlows = async () => {
-    try {
-      const data = await api.listFlows();
-      setFlows(data);
-    } catch {
-      // Logged by API client
-    }
+    try { setFlows(await api.listFlows()); } catch { /* logged */ }
   };
 
   const loadNodeTypes = async () => {
-    try {
-      const data = await api.getNodeTypes();
-      setNodeTypes(data);
-    } catch {
-      // Logged by API client
-    }
+    try { setNodeTypes(await api.getNodeTypes()); } catch { /* logged */ }
   };
 
   const selectFlow = async (id: string) => {
     try {
       const flow = await api.getFlow(id);
-      setActiveFlow(flow);
+      setInitialFlow(flow);
+      setActiveFlowId(flow.id);
+      setActiveFlowMeta({ id: flow.id, name: flow.name, description: flow.description, enabled: flow.enabled });
       setSelectedNodeId(null);
-    } catch {
-      // Logged by API client
-    }
+    } catch { /* logged */ }
   };
 
   const createFlow = async () => {
@@ -73,147 +119,59 @@ export default function App() {
       const { id } = await api.createFlow("New Flow");
       await loadFlows();
       await selectFlow(id);
-    } catch {
-      // Logged by API client
-    }
+    } catch { /* logged */ }
   };
 
-  const debouncedSave = useCallback(
-    (flow: Flow) => {
-      if (saveTimer.current) clearTimeout(saveTimer.current);
-      saveTimer.current = setTimeout(async () => {
-        try {
-          await api.updateFlow(flow.id, {
-            name: flow.name,
-            description: flow.description,
-            enabled: flow.enabled,
-            nodes: flow.nodes,
-            edges: flow.edges,
-          });
-          loadFlows();
-        } catch {
-          // Logged by API client
-        }
-      }, 500);
-    },
-    []
-  );
+  // --- Snapshot callback: Canvas pushes state here for persistence ---
+  const handleFlowSnapshot = useCallback((snapshot: { nodes: FlowNode[]; edges: FlowEdge[] }) => {
+    if (!activeFlowId || !activeFlowMeta) return;
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(async () => {
+      try {
+        await api.updateFlow(activeFlowId, {
+          name: activeFlowMeta.name,
+          description: activeFlowMeta.description,
+          enabled: activeFlowMeta.enabled,
+          nodes: snapshot.nodes,
+          edges: snapshot.edges,
+        });
+        loadFlows();
+      } catch { /* logged */ }
+    }, 500);
+  }, [activeFlowId, activeFlowMeta]);
 
-  const handleNodesChange = useCallback(
-    (nodes: FlowNode[]) => {
-      if (!activeFlow) return;
-      const updated = { ...activeFlow, nodes };
-      setActiveFlow(updated);
-      debouncedSave(updated);
-    },
-    [activeFlow, debouncedSave]
-  );
-
-  const handleEdgesChange = useCallback(
-    (edges: FlowEdge[]) => {
-      if (!activeFlow) return;
-      const updated = { ...activeFlow, edges };
-      setActiveFlow(updated);
-      debouncedSave(updated);
-    },
-    [activeFlow, debouncedSave]
-  );
-
-  const handleNodeSelect = useCallback((nodeId: string | null) => {
+  const handleSelectionChange = useCallback((nodeId: string | null) => {
     setSelectedNodeId(nodeId);
   }, []);
 
-  const handleNodeUpdate = useCallback(
-    (nodeId: string, updates: Partial<FlowNode>) => {
-      if (!activeFlow) return;
-      const nodes = activeFlow.nodes.map((n) =>
-        n.id === nodeId ? { ...n, ...updates } : n
-      );
-      const updated = { ...activeFlow, nodes };
-      setActiveFlow(updated);
-      debouncedSave(updated);
-    },
-    [activeFlow, debouncedSave]
-  );
-
-  const handleNodeDelete = useCallback(
-    (nodeId: string) => {
-      if (!activeFlow) return;
-      const nodes = activeFlow.nodes.filter((n) => n.id !== nodeId);
-      const edges = activeFlow.edges.filter(
-        (e) => e.source !== nodeId && e.target !== nodeId
-      );
-      const updated = { ...activeFlow, nodes, edges };
-      setActiveFlow(updated);
-      setSelectedNodeId(null);
-      debouncedSave(updated);
-    },
-    [activeFlow, debouncedSave]
-  );
-
-  const handleDrop = useCallback(
-    (nodeType: NodeTypeSchema, position: { x: number; y: number }) => {
-      if (!activeFlow) return;
-      const newNode: FlowNode = {
-        id: crypto.randomUUID(),
-        node_type: nodeType.node_type,
-        kind: nodeType.kind,
-        config: {},
-        position,
-        label: nodeType.label,
-      };
-      const nodes = [...activeFlow.nodes, newNode];
-      const updated = { ...activeFlow, nodes };
-      setActiveFlow(updated);
-      debouncedSave(updated);
-      setSelectedNodeId(newNode.id);
-    },
-    [activeFlow, debouncedSave]
-  );
-
-  const handleDragStart = useCallback(
-    (event: React.DragEvent, nodeType: NodeTypeSchema) => {
-      event.dataTransfer.setData(
-        "application/cthulu-node",
-        JSON.stringify(nodeType)
-      );
-      event.dataTransfer.effectAllowed = "move";
-    },
-    []
-  );
-
   const handleTrigger = async () => {
-    if (!activeFlow) return;
+    if (!activeFlowMeta) return;
     try {
-      log("info", `Triggering flow: ${activeFlow.name}`);
-      await api.triggerFlow(activeFlow.id);
-    } catch {
-      // Logged by API client
-    }
+      log("info", `Triggering flow: ${activeFlowMeta.name}`);
+      await api.triggerFlow(activeFlowMeta.id);
+    } catch { /* logged */ }
   };
 
   const handleToggleEnabled = async () => {
-    if (!activeFlow) return;
-    const updated = { ...activeFlow, enabled: !activeFlow.enabled };
-    setActiveFlow(updated);
+    if (!activeFlowMeta) return;
+    const updated = { ...activeFlowMeta, enabled: !activeFlowMeta.enabled };
+    setActiveFlowMeta(updated);
     try {
-      await api.updateFlow(activeFlow.id, { enabled: updated.enabled });
+      await api.updateFlow(activeFlowMeta.id, { enabled: updated.enabled });
       loadFlows();
-    } catch {
-      // Logged by API client
-    }
+    } catch { /* logged */ }
   };
 
   const handleDeleteFlow = async () => {
-    if (!activeFlow) return;
+    if (!activeFlowId) return;
     try {
-      await api.deleteFlow(activeFlow.id);
-      setActiveFlow(null);
+      await api.deleteFlow(activeFlowId);
+      setActiveFlowId(null);
+      setInitialFlow(null);
+      setActiveFlowMeta(null);
       setSelectedNodeId(null);
       loadFlows();
-    } catch {
-      // Logged by API client
-    }
+    } catch { /* logged */ }
   };
 
   const handleSaveSettings = () => {
@@ -223,12 +181,10 @@ export default function App() {
     loadNodeTypes();
   };
 
-  const selectedNode = activeFlow?.nodes.find((n) => n.id === selectedNodeId) || null;
-
   return (
     <div className={showConsole ? "app-with-console" : ""}>
       <TopBar
-        flow={activeFlow}
+        flow={activeFlowMeta}
         onTrigger={handleTrigger}
         onToggleEnabled={handleToggleEnabled}
         onSettingsClick={() => setShowSettings(true)}
@@ -240,21 +196,23 @@ export default function App() {
         <div style={{ display: "flex", flexDirection: "column" }}>
           <FlowList
             flows={flows}
-            activeFlowId={activeFlow?.id || null}
+            activeFlowId={activeFlowId}
             onSelect={selectFlow}
             onCreate={createFlow}
           />
-          <Sidebar nodeTypes={nodeTypes} onDragStart={handleDragStart} />
+          <Sidebar nodeTypes={nodeTypes} onGrab={handleGrab} />
         </div>
 
-        {activeFlow ? (
-          <Canvas
-            flow={activeFlow}
-            onNodesChange={handleNodesChange}
-            onEdgesChange={handleEdgesChange}
-            onNodeSelect={handleNodeSelect}
-            onDrop={handleDrop}
-          />
+        {activeFlowId ? (
+          <ErrorBoundary>
+            <Canvas
+              ref={canvasRef}
+              flowId={activeFlowId}
+              initialFlow={initialFlow}
+              onFlowSnapshot={handleFlowSnapshot}
+              onSelectionChange={handleSelectionChange}
+            />
+          </ErrorBoundary>
         ) : (
           <div className="canvas-container">
             <div className="empty-state">
@@ -265,12 +223,11 @@ export default function App() {
 
         <div style={{ display: "flex", flexDirection: "column" }}>
           <PropertyPanel
-            node={selectedNode}
-            onUpdate={handleNodeUpdate}
-            onDelete={handleNodeDelete}
+            canvasRef={canvasRef}
+            selectedNodeId={selectedNodeId}
           />
-          <RunHistory flowId={activeFlow?.id || null} />
-          {activeFlow && (
+          <RunHistory flowId={activeFlowId} />
+          {activeFlowId && (
             <div style={{ padding: 16 }}>
               <button className="danger" onClick={handleDeleteFlow}>
                 Delete Flow

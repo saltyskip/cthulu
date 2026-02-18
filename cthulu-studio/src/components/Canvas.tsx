@@ -1,10 +1,11 @@
-import { useCallback, useRef } from "react";
+import { useCallback, useRef, useEffect, forwardRef, useImperativeHandle } from "react";
 import {
   ReactFlow,
   MiniMap,
   Controls,
   Background,
   BackgroundVariant,
+  Position,
   useNodesState,
   useEdgesState,
   addEdge,
@@ -19,183 +20,234 @@ import TriggerNode from "./NodeTypes/TriggerNode";
 import SourceNode from "./NodeTypes/SourceNode";
 import ExecutorNode from "./NodeTypes/ExecutorNode";
 import SinkNode from "./NodeTypes/SinkNode";
-import type { Flow, FlowNode, FlowEdge, NodeTypeSchema } from "../types/flow";
+import type { Flow, FlowNode, FlowEdge } from "../types/flow";
+import { log } from "../api/logger";
 
-const nodeTypes: NodeTypes = {
+const rfNodeTypes: NodeTypes = {
   trigger: TriggerNode,
   source: SourceNode,
   executor: ExecutorNode,
   sink: SinkNode,
 };
 
-function flowToRFNodes(flow: Flow): RFNode[] {
+const EDGE_STYLE = { stroke: "#30363d", strokeWidth: 2 };
+
+function toRFNodes(flow: Flow): RFNode[] {
   return flow.nodes.map((n) => ({
     id: n.id,
     type: n.node_type,
     position: { x: n.position.x, y: n.position.y },
     data: { label: n.label, kind: n.kind, config: n.config },
+    sourcePosition: Position.Right,
+    targetPosition: Position.Left,
   }));
 }
 
-function flowToRFEdges(flow: Flow): RFEdge[] {
+function toRFEdges(flow: Flow): RFEdge[] {
   return flow.edges.map((e) => ({
     id: e.id,
     source: e.source,
     target: e.target,
+    sourceHandle: "out",
+    targetHandle: "in",
+    type: "smoothstep",
     animated: true,
-    style: { stroke: "#30363d", strokeWidth: 2 },
+    style: EDGE_STYLE,
   }));
 }
 
-interface CanvasProps {
-  flow: Flow;
-  onNodesChange: (nodes: FlowNode[]) => void;
-  onEdgesChange: (edges: FlowEdge[]) => void;
-  onNodeSelect: (nodeId: string | null) => void;
-  onDrop: (nodeType: NodeTypeSchema, position: { x: number; y: number }) => void;
+function toFlowNodes(rfNodes: RFNode[]): FlowNode[] {
+  return rfNodes.map((n) => ({
+    id: n.id,
+    node_type: n.type as FlowNode["node_type"],
+    kind: n.data.kind as string,
+    config: n.data.config as Record<string, unknown>,
+    position: { x: n.position.x, y: n.position.y },
+    label: n.data.label as string,
+  }));
 }
 
-export default function Canvas({
-  flow,
-  onNodesChange: onFlowNodesChange,
-  onEdgesChange: onFlowEdgesChange,
-  onNodeSelect,
-  onDrop,
-}: CanvasProps) {
-  const reactFlowWrapper = useRef<HTMLDivElement>(null);
-  const [nodes, setNodes, onNodesChange] = useNodesState(flowToRFNodes(flow));
-  const [edges, setEdges, onEdgesChange] = useEdgesState(flowToRFEdges(flow));
-  const reactFlowInstance = useRef<any>(null);
+function toFlowEdges(rfEdges: RFEdge[]): FlowEdge[] {
+  return rfEdges.map((e) => ({
+    id: e.id,
+    source: e.source,
+    target: e.target,
+  }));
+}
 
-  // Build a fingerprint of flow structure + data (excludes positions to avoid drag loops)
-  const flowFingerprint = `${flow.id}:${flow.nodes.length}:${flow.edges.length}:` +
-    flow.nodes.map((n) => `${n.id}|${n.label}|${n.kind}|${JSON.stringify(n.config)}`).join(",");
+// Allowed: trigger→source, trigger→executor, source→executor, executor→sink
+const VALID_TARGETS: Record<string, string[]> = {
+  trigger: ["source", "executor"],
+  source: ["executor"],
+  executor: ["sink"],
+};
 
-  const prevFingerprint = useRef(flowFingerprint);
+export interface CanvasHandle {
+  addNodeAtScreen: (
+    nodeType: string,
+    kind: string,
+    label: string,
+    screenX: number,
+    screenY: number
+  ) => FlowNode | null;
+  getNode: (id: string) => FlowNode | null;
+  updateNodeData: (id: string, updates: { label?: string; config?: Record<string, unknown> }) => void;
+  deleteNode: (id: string) => void;
+}
 
-  if (flowFingerprint !== prevFingerprint.current) {
-    prevFingerprint.current = flowFingerprint;
-    setNodes(flowToRFNodes(flow));
-    setEdges(flowToRFEdges(flow));
-  }
+interface CanvasProps {
+  flowId: string | null;
+  initialFlow: Flow | null;
+  onFlowSnapshot: (snapshot: { nodes: FlowNode[]; edges: FlowEdge[] }) => void;
+  onSelectionChange: (nodeId: string | null) => void;
+}
 
-  const onConnect = useCallback(
+const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(
+  { flowId, initialFlow, onFlowSnapshot, onSelectionChange },
+  ref
+) {
+  const [nodes, setNodes, onNodesChange] = useNodesState<RFNode>([]);
+  const [edges, setEdges, onEdgesChange] = useEdgesState<RFEdge>([]);
+  const rfInstance = useRef<any>(null);
+  const prevFlowId = useRef<string | null>(null);
+  const nodesRef = useRef<RFNode[]>(nodes);
+  nodesRef.current = nodes;
+
+  // --- Seed RF state on flow switch ---
+  useEffect(() => {
+    if (flowId === prevFlowId.current) return;
+    prevFlowId.current = flowId;
+    if (initialFlow && initialFlow.id === flowId) {
+      setNodes(toRFNodes(initialFlow));
+      setEdges(toRFEdges(initialFlow));
+    } else {
+      setNodes([]);
+      setEdges([]);
+    }
+  }, [flowId, initialFlow, setNodes, setEdges]);
+
+  // --- Snapshot emission (debounced) ---
+  useEffect(() => {
+    if (!flowId) return;
+    const timer = setTimeout(() => {
+      onFlowSnapshot({ nodes: toFlowNodes(nodes), edges: toFlowEdges(edges) });
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [nodes, edges, flowId, onFlowSnapshot]);
+
+  // --- Imperative handle ---
+  useImperativeHandle(ref, () => ({
+    addNodeAtScreen(nodeType, kind, label, screenX, screenY) {
+      if (!rfInstance.current) return null;
+      const position = rfInstance.current.screenToFlowPosition({ x: screenX, y: screenY });
+
+      const newNode: RFNode = {
+        id: crypto.randomUUID(),
+        type: nodeType,
+        position,
+        data: { label, kind, config: {} },
+        sourcePosition: Position.Right,
+        targetPosition: Position.Left,
+      };
+
+      setNodes((nds) => [...nds, newNode]);
+      onSelectionChange(newNode.id);
+
+      return {
+        id: newNode.id,
+        node_type: nodeType as FlowNode["node_type"],
+        kind,
+        config: {},
+        position: { x: position.x, y: position.y },
+        label,
+      };
+    },
+
+    getNode(id) {
+      const rfNode = nodes.find((n) => n.id === id);
+      if (!rfNode) return null;
+      return {
+        id: rfNode.id,
+        node_type: rfNode.type as FlowNode["node_type"],
+        kind: rfNode.data.kind as string,
+        config: rfNode.data.config as Record<string, unknown>,
+        position: { x: rfNode.position.x, y: rfNode.position.y },
+        label: rfNode.data.label as string,
+      };
+    },
+
+    updateNodeData(id, updates) {
+      setNodes((nds) =>
+        nds.map((n) => {
+          if (n.id !== id) return n;
+          return {
+            ...n,
+            data: {
+              ...n.data,
+              ...(updates.label !== undefined ? { label: updates.label } : {}),
+              ...(updates.config !== undefined ? { config: updates.config } : {}),
+            },
+          };
+        })
+      );
+    },
+
+    deleteNode(id) {
+      setNodes((nds) => nds.filter((n) => n.id !== id));
+      setEdges((eds) => eds.filter((e) => e.source !== id && e.target !== id));
+      onSelectionChange(null);
+    },
+  }), [nodes, setNodes, setEdges, onSelectionChange]);
+
+  // --- RF event handlers ---
+  const handleConnect = useCallback(
     (params: Connection) => {
-      setEdges((eds) => {
-        const newEdges = addEdge(
-          { ...params, animated: true, style: { stroke: "#30363d", strokeWidth: 2 } },
+      if (!params.source || !params.target) return;
+
+      const currentNodes = nodesRef.current;
+      const srcNode = currentNodes.find((n) => n.id === params.source);
+      const tgtNode = currentNodes.find((n) => n.id === params.target);
+      if (!srcNode?.type || !tgtNode?.type) return;
+
+      const allowed = VALID_TARGETS[srcNode.type];
+      if (!allowed?.includes(tgtNode.type)) {
+        log("warn", "[Canvas] Invalid connection", `${srcNode.type} → ${tgtNode.type}`);
+        return;
+      }
+
+      setEdges((eds) =>
+        addEdge(
+          { ...params, type: "smoothstep", animated: true, style: EDGE_STYLE },
           eds
-        );
-        syncEdges(newEdges);
-        return newEdges;
-      });
+        )
+      );
     },
     [setEdges]
   );
 
-  const syncNodes = useCallback(
-    (rfNodes: RFNode[]) => {
-      const flowNodes: FlowNode[] = rfNodes.map((n) => ({
-        id: n.id,
-        node_type: n.type as FlowNode["node_type"],
-        kind: n.data.kind as string,
-        config: n.data.config as Record<string, unknown>,
-        position: { x: n.position.x, y: n.position.y },
-        label: n.data.label as string,
-      }));
-      onFlowNodesChange(flowNodes);
+  const handleNodesDelete = useCallback(
+    (deleted: RFNode[]) => {
+      if (deleted.length > 0) {
+        onSelectionChange(null);
+      }
     },
-    [onFlowNodesChange]
-  );
-
-  const syncEdges = useCallback(
-    (rfEdges: RFEdge[]) => {
-      const flowEdges: FlowEdge[] = rfEdges.map((e) => ({
-        id: e.id,
-        source: e.source,
-        target: e.target,
-      }));
-      onFlowEdgesChange(flowEdges);
-    },
-    [onFlowEdgesChange]
-  );
-
-  const handleNodesChange = useCallback(
-    (changes: any) => {
-      onNodesChange(changes);
-      // Debounced sync would be ideal, but for now sync on change
-      setNodes((nds) => {
-        // Schedule a sync after state update
-        setTimeout(() => syncNodes(nds), 0);
-        return nds;
-      });
-    },
-    [onNodesChange, setNodes, syncNodes]
-  );
-
-  const handleEdgesChange = useCallback(
-    (changes: any) => {
-      onEdgesChange(changes);
-      setEdges((eds) => {
-        setTimeout(() => syncEdges(eds), 0);
-        return eds;
-      });
-    },
-    [onEdgesChange, setEdges, syncEdges]
-  );
-
-  const handleNodeClick = useCallback(
-    (_event: React.MouseEvent, node: RFNode) => {
-      onNodeSelect(node.id);
-    },
-    [onNodeSelect]
-  );
-
-  const handlePaneClick = useCallback(() => {
-    onNodeSelect(null);
-  }, [onNodeSelect]);
-
-  const handleDragOver = useCallback((event: React.DragEvent) => {
-    event.preventDefault();
-    event.dataTransfer.dropEffect = "move";
-  }, []);
-
-  const handleDrop = useCallback(
-    (event: React.DragEvent) => {
-      event.preventDefault();
-      const data = event.dataTransfer.getData("application/cthulu-node");
-      if (!data) return;
-
-      const nodeType: NodeTypeSchema = JSON.parse(data);
-      const bounds = reactFlowWrapper.current?.getBoundingClientRect();
-      if (!bounds || !reactFlowInstance.current) return;
-
-      const position = reactFlowInstance.current.screenToFlowPosition({
-        x: event.clientX - bounds.left,
-        y: event.clientY - bounds.top,
-      });
-
-      onDrop(nodeType, position);
-    },
-    [onDrop]
+    [onSelectionChange]
   );
 
   return (
-    <div className="canvas-container" ref={reactFlowWrapper}>
+    <div className="canvas-container">
       <ReactFlow
         nodes={nodes}
         edges={edges}
-        onNodesChange={handleNodesChange}
-        onEdgesChange={handleEdgesChange}
-        onConnect={onConnect}
-        onNodeClick={handleNodeClick}
-        onPaneClick={handlePaneClick}
-        onDragOver={handleDragOver}
-        onDrop={handleDrop}
-        onInit={(instance) => {
-          reactFlowInstance.current = instance;
-        }}
-        nodeTypes={nodeTypes}
+        onNodesChange={onNodesChange}
+        onEdgesChange={onEdgesChange}
+        onConnect={handleConnect}
+        onNodesDelete={handleNodesDelete}
+        onNodeClick={(_e, node) => onSelectionChange(node.id)}
+        onPaneClick={() => onSelectionChange(null)}
+        onInit={(instance) => { rfInstance.current = instance; }}
+        nodeTypes={rfNodeTypes}
+        defaultEdgeOptions={{ type: "smoothstep", animated: true, style: EDGE_STYLE }}
         fitView
         proOptions={{ hideAttribution: true }}
       >
@@ -204,16 +256,11 @@ export default function Canvas({
         <MiniMap
           nodeColor={(node) => {
             switch (node.type) {
-              case "trigger":
-                return "#d29922";
-              case "source":
-                return "#58a6ff";
-              case "executor":
-                return "#bc8cff";
-              case "sink":
-                return "#3fb950";
-              default:
-                return "#30363d";
+              case "trigger": return "#d29922";
+              case "source": return "#58a6ff";
+              case "executor": return "#bc8cff";
+              case "sink": return "#3fb950";
+              default: return "#30363d";
             }
           }}
           maskColor="rgba(0,0,0,0.5)"
@@ -221,4 +268,6 @@ export default function Canvas({
       </ReactFlow>
     </div>
   );
-}
+});
+
+export default Canvas;

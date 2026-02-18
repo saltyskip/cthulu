@@ -1,10 +1,8 @@
 import { useState, useEffect, useRef } from "react";
 import * as api from "../api/client";
 import { log } from "../api/logger";
-import type { Flow } from "../types/flow";
-
 interface TopBarProps {
-  flow: Flow | null;
+  flow: { name: string; enabled: boolean } | null;
   onTrigger: () => void;
   onToggleEnabled: () => void;
   onSettingsClick: () => void;

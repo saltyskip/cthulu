@@ -14,7 +14,7 @@ export default function TriggerNode({ data }: { data: TriggerNodeData }) {
       </div>
       <div className="node-label">{data.label}</div>
       <div className="node-kind">{data.kind}</div>
-      <Handle type="source" position={Position.Right} />
+      <Handle id="out" type="source" position={Position.Right} />
     </div>
   );
 }

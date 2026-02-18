@@ -1,24 +1,29 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, type RefObject } from "react";
 import type { FlowNode } from "../types/flow";
+import type { CanvasHandle } from "./Canvas";
 
 interface PropertyPanelProps {
-  node: FlowNode | null;
-  onUpdate: (nodeId: string, updates: Partial<FlowNode>) => void;
-  onDelete: (nodeId: string) => void;
+  canvasRef: RefObject<CanvasHandle | null>;
+  selectedNodeId: string | null;
 }
 
 export default function PropertyPanel({
-  node,
-  onUpdate,
-  onDelete,
+  canvasRef,
+  selectedNodeId,
 }: PropertyPanelProps) {
+  const [node, setNode] = useState<FlowNode | null>(null);
   const [config, setConfig] = useState<Record<string, unknown>>({});
 
+  // Read node from Canvas when selection changes
   useEffect(() => {
-    if (node) {
-      setConfig({ ...node.config });
+    if (!selectedNodeId) {
+      setNode(null);
+      return;
     }
-  }, [node?.id]);
+    const n = canvasRef.current?.getNode(selectedNodeId) ?? null;
+    setNode(n);
+    if (n) setConfig({ ...n.config });
+  }, [selectedNodeId, canvasRef]);
 
   if (!node) {
     return (
@@ -31,13 +36,18 @@ export default function PropertyPanel({
   }
 
   const handleLabelChange = (label: string) => {
-    onUpdate(node.id, { label });
+    canvasRef.current?.updateNodeData(node.id, { label });
+    setNode((prev) => prev ? { ...prev, label } : prev);
   };
 
   const handleConfigChange = (key: string, value: unknown) => {
     const newConfig = { ...config, [key]: value };
     setConfig(newConfig);
-    onUpdate(node.id, { config: newConfig });
+    canvasRef.current?.updateNodeData(node.id, { config: newConfig });
+  };
+
+  const handleDelete = () => {
+    canvasRef.current?.deleteNode(node.id);
   };
 
   return (
@@ -60,7 +70,7 @@ export default function PropertyPanel({
       {renderConfigFields(node, config, handleConfigChange)}
 
       <div style={{ marginTop: 24 }}>
-        <button className="danger" onClick={() => onDelete(node.id)}>
+        <button className="danger" onClick={handleDelete}>
           Delete Node
         </button>
       </div>
