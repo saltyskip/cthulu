@@ -6,5 +6,5 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY target/release/cthulu /usr/local/bin/cthulu
 
-EXPOSE 8087
+EXPOSE 8081
 CMD ["cthulu"]
