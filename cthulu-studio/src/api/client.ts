@@ -10,13 +10,23 @@ import type {
 
 const DEFAULT_BASE_URL = "http://localhost:8081";
 
+function ensureProtocol(url: string): string {
+  const trimmed = url.trim().replace(/\/+$/, "");
+  if (!trimmed.startsWith("http://") && !trimmed.startsWith("https://")) {
+    return `http://${trimmed}`;
+  }
+  return trimmed;
+}
+
 function getBaseUrl(): string {
-  return localStorage.getItem("cthulu_server_url") || DEFAULT_BASE_URL;
+  const stored = localStorage.getItem("cthulu_server_url");
+  return stored ? ensureProtocol(stored) : DEFAULT_BASE_URL;
 }
 
 export function setServerUrl(url: string) {
-  localStorage.setItem("cthulu_server_url", url);
-  log("info", `Server URL changed to ${url}`);
+  const normalized = ensureProtocol(url);
+  localStorage.setItem("cthulu_server_url", normalized);
+  log("info", `Server URL changed to ${normalized}`);
 }
 
 export function getServerUrl(): string {
@@ -125,7 +135,7 @@ export async function getNodeTypes(): Promise<NodeTypeSchema[]> {
 }
 
 export async function checkConnection(): Promise<boolean> {
-  const url = `${getBaseUrl()}/health/`;
+  const url = `${getBaseUrl()}/health`;
   const start = performance.now();
 
   try {

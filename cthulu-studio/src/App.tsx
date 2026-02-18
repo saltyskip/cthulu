@@ -29,8 +29,11 @@ export default function App() {
     });
   }, []);
 
-  // Log startup
+  // Load on mount
+  const initialized = useRef(false);
   useEffect(() => {
+    if (initialized.current) return;
+    initialized.current = true;
     log("info", "Cthulu Studio started");
     log("info", `Server URL: ${api.getServerUrl()}`);
     loadFlows();
