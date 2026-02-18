@@ -1,3 +1,4 @@
+import { log } from "./logger";
 import type {
   Flow,
   FlowNode,
@@ -9,12 +10,23 @@ import type {
 
 const DEFAULT_BASE_URL = "http://localhost:8081";
 
+function ensureProtocol(url: string): string {
+  const trimmed = url.trim().replace(/\/+$/, "");
+  if (!trimmed.startsWith("http://") && !trimmed.startsWith("https://")) {
+    return `http://${trimmed}`;
+  }
+  return trimmed;
+}
+
 function getBaseUrl(): string {
-  return localStorage.getItem("cthulu_server_url") || DEFAULT_BASE_URL;
+  const stored = localStorage.getItem("cthulu_server_url");
+  return stored ? ensureProtocol(stored) : DEFAULT_BASE_URL;
 }
 
 export function setServerUrl(url: string) {
-  localStorage.setItem("cthulu_server_url", url);
+  const normalized = ensureProtocol(url);
+  localStorage.setItem("cthulu_server_url", normalized);
+  log("info", `Server URL changed to ${normalized}`);
 }
 
 export function getServerUrl(): string {
@@ -26,18 +38,38 @@ async function apiFetch<T>(
   options: RequestInit = {}
 ): Promise<T> {
   const url = `${getBaseUrl()}/api${path}`;
-  const res = await fetch(url, {
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...options.headers,
-    },
-  });
-  if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`API error ${res.status}: ${body}`);
+  const method = options.method || "GET";
+
+  log("http", `${method} ${path}`);
+  const start = performance.now();
+
+  try {
+    const res = await fetch(url, {
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        ...options.headers,
+      },
+    });
+
+    const elapsed = Math.round(performance.now() - start);
+
+    if (!res.ok) {
+      const body = await res.text();
+      log("error", `${method} ${path} -> ${res.status} (${elapsed}ms)`, body);
+      throw new Error(`API error ${res.status}: ${body}`);
+    }
+
+    const data = await res.json();
+    log("http", `${method} ${path} -> ${res.status} (${elapsed}ms)`);
+    return data;
+  } catch (e) {
+    if (e instanceof TypeError) {
+      // Network error (server unreachable)
+      log("error", `${method} ${path} -> network error`, (e as Error).message);
+    }
+    throw e;
   }
-  return res.json();
 }
 
 export async function listFlows(): Promise<FlowSummary[]> {
@@ -57,7 +89,12 @@ export async function createFlow(
 ): Promise<{ id: string }> {
   return apiFetch<{ id: string }>("/flows", {
     method: "POST",
-    body: JSON.stringify({ name, description: description || "", nodes: nodes || [], edges: edges || [] }),
+    body: JSON.stringify({
+      name,
+      description: description || "",
+      nodes: nodes || [],
+      edges: edges || [],
+    }),
   });
 }
 
@@ -98,10 +135,25 @@ export async function getNodeTypes(): Promise<NodeTypeSchema[]> {
 }
 
 export async function checkConnection(): Promise<boolean> {
+  const url = `${getBaseUrl()}/health`;
+  const start = performance.now();
+
   try {
-    const res = await fetch(`${getBaseUrl()}/health/`);
-    return res.ok;
-  } catch {
+    const res = await fetch(url);
+    const elapsed = Math.round(performance.now() - start);
+    if (res.ok) {
+      log("info", `Health check OK (${elapsed}ms)`);
+      return true;
+    }
+    log("warn", `Health check failed: ${res.status} (${elapsed}ms)`);
+    return false;
+  } catch (e) {
+    const elapsed = Math.round(performance.now() - start);
+    log(
+      "warn",
+      `Health check failed (${elapsed}ms)`,
+      `Cannot reach ${url} — ${(e as Error).message}`
+    );
     return false;
   }
 }

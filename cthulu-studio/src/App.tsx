@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import * as api from "./api/client";
+import { log, getEntries, subscribe } from "./api/logger";
 import type { Flow, FlowNode, FlowEdge, FlowSummary, NodeTypeSchema } from "./types/flow";
 import TopBar from "./components/TopBar";
 import FlowList from "./components/FlowList";
@@ -7,6 +8,7 @@ import Sidebar from "./components/Sidebar";
 import Canvas from "./components/Canvas";
 import PropertyPanel from "./components/PropertyPanel";
 import RunHistory from "./components/RunHistory";
+import Console from "./components/Console";
 
 export default function App() {
   const [flows, setFlows] = useState<FlowSummary[]>([]);
@@ -14,11 +16,26 @@ export default function App() {
   const [nodeTypes, setNodeTypes] = useState<NodeTypeSchema[]>([]);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
+  const [showConsole, setShowConsole] = useState(false);
+  const [errorCount, setErrorCount] = useState(0);
   const [serverUrl, setServerUrlState] = useState(api.getServerUrl());
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Load flows and node types on mount
+  // Track error count for badge
   useEffect(() => {
+    return subscribe(() => {
+      const errors = getEntries().filter((e) => e.level === "error").length;
+      setErrorCount(errors);
+    });
+  }, []);
+
+  // Load on mount
+  const initialized = useRef(false);
+  useEffect(() => {
+    if (initialized.current) return;
+    initialized.current = true;
+    log("info", "Cthulu Studio started");
+    log("info", `Server URL: ${api.getServerUrl()}`);
     loadFlows();
     loadNodeTypes();
   }, []);
@@ -27,8 +44,8 @@ export default function App() {
     try {
       const data = await api.listFlows();
       setFlows(data);
-    } catch (e) {
-      console.error("Failed to load flows:", e);
+    } catch {
+      // Logged by API client
     }
   };
 
@@ -36,8 +53,8 @@ export default function App() {
     try {
       const data = await api.getNodeTypes();
       setNodeTypes(data);
-    } catch (e) {
-      console.error("Failed to load node types:", e);
+    } catch {
+      // Logged by API client
     }
   };
 
@@ -46,8 +63,8 @@ export default function App() {
       const flow = await api.getFlow(id);
       setActiveFlow(flow);
       setSelectedNodeId(null);
-    } catch (e) {
-      console.error("Failed to load flow:", e);
+    } catch {
+      // Logged by API client
     }
   };
 
@@ -56,8 +73,8 @@ export default function App() {
       const { id } = await api.createFlow("New Flow");
       await loadFlows();
       await selectFlow(id);
-    } catch (e) {
-      console.error("Failed to create flow:", e);
+    } catch {
+      // Logged by API client
     }
   };
 
@@ -74,8 +91,8 @@ export default function App() {
             edges: flow.edges,
           });
           loadFlows();
-        } catch (e) {
-          console.error("Failed to save flow:", e);
+        } catch {
+          // Logged by API client
         }
       }, 500);
     },
@@ -168,9 +185,10 @@ export default function App() {
   const handleTrigger = async () => {
     if (!activeFlow) return;
     try {
+      log("info", `Triggering flow: ${activeFlow.name}`);
       await api.triggerFlow(activeFlow.id);
-    } catch (e) {
-      console.error("Failed to trigger flow:", e);
+    } catch {
+      // Logged by API client
     }
   };
 
@@ -181,8 +199,8 @@ export default function App() {
     try {
       await api.updateFlow(activeFlow.id, { enabled: updated.enabled });
       loadFlows();
-    } catch (e) {
-      console.error("Failed to toggle flow:", e);
+    } catch {
+      // Logged by API client
     }
   };
 
@@ -193,8 +211,8 @@ export default function App() {
       setActiveFlow(null);
       setSelectedNodeId(null);
       loadFlows();
-    } catch (e) {
-      console.error("Failed to delete flow:", e);
+    } catch {
+      // Logged by API client
     }
   };
 
@@ -208,12 +226,15 @@ export default function App() {
   const selectedNode = activeFlow?.nodes.find((n) => n.id === selectedNodeId) || null;
 
   return (
-    <>
+    <div className={showConsole ? "app-with-console" : ""}>
       <TopBar
         flow={activeFlow}
         onTrigger={handleTrigger}
         onToggleEnabled={handleToggleEnabled}
         onSettingsClick={() => setShowSettings(true)}
+        consoleOpen={showConsole}
+        onToggleConsole={() => setShowConsole((v) => !v)}
+        errorCount={errorCount}
       />
       <div className="app-layout">
         <div style={{ display: "flex", flexDirection: "column" }}>
@@ -259,6 +280,8 @@ export default function App() {
         </div>
       </div>
 
+      {showConsole && <Console onClose={() => setShowConsole(false)} />}
+
       {showSettings && (
         <div className="modal-overlay" onClick={() => setShowSettings(false)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
@@ -282,6 +305,6 @@ export default function App() {
           </div>
         </div>
       )}
-    </>
+    </div>
   );
 }
