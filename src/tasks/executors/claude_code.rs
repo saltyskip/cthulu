@@ -13,11 +13,12 @@ const PROCESS_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 
 pub struct ClaudeCodeExecutor {
     permissions: Vec<String>,
+    append_system_prompt: Option<String>,
 }
 
 impl ClaudeCodeExecutor {
-    pub fn new(permissions: Vec<String>) -> Self {
-        Self { permissions }
+    pub fn new(permissions: Vec<String>, append_system_prompt: Option<String>) -> Self {
+        Self { permissions, append_system_prompt }
     }
 
     pub fn build_args(&self) -> Vec<String> {
@@ -27,6 +28,11 @@ impl ClaudeCodeExecutor {
             "--output-format".to_string(),
             "stream-json".to_string(),
         ];
+
+        if let Some(prompt) = &self.append_system_prompt {
+            args.push("--append-system-prompt".to_string());
+            args.push(prompt.clone());
+        }
 
         if self.permissions.is_empty() {
             args.push("--dangerously-skip-permissions".to_string());
@@ -73,7 +79,7 @@ impl Executor for ClaudeCodeExecutor {
             let mut lines = reader.lines();
             while let Ok(Some(line)) = lines.next_line().await {
                 if !line.is_empty() {
-                    tracing::info!(source = "claude-stderr", "{}", line);
+                    tracing::debug!(source = "claude-stderr", "{}", line);
                 }
             }
         });
@@ -98,7 +104,7 @@ impl Executor for ClaudeCodeExecutor {
                         .unwrap_or("unknown");
                     match event_type {
                         "system" => {
-                            tracing::info!(source = "claude", "Session initialized");
+                            tracing::debug!(source = "claude", "Session initialized");
                         }
                         "assistant" => {
                             if let Some(content) = event
@@ -117,37 +123,24 @@ impl Executor for ClaudeCodeExecutor {
                                                 .get("name")
                                                 .and_then(|v| v.as_str())
                                                 .unwrap_or("?");
-                                            let input = block
-                                                .get("input")
-                                                .map(|v| v.to_string())
-                                                .unwrap_or_default();
-                                            let input_short = if input.len() > 300 {
-                                                format!("{}...", &input[..300])
-                                            } else {
-                                                input
-                                            };
-                                            tracing::info!(
+                                            tracing::debug!(
                                                 source = "claude",
                                                 tool,
-                                                "Tool: {} {}",
+                                                "Tool: {}",
                                                 tool,
-                                                input_short
                                             );
                                         }
                                         "text" => {
-                                            let text = block
+                                            let text_len = block
                                                 .get("text")
                                                 .and_then(|v| v.as_str())
-                                                .unwrap_or("");
-                                            let text_short = if text.len() > 200 {
-                                                format!("{}...", &text[..200])
-                                            } else {
-                                                text.to_string()
-                                            };
-                                            tracing::info!(
+                                                .map(|t| t.len())
+                                                .unwrap_or(0);
+                                            tracing::debug!(
                                                 source = "claude",
-                                                "Text: {}",
-                                                text_short
+                                                len = text_len,
+                                                "Text output ({} chars)",
+                                                text_len,
                                             );
                                         }
                                         _ => {}
@@ -168,13 +161,11 @@ impl Executor for ClaudeCodeExecutor {
                                 .get("result")
                                 .and_then(|v| v.as_str())
                                 .map(|s| s.to_string());
-                            tracing::info!(
+                            tracing::debug!(
                                 source = "claude",
-                                cost_usd = total_cost,
+                                cost = format_args!("${:.4}", total_cost),
                                 turns = total_turns,
-                                "Claude finished - {} turns, ${:.4}",
-                                total_turns,
-                                total_cost
+                                "Claude finished",
                             );
                         }
                         _ => {}
@@ -225,7 +216,7 @@ mod tests {
             "Bash".to_string(),
             "Read".to_string(),
             "Grep".to_string(),
-        ]);
+        ], None);
         let args = executor.build_args();
         assert!(args.contains(&"--print".to_string()));
         assert!(args.contains(&"--verbose".to_string()));
@@ -236,7 +227,7 @@ mod tests {
 
     #[test]
     fn test_build_args_no_permissions_uses_dangerous() {
-        let executor = ClaudeCodeExecutor::new(vec![]);
+        let executor = ClaudeCodeExecutor::new(vec![], None);
         let args = executor.build_args();
         assert!(args.contains(&"--dangerously-skip-permissions".to_string()));
         assert!(!args.contains(&"--allowedTools".to_string()));
@@ -244,7 +235,7 @@ mod tests {
 
     #[test]
     fn test_build_args_single_permission() {
-        let executor = ClaudeCodeExecutor::new(vec!["Read".to_string()]);
+        let executor = ClaudeCodeExecutor::new(vec!["Read".to_string()], None);
         let args = executor.build_args();
         assert!(args.contains(&"--allowedTools".to_string()));
         assert!(args.contains(&"Read".to_string()));
@@ -252,14 +243,14 @@ mod tests {
 
     #[test]
     fn test_build_args_always_reads_stdin() {
-        let executor = ClaudeCodeExecutor::new(vec![]);
+        let executor = ClaudeCodeExecutor::new(vec![], None);
         let args = executor.build_args();
         assert_eq!(args.last().unwrap(), "-");
     }
 
     #[test]
     fn test_build_args_output_format() {
-        let executor = ClaudeCodeExecutor::new(vec![]);
+        let executor = ClaudeCodeExecutor::new(vec![], None);
         let args = executor.build_args();
         let fmt_idx = args.iter().position(|a| a == "--output-format").unwrap();
         assert_eq!(args[fmt_idx + 1], "stream-json");

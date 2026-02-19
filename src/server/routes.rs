@@ -283,7 +283,7 @@ async fn trigger_review(
         let rendered = crate::tasks::context::render_prompt(&prompt_template, &context);
 
         let executor =
-            crate::tasks::executors::claude_code::ClaudeCodeExecutor::new(permissions);
+            crate::tasks::executors::claude_code::ClaudeCodeExecutor::new(permissions, None);
 
         {
             let mut active = task_state.active_reviews.lock().await;
@@ -369,6 +369,7 @@ async fn trigger_task(
 
     let executor = crate::tasks::executors::claude_code::ClaudeCodeExecutor::new(
         task.permissions.clone(),
+        None,
     );
 
     let github_token = state.config.github_token();

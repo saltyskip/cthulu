@@ -212,7 +212,7 @@ fn build_source_node(
     source: &SourceConfig,
 ) -> (String, serde_json::Value, String) {
     match source {
-        SourceConfig::Rss { url, limit } => {
+        SourceConfig::Rss { url, limit, keywords } => {
             let domain = url
                 .split("//")
                 .nth(1)
@@ -220,8 +220,20 @@ fn build_source_node(
                 .unwrap_or(url);
             (
                 "rss".to_string(),
-                json!({ "url": url, "limit": limit }),
+                json!({ "url": url, "limit": limit, "keywords": keywords }),
                 format!("RSS: {domain}"),
+            )
+        }
+        SourceConfig::WebScrape { url, keywords } => {
+            let domain = url
+                .split("//")
+                .nth(1)
+                .and_then(|s| s.split('/').next())
+                .unwrap_or(url);
+            (
+                "web-scrape".to_string(),
+                json!({ "url": url, "keywords": keywords }),
+                format!("Scrape: {domain}"),
             )
         }
         SourceConfig::GithubMergedPrs { repos, since_days } => (
@@ -229,6 +241,32 @@ fn build_source_node(
             json!({ "repos": repos, "since_days": since_days }),
             format!("Merged PRs: {} repos", repos.len()),
         ),
+        SourceConfig::WebScraper {
+            url, base_url, items_selector, title_selector,
+            url_selector, summary_selector, date_selector,
+            date_format, limit,
+        } => {
+            let domain = url
+                .split("//")
+                .nth(1)
+                .and_then(|s| s.split('/').next())
+                .unwrap_or(url);
+            (
+                "web-scraper".to_string(),
+                json!({
+                    "url": url,
+                    "base_url": base_url,
+                    "items_selector": items_selector,
+                    "title_selector": title_selector,
+                    "url_selector": url_selector,
+                    "summary_selector": summary_selector,
+                    "date_selector": date_selector,
+                    "date_format": date_format,
+                    "limit": limit,
+                }),
+                format!("Scrape: {domain}"),
+            )
+        }
     }
 }
 
@@ -242,6 +280,7 @@ fn build_executor_node(task: &TaskConfig) -> (String, serde_json::Value, String)
         json!({
             "prompt": task.prompt,
             "permissions": task.permissions,
+            "append_system_prompt": task.append_system_prompt,
         }),
         format!("Claude: {}", task.prompt),
     )
@@ -331,8 +370,10 @@ mod tests {
                 SourceConfig::Rss {
                     url: "https://example.com/feed".to_string(),
                     limit: 10,
+                    keywords: vec![],
                 },
             ],
+            append_system_prompt: None,
             sinks: vec![SinkConfig::Notion {
                 token_env: "TOKEN".to_string(),
                 database_id: "abc123def456".to_string(),
@@ -396,6 +437,7 @@ mod tests {
             },
             sources: vec![],
             sinks: vec![],
+            append_system_prompt: None,
         };
 
         let flow = task_to_flow(&task);

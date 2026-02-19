@@ -1,0 +1,104 @@
+{
+  "id": "crypto-news-pipeline",
+  "name": "Crypto News Pipeline",
+  "description": "Monitors crypto news from RSS and government sites, filters by keywords, drafts posts, delivers to Notion for review.",
+  "enabled": true,
+  "nodes": [
+    {
+      "id": "trigger-cron",
+      "node_type": "trigger",
+      "kind": "cron",
+      "config": {
+        "schedule": "0 */4 * * *",
+        "working_dir": "."
+      },
+      "position": { "x": 0, "y": 0 },
+      "label": "Every 4h"
+    },
+    {
+      "id": "source-google-news-btc",
+      "node_type": "source",
+      "kind": "rss",
+      "config": {
+        "url": "https://news.google.com/rss/search?q=bitcoin+OR+btc+OR+cryptocurrency&hl=en-US&gl=US&ceid=US:en",
+        "limit": 15
+      },
+      "position": { "x": 280, "y": -120 },
+      "label": "RSS: Google News (BTC)"
+    },
+    {
+      "id": "source-google-news-reg",
+      "node_type": "source",
+      "kind": "rss",
+      "config": {
+        "url": "https://news.google.com/rss/search?q=SEC+crypto+OR+bitcoin+ETF+OR+CFTC+crypto&hl=en-US&gl=US&ceid=US:en",
+        "limit": 10
+      },
+      "position": { "x": 280, "y": 0 },
+      "label": "RSS: Google News (Regulation)"
+    },
+    {
+      "id": "source-sec-press",
+      "node_type": "source",
+      "kind": "web-scraper",
+      "config": {
+        "url": "https://www.sec.gov/news/pressreleases",
+        "base_url": "https://www.sec.gov",
+        "items_selector": "tr.pr-list-page-row",
+        "title_selector": "td.views-field-title a",
+        "url_selector": "td.views-field-title a",
+        "summary_selector": "td.views-field-field-description",
+        "date_selector": "td.views-field-field-publish-date time",
+        "limit": 10
+      },
+      "position": { "x": 280, "y": 120 },
+      "label": "Scrape: SEC Press Releases"
+    },
+    {
+      "id": "filter-keywords",
+      "node_type": "filter",
+      "kind": "keyword",
+      "config": {
+        "keywords": ["bitcoin", "btc", "crypto", "cryptocurrency", "digital asset", "stablecoin", "cbdc", "sec", "etf", "defi", "ethereum", "eth", "blockchain"],
+        "require_all": false,
+        "field": "title_or_summary"
+      },
+      "position": { "x": 560, "y": 0 },
+      "label": "Keyword Filter"
+    },
+    {
+      "id": "executor-claude",
+      "node_type": "executor",
+      "kind": "claude-api",
+      "config": {
+        "prompt": "prompts/crypto_news_brief.md",
+        "permissions": []
+      },
+      "position": { "x": 840, "y": 0 },
+      "label": "Claude: crypto_news_brief.md"
+    },
+    {
+      "id": "sink-notion",
+      "node_type": "sink",
+      "kind": "notion",
+      "config": {
+        "token_env": "NOTION_TOKEN",
+        "database_id": "YOUR_DATABASE_ID_HERE"
+      },
+      "position": { "x": 1120, "y": 0 },
+      "label": "Notion: Review Queue"
+    }
+  ],
+  "edges": [
+    { "id": "e1", "source": "trigger-cron", "target": "source-google-news-btc" },
+    { "id": "e2", "source": "trigger-cron", "target": "source-google-news-reg" },
+    { "id": "e3", "source": "trigger-cron", "target": "source-sec-press" },
+    { "id": "e4", "source": "source-google-news-btc", "target": "filter-keywords" },
+    { "id": "e5", "source": "source-google-news-reg", "target": "filter-keywords" },
+    { "id": "e6", "source": "source-sec-press", "target": "filter-keywords" },
+    { "id": "e7", "source": "filter-keywords", "target": "executor-claude" },
+    { "id": "e8", "source": "executor-claude", "target": "sink-notion" }
+  ],
+  "created_at": "2025-01-01T00:00:00Z",
+  "updated_at": "2025-01-01T00:00:00Z"
+}

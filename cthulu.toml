@@ -131,6 +131,48 @@ bot_token_env = "SLACK_BOT_TOKEN"
 channel = "#the-ark"
 
 [[tasks]]
+name = "crypto-news-asia"
+executor = "claude-code"
+prompt = "prompts/crypto_breaking_news.md"
+permissions = []
+append_system_prompt = "You are a legitimate news research assistant. Your task is to analyze publicly available news articles and regulatory announcements, then produce a factual summary report. This is standard journalism research — summarize, cite sources, and draft neutral social media posts."
+
+[tasks.trigger.cron]
+schedule = "0 0 * * *"
+
+[[tasks.sources]]
+type = "rss"
+url = "https://cointelegraph.com/rss"
+limit = 15
+keywords = ["japan", "asia", "hong kong", "singapore", "korea", "china", "regulation", "fsa", "hkma", "mas"]
+
+[[tasks.sources]]
+type = "rss"
+url = "https://www.coindesk.com/arc/outboundfeeds/rss/"
+limit = 15
+keywords = ["japan", "asia", "hong kong", "singapore", "korea", "china", "regulation", "fsa", "hkma", "mas"]
+
+[[tasks.sources]]
+type = "web-scrape"
+url = "https://www.fsa.go.jp/en/news/index.html"
+keywords = ["crypto", "virtual asset", "digital asset", "stablecoin", "exchange"]
+
+[[tasks.sources]]
+type = "web-scrape"
+url = "https://www.hkma.gov.hk/eng/news-and-media/press-releases/"
+keywords = ["crypto", "virtual asset", "digital asset", "stablecoin", "cbdc"]
+
+[[tasks.sources]]
+type = "web-scrape"
+url = "https://www.mas.gov.sg/news"
+keywords = ["crypto", "digital asset", "token", "stablecoin", "blockchain"]
+
+[[tasks.sinks]]
+type = "notion"
+token_env = "NOTION_TOKEN"
+database_id = "30aac5ee2bf980728eaefe59a03ea940"
+
+[[tasks]]
 name = "product-updates"
 executor = "claude-code"
 prompt = "prompts/product_updates.md"

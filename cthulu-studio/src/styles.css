@@ -311,6 +311,11 @@ button:disabled {
   color: var(--executor-color);
 }
 
+.custom-node .node-type-badge.filter {
+  background: rgba(255, 166, 87, 0.2);
+  color: #ffa657;
+}
+
 .custom-node .node-type-badge.sink {
   background: rgba(63, 185, 80, 0.2);
   color: var(--sink-color);

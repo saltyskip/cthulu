@@ -33,7 +33,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     tracing_subscriber::registry()
         .with(filter)
-        .with(tracing_subscriber::fmt::layer())
+        .with(tracing_tree::HierarchicalLayer::new(2).with_targets(true).with_bracketed_fields(false))
         .with(sentry::integrations::tracing::layer().event_filter(
             |metadata| match *metadata.level() {
                 tracing::Level::ERROR => sentry::integrations::tracing::EventFilter::Event,
@@ -84,12 +84,26 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .await
         .context("failed to load flows")?;
 
-    // Import TOML tasks as flows on first boot
-    if flow_store.is_empty().await && !config.tasks.is_empty() {
-        tracing::info!("No flows found, importing {} TOML tasks", config.tasks.len());
-        match flows::import::import_toml_tasks(&config.tasks, &flow_store).await {
-            Ok(count) => tracing::info!(count, "TOML tasks imported as flows"),
-            Err(e) => tracing::error!(error = %e, "Failed to import TOML tasks"),
+    // Import TOML tasks that don't already exist as flows
+    if !config.tasks.is_empty() {
+        let existing: std::collections::HashSet<String> = flow_store
+            .list()
+            .await
+            .into_iter()
+            .map(|f| f.name)
+            .collect();
+        let new_tasks: Vec<_> = config
+            .tasks
+            .iter()
+            .filter(|t| !existing.contains(&t.name))
+            .cloned()
+            .collect();
+        if !new_tasks.is_empty() {
+            tracing::info!("Importing {} new TOML tasks as flows", new_tasks.len());
+            match flows::import::import_toml_tasks(&new_tasks, &flow_store).await {
+                Ok(count) => tracing::info!(count, "TOML tasks imported as flows"),
+                Err(e) => tracing::error!(error = %e, "Failed to import TOML tasks"),
+            }
         }
     }
 

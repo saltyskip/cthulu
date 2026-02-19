@@ -44,6 +44,8 @@ pub struct TaskConfig {
     pub sources: Vec<SourceConfig>,
     #[serde(default)]
     pub sinks: Vec<SinkConfig>,
+    #[serde(default)]
+    pub append_system_prompt: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -121,11 +123,36 @@ pub enum SourceConfig {
         url: String,
         #[serde(default = "default_rss_limit")]
         limit: usize,
+        #[serde(default)]
+        keywords: Vec<String>,
+    },
+    WebScrape {
+        url: String,
+        #[serde(default)]
+        keywords: Vec<String>,
     },
     GithubMergedPrs {
         repos: Vec<String>,
         #[serde(default = "default_since_days")]
         since_days: u64,
+    },
+    WebScraper {
+        url: String,
+        #[serde(default)]
+        base_url: Option<String>,
+        items_selector: String,
+        #[serde(default)]
+        title_selector: Option<String>,
+        #[serde(default)]
+        url_selector: Option<String>,
+        #[serde(default)]
+        summary_selector: Option<String>,
+        #[serde(default)]
+        date_selector: Option<String>,
+        #[serde(default)]
+        date_format: Option<String>,
+        #[serde(default = "default_rss_limit")]
+        limit: usize,
     },
 }
 
@@ -418,16 +445,18 @@ mod tests {
         let task = &config.tasks[0];
         assert_eq!(task.sources.len(), 2);
         match &task.sources[0] {
-            SourceConfig::Rss { url, limit } => {
+            SourceConfig::Rss { url, limit, keywords } => {
                 assert_eq!(url, "https://example.com/feed.xml");
                 assert_eq!(*limit, 5);
+                assert!(keywords.is_empty());
             }
             _ => panic!("expected Rss source"),
         }
         match &task.sources[1] {
-            SourceConfig::Rss { url, limit } => {
+            SourceConfig::Rss { url, limit, keywords } => {
                 assert_eq!(url, "https://other.com/rss");
                 assert_eq!(*limit, 10); // default
+                assert!(keywords.is_empty());
             }
             _ => panic!("expected Rss source"),
         }
@@ -563,6 +592,106 @@ mod tests {
             }
             _ => panic!("expected Notion sink"),
         }
+    }
+
+    #[test]
+    fn test_rss_with_keywords() {
+        let config = parse(r#"
+            [server]
+
+            [[tasks]]
+            name = "filtered"
+            executor = "claude-code"
+            prompt = "test.md"
+
+            [tasks.trigger.cron]
+            schedule = "daily"
+
+            [[tasks.sources]]
+            type = "rss"
+            url = "https://example.com/feed.xml"
+            keywords = ["bitcoin", "ethereum"]
+        "#);
+        match &config.tasks[0].sources[0] {
+            SourceConfig::Rss { url, keywords, .. } => {
+                assert_eq!(url, "https://example.com/feed.xml");
+                assert_eq!(keywords, &["bitcoin", "ethereum"]);
+            }
+            _ => panic!("expected Rss source"),
+        }
+    }
+
+    #[test]
+    fn test_web_scrape_source() {
+        let config = parse(r#"
+            [server]
+
+            [[tasks]]
+            name = "scraper"
+            executor = "claude-code"
+            prompt = "test.md"
+
+            [tasks.trigger.cron]
+            schedule = "daily"
+
+            [[tasks.sources]]
+            type = "web-scrape"
+            url = "https://example.gov/news"
+            keywords = ["regulation", "crypto"]
+        "#);
+        match &config.tasks[0].sources[0] {
+            SourceConfig::WebScrape { url, keywords } => {
+                assert_eq!(url, "https://example.gov/news");
+                assert_eq!(keywords, &["regulation", "crypto"]);
+            }
+            _ => panic!("expected WebScrape source"),
+        }
+    }
+
+    #[test]
+    fn test_web_scrape_no_keywords() {
+        let config = parse(r#"
+            [server]
+
+            [[tasks]]
+            name = "scraper"
+            executor = "claude-code"
+            prompt = "test.md"
+
+            [tasks.trigger.cron]
+            schedule = "daily"
+
+            [[tasks.sources]]
+            type = "web-scrape"
+            url = "https://example.gov/news"
+        "#);
+        match &config.tasks[0].sources[0] {
+            SourceConfig::WebScrape { url, keywords } => {
+                assert_eq!(url, "https://example.gov/news");
+                assert!(keywords.is_empty());
+            }
+            _ => panic!("expected WebScrape source"),
+        }
+    }
+
+    #[test]
+    fn test_append_system_prompt() {
+        let config = parse(r#"
+            [server]
+
+            [[tasks]]
+            name = "test"
+            executor = "claude-code"
+            prompt = "test.md"
+            append_system_prompt = "You are a news researcher."
+
+            [tasks.trigger.cron]
+            schedule = "daily"
+        "#);
+        assert_eq!(
+            config.tasks[0].append_system_prompt.as_deref(),
+            Some("You are a news researcher.")
+        );
     }
 
     #[test]

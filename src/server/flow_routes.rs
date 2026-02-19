@@ -261,7 +261,17 @@ async fn get_node_types() -> Json<Value> {
                 "label": "RSS Feed",
                 "config_schema": {
                     "url": { "type": "string", "description": "Feed URL", "required": true },
-                    "limit": { "type": "number", "description": "Max items to fetch", "default": 10 }
+                    "limit": { "type": "number", "description": "Max items to fetch", "default": 10 },
+                    "keywords": { "type": "array", "description": "Filter items by keywords (case-insensitive, any match)", "default": [] }
+                }
+            },
+            {
+                "kind": "web-scrape",
+                "node_type": "source",
+                "label": "Web Scrape",
+                "config_schema": {
+                    "url": { "type": "string", "description": "Page URL to scrape", "required": true },
+                    "keywords": { "type": "array", "description": "Filter by keywords (case-insensitive, any match)", "default": [] }
                 }
             },
             {
@@ -274,10 +284,36 @@ async fn get_node_types() -> Json<Value> {
                 }
             },
             {
+                "kind": "web-scraper",
+                "node_type": "source",
+                "label": "Web Scraper (CSS)",
+                "config_schema": {
+                    "url": { "type": "string", "description": "Page URL to scrape", "required": true },
+                    "base_url": { "type": "string", "description": "Base URL for resolving relative links" },
+                    "items_selector": { "type": "string", "description": "CSS selector for item containers", "required": true },
+                    "title_selector": { "type": "string", "description": "CSS selector for title within item" },
+                    "url_selector": { "type": "string", "description": "CSS selector for link within item" },
+                    "summary_selector": { "type": "string", "description": "CSS selector for summary within item" },
+                    "date_selector": { "type": "string", "description": "CSS selector for date within item" },
+                    "date_format": { "type": "string", "description": "Date format string (e.g. %Y-%m-%d)" },
+                    "limit": { "type": "number", "description": "Max items to extract", "default": 10 }
+                }
+            },
+            {
                 "kind": "market-data",
                 "node_type": "source",
                 "label": "Market Data",
                 "config_schema": {}
+            },
+            {
+                "kind": "keyword",
+                "node_type": "filter",
+                "label": "Keyword Filter",
+                "config_schema": {
+                    "keywords": { "type": "array", "description": "Keywords to match (case-insensitive)", "required": true },
+                    "require_all": { "type": "boolean", "description": "Require all keywords to match", "default": false },
+                    "field": { "type": "string", "description": "Field to match: title, summary, or title_or_summary", "default": "title_or_summary" }
+                }
             },
             {
                 "kind": "claude-code",
@@ -285,7 +321,8 @@ async fn get_node_types() -> Json<Value> {
                 "label": "Claude Code",
                 "config_schema": {
                     "prompt": { "type": "string", "description": "Prompt file path or inline prompt", "required": true },
-                    "permissions": { "type": "array", "description": "Tool permissions (e.g. Bash, Read)", "default": [] }
+                    "permissions": { "type": "array", "description": "Tool permissions (e.g. Bash, Read)", "default": [] },
+                    "append_system_prompt": { "type": "string", "description": "Additional system prompt appended to Claude's instructions" }
                 }
             },
             {

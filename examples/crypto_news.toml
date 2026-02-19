@@ -1,0 +1,59 @@
+# Crypto News Pipeline
+# Monitors Google News RSS for crypto/Bitcoin news, drafts short posts,
+# and delivers to Notion for review.
+
+[server]
+port = 8081
+
+[[tasks]]
+name = "crypto-news"
+executor = "claude-api"
+prompt = "prompts/crypto_news_brief.md"
+
+[tasks.trigger.cron]
+schedule = "0 */4 * * *"
+
+# Google News RSS feeds for crypto topics
+[[tasks.sources]]
+type = "rss"
+url = "https://news.google.com/rss/search?q=bitcoin+OR+btc+OR+cryptocurrency&hl=en-US&gl=US&ceid=US:en"
+limit = 15
+
+[[tasks.sources]]
+type = "rss"
+url = "https://news.google.com/rss/search?q=SEC+crypto+OR+bitcoin+ETF+OR+CFTC+crypto&hl=en-US&gl=US&ceid=US:en"
+limit = 10
+
+[[tasks.sources]]
+type = "rss"
+url = "https://news.google.com/rss/search?q=stablecoin+regulation+OR+CBDC+OR+digital+dollar&hl=en-US&gl=US&ceid=US:en"
+limit = 5
+
+# SEC Press Releases (web scraper)
+[[tasks.sources]]
+type = "web-scraper"
+url = "https://www.sec.gov/news/pressreleases"
+base_url = "https://www.sec.gov"
+items_selector = "tr.pr-list-page-row"
+title_selector = "td.views-field-title a"
+url_selector = "td.views-field-title a"
+summary_selector = "td.views-field-field-description"
+date_selector = "td.views-field-field-publish-date time"
+limit = 10
+
+# CFTC Press Releases (web scraper)
+[[tasks.sources]]
+type = "web-scraper"
+url = "https://www.cftc.gov/PressRoom/PressReleases"
+base_url = "https://www.cftc.gov"
+items_selector = ".view-content .views-row"
+title_selector = ".views-field-title a"
+url_selector = ".views-field-title a"
+summary_selector = ".views-field-body"
+limit = 10
+
+# Notion as review sink (set NOTION_TOKEN and database ID in env)
+[[tasks.sinks]]
+type = "notion"
+token_env = "NOTION_TOKEN"
+database_id = "YOUR_DATABASE_ID_HERE"

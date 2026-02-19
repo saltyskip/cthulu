@@ -8,6 +8,7 @@ interface SidebarProps {
 const typeColors: Record<string, string> = {
   trigger: "var(--trigger-color)",
   source: "var(--source-color)",
+  filter: "#ffa657",
   executor: "var(--executor-color)",
   sink: "var(--sink-color)",
 };
@@ -16,6 +17,7 @@ export default function Sidebar({ nodeTypes, onGrab }: SidebarProps) {
   const grouped = {
     trigger: nodeTypes.filter((n) => n.node_type === "trigger"),
     source: nodeTypes.filter((n) => n.node_type === "source"),
+    filter: nodeTypes.filter((n) => n.node_type === "filter"),
     executor: nodeTypes.filter((n) => n.node_type === "executor"),
     sink: nodeTypes.filter((n) => n.node_type === "sink"),
   };
@@ -23,7 +25,7 @@ export default function Sidebar({ nodeTypes, onGrab }: SidebarProps) {
   return (
     <div className="node-palette">
       <h3>Add Nodes</h3>
-      {(["trigger", "source", "executor", "sink"] as const).map((type) => (
+      {(["trigger", "source", "filter", "executor", "sink"] as const).map((type) => (
         <div key={type}>
           {grouped[type].map((nt) => (
             <div

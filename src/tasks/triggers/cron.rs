@@ -250,7 +250,7 @@ pub fn format_items(items: &[ContentItem]) -> String {
                 .unwrap_or_default();
 
             format!(
-                "{}. **{}**\n   URL: {}\n   Published: {}{}\n   {}\n",
+                "{}. [{}]({})\n   Published: {}{}\n   {}\n",
                 i + 1,
                 item.title,
                 item.url,
@@ -318,8 +318,8 @@ mod tests {
             },
         ];
         let result = format_items(&items);
-        assert!(result.contains("1. **Bitcoin Hits ATH**"));
-        assert!(result.contains("2. **ETH Update**"));
+        assert!(result.contains("1. [Bitcoin Hits ATH](https://example.com/1)"));
+        assert!(result.contains("2. [ETH Update](https://example.com/2)"));
         assert!(result.contains("https://example.com/1"));
         // Item without image_url should not have Image: line
         assert!(!result.contains("Image: https://example.com/1"));

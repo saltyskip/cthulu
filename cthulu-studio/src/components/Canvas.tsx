@@ -19,6 +19,7 @@ import "@xyflow/react/dist/style.css";
 import TriggerNode from "./NodeTypes/TriggerNode";
 import SourceNode from "./NodeTypes/SourceNode";
 import ExecutorNode from "./NodeTypes/ExecutorNode";
+import FilterNode from "./NodeTypes/FilterNode";
 import SinkNode from "./NodeTypes/SinkNode";
 import type { Flow, FlowNode, FlowEdge } from "../types/flow";
 import { log } from "../api/logger";
@@ -26,6 +27,7 @@ import { log } from "../api/logger";
 const rfNodeTypes: NodeTypes = {
   trigger: TriggerNode,
   source: SourceNode,
+  filter: FilterNode,
   executor: ExecutorNode,
   sink: SinkNode,
 };

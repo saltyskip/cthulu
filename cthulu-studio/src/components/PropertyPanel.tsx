@@ -123,6 +123,23 @@ function renderConfigFields(
               onChange={(e) => onChange("limit", parseInt(e.target.value) || 10)}
             />
           </div>
+          <div className="form-group">
+            <label>Keywords (comma separated, optional)</label>
+            <input
+              value={
+                Array.isArray(config.keywords)
+                  ? (config.keywords as string[]).join(", ")
+                  : ""
+              }
+              onChange={(e) =>
+                onChange(
+                  "keywords",
+                  e.target.value.split(",").map((s) => s.trim()).filter(Boolean)
+                )
+              }
+              placeholder="bitcoin, crypto, regulation"
+            />
+          </div>
         </>
       );
     case "github-merged-prs":
@@ -184,6 +201,154 @@ function renderConfigFields(
               }
               placeholder="Bash, Read, Grep, Glob"
             />
+          </div>
+          <div className="form-group">
+            <label>System Prompt</label>
+            <textarea
+              value={(config.append_system_prompt as string) || ""}
+              onChange={(e) =>
+                onChange(
+                  "append_system_prompt",
+                  e.target.value || null
+                )
+              }
+              placeholder="Additional instructions appended to Claude's system prompt"
+              rows={4}
+            />
+          </div>
+        </>
+      );
+    case "web-scrape":
+      return (
+        <>
+          <div className="form-group">
+            <label>Page URL</label>
+            <input
+              value={(config.url as string) || ""}
+              onChange={(e) => onChange("url", e.target.value)}
+              placeholder="https://example.gov/news"
+            />
+          </div>
+          <div className="form-group">
+            <label>Keywords (comma separated)</label>
+            <input
+              value={
+                Array.isArray(config.keywords)
+                  ? (config.keywords as string[]).join(", ")
+                  : ""
+              }
+              onChange={(e) =>
+                onChange(
+                  "keywords",
+                  e.target.value.split(",").map((s) => s.trim()).filter(Boolean)
+                )
+              }
+              placeholder="bitcoin, crypto, regulation"
+            />
+          </div>
+        </>
+      );
+    case "web-scraper":
+      return (
+        <>
+          <div className="form-group">
+            <label>Page URL</label>
+            <input
+              value={(config.url as string) || ""}
+              onChange={(e) => onChange("url", e.target.value)}
+              placeholder="https://www.sec.gov/news/pressreleases"
+            />
+          </div>
+          <div className="form-group">
+            <label>Base URL</label>
+            <input
+              value={(config.base_url as string) || ""}
+              onChange={(e) => onChange("base_url", e.target.value || null)}
+              placeholder="https://www.sec.gov"
+            />
+          </div>
+          <div className="form-group">
+            <label>Items Selector</label>
+            <input
+              value={(config.items_selector as string) || ""}
+              onChange={(e) => onChange("items_selector", e.target.value)}
+              placeholder="div.press-release"
+            />
+          </div>
+          <div className="form-group">
+            <label>Title Selector</label>
+            <input
+              value={(config.title_selector as string) || ""}
+              onChange={(e) => onChange("title_selector", e.target.value || null)}
+              placeholder="h3 a"
+            />
+          </div>
+          <div className="form-group">
+            <label>URL Selector</label>
+            <input
+              value={(config.url_selector as string) || ""}
+              onChange={(e) => onChange("url_selector", e.target.value || null)}
+              placeholder="h3 a"
+            />
+          </div>
+          <div className="form-group">
+            <label>Summary Selector</label>
+            <input
+              value={(config.summary_selector as string) || ""}
+              onChange={(e) => onChange("summary_selector", e.target.value || null)}
+              placeholder="p.summary"
+            />
+          </div>
+          <div className="form-group">
+            <label>Limit</label>
+            <input
+              type="number"
+              value={(config.limit as number) || 10}
+              onChange={(e) => onChange("limit", parseInt(e.target.value) || 10)}
+            />
+          </div>
+        </>
+      );
+    case "keyword":
+      return (
+        <>
+          <div className="form-group">
+            <label>Keywords (comma separated)</label>
+            <input
+              value={
+                Array.isArray(config.keywords)
+                  ? (config.keywords as string[]).join(", ")
+                  : ""
+              }
+              onChange={(e) =>
+                onChange(
+                  "keywords",
+                  e.target.value.split(",").map((s) => s.trim()).filter(Boolean)
+                )
+              }
+              placeholder="bitcoin, crypto, sec, etf"
+            />
+          </div>
+          <div className="form-group">
+            <label>Require All</label>
+            <select
+              value={config.require_all ? "true" : "false"}
+              onChange={(e) => onChange("require_all", e.target.value === "true")}
+            >
+              <option value="false">Any keyword (OR)</option>
+              <option value="true">All keywords (AND)</option>
+            </select>
+          </div>
+          <div className="form-group">
+            <label>Match Field</label>
+            <select
+              value={(config.field as string) || "title_or_summary"}
+              onChange={(e) => onChange("field", e.target.value)}
+            >
+              <option value="title_or_summary">Title or Summary</option>
+              <option value="title">Title only</option>
+              <option value="summary">Summary only</option>
+            </select>
           </div>
         </>
       );

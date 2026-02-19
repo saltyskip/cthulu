@@ -39,6 +39,7 @@ pub struct Node {
 pub enum NodeType {
     Trigger,
     Source,
+    Filter,
     Executor,
     Sink,
 }
@@ -96,6 +97,10 @@ mod tests {
         assert_eq!(
             serde_json::to_string(&NodeType::Source).unwrap(),
             "\"source\""
+        );
+        assert_eq!(
+            serde_json::to_string(&NodeType::Filter).unwrap(),
+            "\"filter\""
         );
         assert_eq!(
             serde_json::to_string(&NodeType::Executor).unwrap(),

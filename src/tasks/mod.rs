@@ -1,6 +1,7 @@
 pub mod context;
 pub mod diff;
 pub mod executors;
+pub mod filters;
 pub mod sinks;
 pub mod sources;
 pub mod triggers;
@@ -43,7 +44,7 @@ fn load_prompt_and_executor(task: &TaskConfig) -> Option<(String, Box<dyn Execut
     };
 
     let executor: Box<dyn Executor> = match task.executor {
-        ExecutorType::ClaudeCode => Box::new(ClaudeCodeExecutor::new(task.permissions.clone())),
+        ExecutorType::ClaudeCode => Box::new(ClaudeCodeExecutor::new(task.permissions.clone(), task.append_system_prompt.clone())),
         ExecutorType::ClaudeApi => {
             tracing::error!(task = %task.name, "claude-api executor not yet implemented");
             return None;
