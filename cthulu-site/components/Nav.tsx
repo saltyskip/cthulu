@@ -41,8 +41,6 @@ export default function Nav() {
             <a
               key={l.label}
               href={l.href}
-              target={l.external ? "_blank" : undefined}
-              rel={l.external ? "noopener noreferrer" : undefined}
               className="text-sm text-text-secondary transition-colors hover:text-text"
             >
               {l.label}
@@ -85,8 +83,6 @@ export default function Nav() {
             <a
               key={l.label}
               href={l.href}
-              target={l.external ? "_blank" : undefined}
-              rel={l.external ? "noopener noreferrer" : undefined}
               className="block py-2 text-sm text-text-secondary"
               onClick={() => setOpen(false)}
             >
