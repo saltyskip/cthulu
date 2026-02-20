@@ -4,11 +4,12 @@ interface SinkNodeData {
   label: string;
   kind: string;
   config: Record<string, unknown>;
+  runStatus?: "running" | "completed" | "failed" | null;
 }
 
 export default function SinkNode({ data }: { data: SinkNodeData }) {
   return (
-    <div className="custom-node">
+    <div className={`custom-node${data.runStatus ? ` run-${data.runStatus}` : ""}`}>
       <Handle id="in" type="target" position={Position.Left} />
       <div className="node-header">
         <span className="node-type-badge sink">Sink</span>

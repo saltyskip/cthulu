@@ -1,10 +1,13 @@
 use axum::extract::{Path, State};
+use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use chrono::Utc;
+use futures::stream::Stream;
 use hyper::StatusCode;
 use serde::Deserialize;
 use serde_json::{json, Value};
+use std::convert::Infallible;
 use uuid::Uuid;
 
 use super::AppState;
@@ -19,6 +22,7 @@ pub fn flow_router() -> Router<AppState> {
         )
         .route("/flows/{id}/trigger", post(trigger_flow))
         .route("/flows/{id}/runs", get(get_runs))
+        .route("/flows/{id}/runs/live", get(stream_runs))
         .route("/node-types", get(get_node_types))
 }
 
@@ -232,6 +236,7 @@ async fn trigger_flow(
     let runner = crate::flows::runner::FlowRunner {
         http_client: state.http_client.clone(),
         github_client: state.github_client.clone(),
+        events_tx: Some(state.events_tx.clone()),
     };
 
     let store = state.store.clone();
@@ -395,4 +400,33 @@ async fn get_node_types() -> Json<Value> {
             }
         ]
     }))
+}
+
+async fn stream_runs(
+    State(state): State<AppState>,
+    Path(flow_id): Path<String>,
+) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+    let mut rx = state.events_tx.subscribe();
+    let stream = async_stream::stream! {
+        loop {
+            match rx.recv().await {
+                Ok(event) => {
+                    if event.flow_id != flow_id {
+                        continue;
+                    }
+                    let sse_event_name = event.event_type.as_sse_event();
+                    let data = serde_json::to_string(&event).unwrap_or_default();
+                    yield Ok(Event::default().event(sse_event_name).data(data));
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                    tracing::warn!(flow_id = %flow_id, skipped = n, "SSE subscriber lagged");
+                    continue;
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                    break;
+                }
+            }
+        }
+    };
+    Sse::new(stream).keep_alive(KeepAlive::new().interval(std::time::Duration::from_secs(15)))
 }

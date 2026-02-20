@@ -6,8 +6,10 @@ use anyhow::{Context, Result};
 use chrono::Utc;
 use croner::Cron;
 use tokio::sync::Mutex;
+use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
 
+use crate::flows::events::RunEvent;
 use crate::flows::runner::FlowRunner;
 use crate::flows::store::Store;
 use crate::flows::NodeType;
@@ -19,6 +21,7 @@ pub struct FlowScheduler {
     store: Arc<dyn Store>,
     http_client: Arc<reqwest::Client>,
     github_client: Option<Arc<dyn GithubClient>>,
+    events_tx: broadcast::Sender<RunEvent>,
     handles: Mutex<HashMap<String, JoinHandle<()>>>,
     seen_prs: Arc<Mutex<HashMap<String, HashMap<u64, String>>>>,
 }
@@ -28,11 +31,13 @@ impl FlowScheduler {
         store: Arc<dyn Store>,
         http_client: Arc<reqwest::Client>,
         github_client: Option<Arc<dyn GithubClient>>,
+        events_tx: broadcast::Sender<RunEvent>,
     ) -> Self {
         Self {
             store,
             http_client,
             github_client,
+            events_tx,
             handles: Mutex::new(HashMap::new()),
             seen_prs: Arc::new(Mutex::new(HashMap::new())),
         }
@@ -81,6 +86,7 @@ impl FlowScheduler {
                 let store = self.store.clone();
                 let http_client = self.http_client.clone();
                 let github_client = self.github_client.clone();
+                let events_tx = self.events_tx.clone();
 
                 tracing::info!(flow = %flow.name, schedule = %schedule, "Started cron trigger");
 
@@ -92,6 +98,7 @@ impl FlowScheduler {
                         store,
                         http_client,
                         github_client,
+                        events_tx,
                     )
                     .await;
                 });
@@ -109,6 +116,7 @@ impl FlowScheduler {
                 let http_client = self.http_client.clone();
                 let seen_prs = self.seen_prs.clone();
                 let trigger_config = trigger_node.config.clone();
+                let events_tx = self.events_tx.clone();
 
                 let handle = tokio::spawn(async move {
                     github_pr_loop(
@@ -119,6 +127,7 @@ impl FlowScheduler {
                         http_client,
                         github_client,
                         seen_prs,
+                        events_tx,
                     )
                     .await;
                 });
@@ -236,6 +245,7 @@ impl FlowScheduler {
         let runner = FlowRunner {
             http_client: self.http_client.clone(),
             github_client: self.github_client.clone(),
+            events_tx: Some(self.events_tx.clone()),
         };
 
         runner
@@ -256,6 +266,7 @@ async fn cron_loop(
     store: Arc<dyn Store>,
     http_client: Arc<reqwest::Client>,
     github_client: Option<Arc<dyn GithubClient>>,
+    events_tx: broadcast::Sender<RunEvent>,
 ) {
     let cron = match Cron::new(schedule).parse() {
         Ok(c) => c,
@@ -309,6 +320,7 @@ async fn cron_loop(
         let runner = FlowRunner {
             http_client: http_client.clone(),
             github_client: github_client.clone(),
+            events_tx: Some(events_tx.clone()),
         };
 
         if let Err(e) = runner.execute(&flow, &*store).await {
@@ -327,6 +339,7 @@ async fn github_pr_loop(
     http_client: Arc<reqwest::Client>,
     github_client: Arc<dyn GithubClient>,
     seen_prs: Arc<Mutex<HashMap<String, HashMap<u64, String>>>>,
+    events_tx: broadcast::Sender<RunEvent>,
 ) {
     let poll_interval = trigger_config["poll_interval"].as_u64().unwrap_or(60);
     let skip_drafts = trigger_config["skip_drafts"].as_bool().unwrap_or(true);
@@ -556,6 +569,7 @@ async fn github_pr_loop(
                 let runner = FlowRunner {
                     http_client: http_client.clone(),
                     github_client: Some(github_client.clone()),
+                    events_tx: Some(events_tx.clone()),
                 };
 
                 match runner

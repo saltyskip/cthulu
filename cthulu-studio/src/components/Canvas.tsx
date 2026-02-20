@@ -102,10 +102,11 @@ interface CanvasProps {
   initialFlow: Flow | null;
   onFlowSnapshot: (snapshot: { nodes: FlowNode[]; edges: FlowEdge[] }) => void;
   onSelectionChange: (nodeId: string | null) => void;
+  nodeRunStatus?: Record<string, "running" | "completed" | "failed">;
 }
 
 const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(
-  { flowId, initialFlow, onFlowSnapshot, onSelectionChange },
+  { flowId, initialFlow, onFlowSnapshot, onSelectionChange, nodeRunStatus },
   ref
 ) {
   const [nodes, setNodes, onNodesChange] = useNodesState<RFNode>([]);
@@ -127,6 +128,18 @@ const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(
       setEdges([]);
     }
   }, [flowId, initialFlow, setNodes, setEdges]);
+
+  // --- Merge run status into node data ---
+  useEffect(() => {
+    if (!nodeRunStatus) return;
+    setNodes((nds) =>
+      nds.map((n) => {
+        const status = nodeRunStatus[n.id] ?? null;
+        if (n.data.runStatus === status) return n;
+        return { ...n, data: { ...n.data, runStatus: status } };
+      })
+    );
+  }, [nodeRunStatus, setNodes]);
 
   // --- Snapshot emission (debounced) ---
   useEffect(() => {
