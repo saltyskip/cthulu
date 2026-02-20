@@ -19,6 +19,7 @@ use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 
 use crate::flows::history::RunHistory;
+use crate::flows::scheduler::FlowScheduler;
 use crate::flows::storage::FlowStore;
 use crate::github::client::{GithubClient, HttpGithubClient};
 
@@ -64,11 +65,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
             .build()
             .context("failed to build HTTP client")?,
     );
-    let github_token = config.github_token();
-    let task_state = Arc::new(tasks::TaskState::new());
 
-    let github_client: Option<Arc<dyn GithubClient>> = github_token.as_ref().map(|token| {
-        Arc::new(HttpGithubClient::new((*http_client).clone(), token.clone())) as Arc<dyn GithubClient>
+    let github_client: Option<Arc<dyn GithubClient>> = config.github_token().map(|token| {
+        Arc::new(HttpGithubClient::new((*http_client).clone(), token)) as Arc<dyn GithubClient>
     });
 
     let config = Arc::new(config);
@@ -109,24 +108,22 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let run_history = Arc::new(RunHistory::new());
 
-    // Spawn all configured tasks
-    for task in &config.tasks {
-        tasks::spawn_task(
-            task.clone(),
-            github_token.clone(),
-            http_client.clone(),
-            task_state.clone(),
-        )
-        .await;
-    }
+    // Create and start the flow scheduler
+    let scheduler = Arc::new(FlowScheduler::new(
+        flow_store.clone(),
+        run_history.clone(),
+        http_client.clone(),
+        github_client.clone(),
+    ));
+    scheduler.start_all().await;
 
     let app_state = server::AppState {
-        task_state,
         config: config.clone(),
         github_client,
         http_client,
         flow_store,
         run_history,
+        scheduler,
     };
 
     let app = server::create_app(app_state)

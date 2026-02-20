@@ -93,6 +93,11 @@ async fn create_flow(
         );
     }
 
+    // Start scheduler trigger for the new flow
+    if let Err(e) = state.scheduler.start_flow(&id).await {
+        tracing::warn!(flow_id = %id, error = %e, "Failed to start trigger for new flow");
+    }
+
     (StatusCode::CREATED, Json(json!({ "id": id })))
 }
 
@@ -146,6 +151,11 @@ async fn update_flow(
         )
     })?;
 
+    // Restart scheduler trigger (handles enable/disable/config changes)
+    if let Err(e) = state.scheduler.restart_flow(&id).await {
+        tracing::warn!(flow_id = %id, error = %e, "Failed to restart trigger for updated flow");
+    }
+
     Ok(Json(serde_json::to_value(&flow).unwrap()))
 }
 
@@ -153,6 +163,9 @@ async fn delete_flow(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    // Stop scheduler trigger before deleting
+    state.scheduler.stop_flow(&id).await;
+
     let existed = state.flow_store.delete(&id).await.map_err(|e| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -170,9 +183,16 @@ async fn delete_flow(
     Ok(Json(json!({ "deleted": true })))
 }
 
+#[derive(Deserialize)]
+struct TriggerFlowRequest {
+    repo: Option<String>,
+    pr: Option<u64>,
+}
+
 async fn trigger_flow(
     State(state): State<AppState>,
     Path(id): Path<String>,
+    body: String,
 ) -> Result<(StatusCode, Json<Value>), (StatusCode, Json<Value>)> {
     let flow = state.flow_store.get(&id).await.ok_or_else(|| {
         (
@@ -181,6 +201,34 @@ async fn trigger_flow(
         )
     })?;
 
+    // Check if this is a PR trigger request
+    let trigger_body: Option<TriggerFlowRequest> = if body.trim().is_empty() {
+        None
+    } else {
+        serde_json::from_str(&body).ok()
+    };
+
+    if let Some(trigger_body) = &trigger_body {
+        if let (Some(repo), Some(pr)) = (&trigger_body.repo, trigger_body.pr) {
+            let scheduler = state.scheduler.clone();
+            let flow_id = id.clone();
+            let repo = repo.clone();
+            let repo_for_response = repo.clone();
+
+            tokio::spawn(async move {
+                if let Err(e) = scheduler.trigger_pr_review(&flow_id, &repo, pr).await {
+                    tracing::error!(flow_id = %flow_id, repo = %repo, pr, error = %e, "Manual PR trigger failed");
+                }
+            });
+
+            return Ok((
+                StatusCode::ACCEPTED,
+                Json(json!({ "status": "pr_review_started", "flow_id": id, "repo": repo_for_response, "pr": pr })),
+            ));
+        }
+    }
+
+    // Default: one-shot flow execution
     let runner = crate::flows::runner::FlowRunner {
         http_client: state.http_client.clone(),
         github_client: state.github_client.clone(),
@@ -238,7 +286,8 @@ async fn get_node_types() -> Json<Value> {
                     "repos": { "type": "array", "description": "Repository configs [{slug, path}]", "required": true },
                     "poll_interval": { "type": "number", "description": "Poll interval in seconds", "default": 60 },
                     "skip_drafts": { "type": "boolean", "default": true },
-                    "review_on_push": { "type": "boolean", "default": false }
+                    "review_on_push": { "type": "boolean", "default": false },
+                    "max_diff_size": { "type": "number", "description": "Max inline diff size in bytes", "default": 50000 }
                 }
             },
             {

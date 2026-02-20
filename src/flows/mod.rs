@@ -1,6 +1,7 @@
 pub mod history;
 pub mod import;
 pub mod runner;
+pub mod scheduler;
 pub mod storage;
 
 use chrono::{DateTime, Utc};

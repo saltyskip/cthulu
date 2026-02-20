@@ -17,7 +17,7 @@ use crate::tasks::executors::Executor;
 use crate::tasks::filters::Filter;
 use crate::tasks::filters::keyword::{KeywordFilter, MatchField};
 use crate::tasks::sources::{self, ContentItem};
-use crate::tasks::triggers::cron::{format_items, resolve_sinks};
+use crate::tasks::pipeline::{format_items, resolve_sinks};
 
 pub struct FlowRunner {
     pub http_client: Arc<reqwest::Client>,
@@ -25,6 +25,66 @@ pub struct FlowRunner {
 }
 
 impl FlowRunner {
+    pub async fn execute_with_context(
+        &self,
+        flow: &Flow,
+        history: &RunHistory,
+        extra_vars: HashMap<String, String>,
+    ) -> Result<FlowRun> {
+        let run_id = Uuid::new_v4().to_string();
+        let short_id = &run_id[..8];
+        let mut run = FlowRun {
+            id: run_id.clone(),
+            flow_id: flow.id.clone(),
+            status: RunStatus::Running,
+            started_at: Utc::now(),
+            finished_at: None,
+            node_runs: vec![],
+            error: None,
+        };
+        history.add_run(run.clone()).await;
+
+        let span = tracing::info_span!("flow_run", flow = %flow.name, run = %short_id);
+
+        tracing::info!(parent: &span, nodes = flow.nodes.len(), edges = flow.edges.len(), "▶ Started (with context)");
+
+        let start = std::time::Instant::now();
+        let result = self.execute_inner_with_context(flow, &run_id, history, extra_vars).instrument(span.clone()).await;
+        let elapsed = start.elapsed();
+
+        match &result {
+            Ok(_) => {
+                history
+                    .update_run(&flow.id, &run_id, |r| {
+                        r.status = RunStatus::Success;
+                        r.finished_at = Some(Utc::now());
+                    })
+                    .await;
+                tracing::info!(parent: &span, elapsed = format_args!("{:.1}s", elapsed.as_secs_f64()), "✓ Completed");
+            }
+            Err(e) => {
+                let err_msg = format!("{e:#}");
+                history
+                    .update_run(&flow.id, &run_id, |r| {
+                        r.status = RunStatus::Failed;
+                        r.finished_at = Some(Utc::now());
+                        r.error = Some(err_msg.clone());
+                    })
+                    .await;
+                tracing::error!(parent: &span, elapsed = format_args!("{:.1}s", elapsed.as_secs_f64()), error = %err_msg, "✗ Failed");
+            }
+        }
+
+        run = history
+            .get_runs(&flow.id)
+            .await
+            .into_iter()
+            .find(|r| r.id == run_id)
+            .unwrap_or(run);
+
+        result.map(|_| run)
+    }
+
     pub async fn execute(&self, flow: &Flow, history: &RunHistory) -> Result<FlowRun> {
         let run_id = Uuid::new_v4().to_string();
         let short_id = &run_id[..8];
@@ -422,6 +482,136 @@ impl FlowRunner {
             }
         } else {
             tracing::warn!("⚠ Executor returned empty output, skipping sinks");
+        }
+
+        Ok(())
+    }
+
+    /// Execute a flow with pre-built context variables (e.g. PR diff, metadata).
+    /// Skips source fetching and filtering — the caller provides all template vars.
+    async fn execute_inner_with_context(
+        &self,
+        flow: &Flow,
+        run_id: &str,
+        history: &RunHistory,
+        extra_vars: HashMap<String, String>,
+    ) -> Result<()> {
+        let executor_node = flow
+            .nodes
+            .iter()
+            .find(|n| n.node_type == NodeType::Executor)
+            .context("flow has no executor node")?;
+
+        let trigger_node = flow.nodes.iter().find(|n| n.node_type == NodeType::Trigger);
+
+        // Build template vars from extra_vars
+        let mut vars = extra_vars;
+        let timestamp = Utc::now().format("%Y-%m-%d %H:%M UTC").to_string();
+        vars.entry("timestamp".to_string()).or_insert(timestamp);
+
+        // Resolve prompt
+        let prompt_path = executor_node.config["prompt"]
+            .as_str()
+            .context("executor node missing 'prompt' config")?;
+
+        let prompt_template = if prompt_path.ends_with(".md") || prompt_path.ends_with(".txt") || std::path::Path::new(prompt_path).exists() {
+            std::fs::read_to_string(prompt_path)
+                .with_context(|| format!("failed to read prompt file: {prompt_path}"))?
+        } else {
+            prompt_path.to_string()
+        };
+
+        let rendered = render_prompt(&prompt_template, &vars);
+
+        tracing::info!(
+            chars = rendered.len(),
+            "✓ Prompt rendered (with context)",
+        );
+
+        // Resolve working_dir: trigger node config > executor node config > cwd
+        let working_dir = trigger_node
+            .and_then(|n| n.config["working_dir"].as_str())
+            .or_else(|| executor_node.config["working_dir"].as_str())
+            .map(PathBuf::from)
+            .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+
+        let permissions: Vec<String> = executor_node.config["permissions"]
+            .as_array()
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        let append_system_prompt = executor_node.config["append_system_prompt"]
+            .as_str()
+            .map(String::from);
+
+        let executor = ClaudeCodeExecutor::new(permissions, append_system_prompt);
+
+        let exec_node_run = NodeRun {
+            node_id: executor_node.id.clone(),
+            status: RunStatus::Running,
+            started_at: Utc::now(),
+            finished_at: None,
+            output_preview: None,
+        };
+        history
+            .update_run(&flow.id, run_id, |r| r.node_runs.push(exec_node_run))
+            .await;
+
+        let exec_start = std::time::Instant::now();
+        let exec_result = executor
+            .execute(&rendered, &working_dir)
+            .await
+            .context("executor failed")?;
+        let exec_elapsed = exec_start.elapsed();
+
+        tracing::info!(
+            turns = exec_result.num_turns,
+            cost = format_args!("${:.4}", exec_result.cost_usd),
+            output_chars = exec_result.text.len(),
+            elapsed = format_args!("{:.1}s", exec_elapsed.as_secs_f64()),
+            "✓ Executor finished",
+        );
+
+        let preview = if exec_result.text.len() > 500 {
+            format!("{}...", &exec_result.text[..500])
+        } else {
+            exec_result.text.clone()
+        };
+
+        let exec_nid = executor_node.id.clone();
+        history
+            .update_run(&flow.id, run_id, |r| {
+                if let Some(nr) = r.node_runs.iter_mut().find(|nr| nr.node_id == exec_nid) {
+                    nr.status = RunStatus::Success;
+                    nr.finished_at = Some(Utc::now());
+                    nr.output_preview = Some(preview);
+                }
+            })
+            .await;
+
+        // Sinks
+        let sink_nodes: Vec<_> = flow
+            .nodes
+            .iter()
+            .filter(|n| n.node_type == NodeType::Sink)
+            .collect();
+
+        if !exec_result.text.is_empty() && !sink_nodes.is_empty() {
+            let sink_configs = parse_sink_configs(&sink_nodes)?;
+            let resolved_sinks = resolve_sinks(&sink_configs, &self.http_client)?;
+
+            for (i, sink) in resolved_sinks.iter().enumerate() {
+                let sink_node = &sink_nodes[i];
+                let result = sink.deliver(&exec_result.text).await;
+                match &result {
+                    Ok(_) => tracing::info!(sink = %sink_node.label, "✓ Delivered"),
+                    Err(e) => tracing::error!(sink = %sink_node.label, error = %e, "✗ Delivery failed"),
+                }
+            }
         }
 
         Ok(())
