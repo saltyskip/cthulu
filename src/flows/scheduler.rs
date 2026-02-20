@@ -8,17 +8,15 @@ use croner::Cron;
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 
-use crate::flows::history::RunHistory;
 use crate::flows::runner::FlowRunner;
-use crate::flows::storage::FlowStore;
+use crate::flows::store::Store;
 use crate::flows::NodeType;
 use crate::github::client::GithubClient;
 use crate::github::models::RepoConfig;
 use crate::tasks::diff;
 
 pub struct FlowScheduler {
-    flow_store: Arc<FlowStore>,
-    run_history: Arc<RunHistory>,
+    store: Arc<dyn Store>,
     http_client: Arc<reqwest::Client>,
     github_client: Option<Arc<dyn GithubClient>>,
     handles: Mutex<HashMap<String, JoinHandle<()>>>,
@@ -27,14 +25,12 @@ pub struct FlowScheduler {
 
 impl FlowScheduler {
     pub fn new(
-        flow_store: Arc<FlowStore>,
-        run_history: Arc<RunHistory>,
+        store: Arc<dyn Store>,
         http_client: Arc<reqwest::Client>,
         github_client: Option<Arc<dyn GithubClient>>,
     ) -> Self {
         Self {
-            flow_store,
-            run_history,
+            store,
             http_client,
             github_client,
             handles: Mutex::new(HashMap::new()),
@@ -43,7 +39,7 @@ impl FlowScheduler {
     }
 
     pub async fn start_all(&self) {
-        let flows = self.flow_store.list().await;
+        let flows = self.store.list_flows().await;
         for flow in flows {
             if flow.enabled {
                 if let Err(e) = self.start_flow(&flow.id).await {
@@ -55,8 +51,8 @@ impl FlowScheduler {
 
     pub async fn start_flow(&self, flow_id: &str) -> Result<()> {
         let flow = self
-            .flow_store
-            .get(flow_id)
+            .store
+            .get_flow(flow_id)
             .await
             .context("flow not found")?;
 
@@ -82,8 +78,7 @@ impl FlowScheduler {
 
                 let flow_id = flow.id.clone();
                 let flow_name = flow.name.clone();
-                let flow_store = self.flow_store.clone();
-                let run_history = self.run_history.clone();
+                let store = self.store.clone();
                 let http_client = self.http_client.clone();
                 let github_client = self.github_client.clone();
 
@@ -94,8 +89,7 @@ impl FlowScheduler {
                         &flow_id,
                         &flow_name,
                         &schedule,
-                        flow_store,
-                        run_history,
+                        store,
                         http_client,
                         github_client,
                     )
@@ -111,8 +105,7 @@ impl FlowScheduler {
 
                 let flow_id = flow.id.clone();
                 let flow_name = flow.name.clone();
-                let flow_store = self.flow_store.clone();
-                let run_history = self.run_history.clone();
+                let store = self.store.clone();
                 let http_client = self.http_client.clone();
                 let seen_prs = self.seen_prs.clone();
                 let trigger_config = trigger_node.config.clone();
@@ -122,8 +115,7 @@ impl FlowScheduler {
                         &flow_id,
                         &flow_name,
                         trigger_config,
-                        flow_store,
-                        run_history,
+                        store,
                         http_client,
                         github_client,
                         seen_prs,
@@ -171,8 +163,8 @@ impl FlowScheduler {
         pr_number: u64,
     ) -> Result<()> {
         let flow = self
-            .flow_store
-            .get(flow_id)
+            .store
+            .get_flow(flow_id)
             .await
             .context("flow not found")?;
 
@@ -247,7 +239,7 @@ impl FlowScheduler {
         };
 
         runner
-            .execute_with_context(&flow, &self.run_history, context)
+            .execute_with_context(&flow, &*self.store, context)
             .await?;
 
         diff::cleanup(&diff_ctx);
@@ -261,8 +253,7 @@ async fn cron_loop(
     flow_id: &str,
     flow_name: &str,
     schedule: &str,
-    flow_store: Arc<FlowStore>,
-    run_history: Arc<RunHistory>,
+    store: Arc<dyn Store>,
     http_client: Arc<reqwest::Client>,
     github_client: Option<Arc<dyn GithubClient>>,
 ) {
@@ -303,7 +294,7 @@ async fn cron_loop(
         }
 
         // Re-fetch the flow in case it was updated
-        let flow = match flow_store.get(flow_id).await {
+        let flow = match store.get_flow(flow_id).await {
             Some(f) if f.enabled => f,
             Some(_) => {
                 tracing::info!(flow = %flow_name, "Flow disabled, stopping cron loop");
@@ -320,7 +311,7 @@ async fn cron_loop(
             github_client: github_client.clone(),
         };
 
-        if let Err(e) = runner.execute(&flow, &run_history).await {
+        if let Err(e) = runner.execute(&flow, &*store).await {
             tracing::error!(flow = %flow_name, error = %e, "Cron flow execution failed");
         }
     }
@@ -332,8 +323,7 @@ async fn github_pr_loop(
     flow_id: &str,
     flow_name: &str,
     trigger_config: serde_json::Value,
-    flow_store: Arc<FlowStore>,
-    run_history: Arc<RunHistory>,
+    store: Arc<dyn Store>,
     http_client: Arc<reqwest::Client>,
     github_client: Arc<dyn GithubClient>,
     seen_prs: Arc<Mutex<HashMap<String, HashMap<u64, String>>>>,
@@ -438,7 +428,7 @@ async fn github_pr_loop(
         interval.tick().await;
 
         // Check if flow still exists and is enabled
-        let flow = match flow_store.get(flow_id).await {
+        let flow = match store.get_flow(flow_id).await {
             Some(f) if f.enabled => f,
             Some(_) => {
                 tracing::info!(flow = %flow_name, "Flow disabled, stopping PR poll loop");
@@ -569,7 +559,7 @@ async fn github_pr_loop(
                 };
 
                 match runner
-                    .execute_with_context(&flow, &run_history, context)
+                    .execute_with_context(&flow, &*store, context)
                     .await
                 {
                     Ok(run) => {

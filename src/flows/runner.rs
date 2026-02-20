@@ -8,7 +8,8 @@ use tracing::Instrument;
 use uuid::Uuid;
 
 use crate::config::{SinkConfig, SourceConfig};
-use crate::flows::history::{FlowRun, NodeRun, RunHistory, RunStatus};
+use crate::flows::history::{FlowRun, NodeRun, RunStatus};
+use crate::flows::store::Store;
 use crate::flows::{Flow, NodeType};
 use crate::github::client::GithubClient;
 use crate::tasks::context::render_prompt;
@@ -28,12 +29,12 @@ impl FlowRunner {
     pub async fn execute_with_context(
         &self,
         flow: &Flow,
-        history: &RunHistory,
+        store: &dyn Store,
         extra_vars: HashMap<String, String>,
     ) -> Result<FlowRun> {
         let run_id = Uuid::new_v4().to_string();
         let short_id = &run_id[..8];
-        let mut run = FlowRun {
+        let run = FlowRun {
             id: run_id.clone(),
             flow_id: flow.id.clone(),
             status: RunStatus::Running,
@@ -42,41 +43,34 @@ impl FlowRunner {
             node_runs: vec![],
             error: None,
         };
-        history.add_run(run.clone()).await;
+        store.add_run(run.clone()).await?;
 
         let span = tracing::info_span!("flow_run", flow = %flow.name, run = %short_id);
 
         tracing::info!(parent: &span, nodes = flow.nodes.len(), edges = flow.edges.len(), "▶ Started (with context)");
 
         let start = std::time::Instant::now();
-        let result = self.execute_inner_with_context(flow, &run_id, history, extra_vars).instrument(span.clone()).await;
+        let result = self.execute_inner_with_context(flow, &run_id, store, extra_vars).instrument(span.clone()).await;
         let elapsed = start.elapsed();
 
         match &result {
             Ok(_) => {
-                history
-                    .update_run(&flow.id, &run_id, |r| {
-                        r.status = RunStatus::Success;
-                        r.finished_at = Some(Utc::now());
-                    })
-                    .await;
+                store
+                    .complete_run(&flow.id, &run_id, RunStatus::Success, None)
+                    .await?;
                 tracing::info!(parent: &span, elapsed = format_args!("{:.1}s", elapsed.as_secs_f64()), "✓ Completed");
             }
             Err(e) => {
                 let err_msg = format!("{e:#}");
-                history
-                    .update_run(&flow.id, &run_id, |r| {
-                        r.status = RunStatus::Failed;
-                        r.finished_at = Some(Utc::now());
-                        r.error = Some(err_msg.clone());
-                    })
-                    .await;
+                store
+                    .complete_run(&flow.id, &run_id, RunStatus::Failed, Some(err_msg.clone()))
+                    .await?;
                 tracing::error!(parent: &span, elapsed = format_args!("{:.1}s", elapsed.as_secs_f64()), error = %err_msg, "✗ Failed");
             }
         }
 
-        run = history
-            .get_runs(&flow.id)
+        let run = store
+            .get_runs(&flow.id, 100)
             .await
             .into_iter()
             .find(|r| r.id == run_id)
@@ -85,10 +79,10 @@ impl FlowRunner {
         result.map(|_| run)
     }
 
-    pub async fn execute(&self, flow: &Flow, history: &RunHistory) -> Result<FlowRun> {
+    pub async fn execute(&self, flow: &Flow, store: &dyn Store) -> Result<FlowRun> {
         let run_id = Uuid::new_v4().to_string();
         let short_id = &run_id[..8];
-        let mut run = FlowRun {
+        let run = FlowRun {
             id: run_id.clone(),
             flow_id: flow.id.clone(),
             status: RunStatus::Running,
@@ -97,42 +91,35 @@ impl FlowRunner {
             node_runs: vec![],
             error: None,
         };
-        history.add_run(run.clone()).await;
+        store.add_run(run.clone()).await?;
 
         let span = tracing::info_span!("flow_run", flow = %flow.name, run = %short_id);
 
         tracing::info!(parent: &span, nodes = flow.nodes.len(), edges = flow.edges.len(), "▶ Started");
 
         let start = std::time::Instant::now();
-        let result = self.execute_inner(flow, &run_id, history).instrument(span.clone()).await;
+        let result = self.execute_inner(flow, &run_id, store).instrument(span.clone()).await;
         let elapsed = start.elapsed();
 
         match &result {
             Ok(_) => {
-                history
-                    .update_run(&flow.id, &run_id, |r| {
-                        r.status = RunStatus::Success;
-                        r.finished_at = Some(Utc::now());
-                    })
-                    .await;
+                store
+                    .complete_run(&flow.id, &run_id, RunStatus::Success, None)
+                    .await?;
                 tracing::info!(parent: &span, elapsed = format_args!("{:.1}s", elapsed.as_secs_f64()), "✓ Completed");
             }
             Err(e) => {
                 let err_msg = format!("{e:#}");
-                history
-                    .update_run(&flow.id, &run_id, |r| {
-                        r.status = RunStatus::Failed;
-                        r.finished_at = Some(Utc::now());
-                        r.error = Some(err_msg.clone());
-                    })
-                    .await;
+                store
+                    .complete_run(&flow.id, &run_id, RunStatus::Failed, Some(err_msg.clone()))
+                    .await?;
                 tracing::error!(parent: &span, elapsed = format_args!("{:.1}s", elapsed.as_secs_f64()), error = %err_msg, "✗ Failed");
             }
         }
 
         // Return the final state
-        run = history
-            .get_runs(&flow.id)
+        let run = store
+            .get_runs(&flow.id, 100)
             .await
             .into_iter()
             .find(|r| r.id == run_id)
@@ -145,7 +132,7 @@ impl FlowRunner {
         &self,
         flow: &Flow,
         run_id: &str,
-        history: &RunHistory,
+        store: &dyn Store,
     ) -> Result<()> {
         // Find nodes by type
         let executor_node = flow
@@ -198,9 +185,7 @@ impl FlowRunner {
                     finished_at: None,
                     output_preview: None,
                 };
-                history
-                    .update_run(&flow.id, run_id, |r| r.node_runs.push(node_run))
-                    .await;
+                store.push_node_run(&flow.id, run_id, node_run).await?;
             }
 
             let fetch_start = std::time::Instant::now();
@@ -231,17 +216,10 @@ impl FlowRunner {
 
             // Mark source nodes as complete
             for node in &source_nodes {
-                let nid = node.id.clone();
                 let preview = format!("{} items fetched", result.len());
-                history
-                    .update_run(&flow.id, run_id, |r| {
-                        if let Some(nr) = r.node_runs.iter_mut().find(|nr| nr.node_id == nid) {
-                            nr.status = RunStatus::Success;
-                            nr.finished_at = Some(Utc::now());
-                            nr.output_preview = Some(preview);
-                        }
-                    })
-                    .await;
+                store
+                    .complete_node_run(&flow.id, run_id, &node.id, RunStatus::Success, Some(preview))
+                    .await?;
             }
 
             result
@@ -262,9 +240,7 @@ impl FlowRunner {
                 finished_at: None,
                 output_preview: None,
             };
-            history
-                .update_run(&flow.id, run_id, |r| r.node_runs.push(filter_run))
-                .await;
+            store.push_node_run(&flow.id, run_id, filter_run).await?;
 
             let filter = parse_filter_config(node)?;
             items = filter.apply(items);
@@ -278,17 +254,10 @@ impl FlowRunner {
                 dropped,
             );
 
-            let nid = node.id.clone();
             let preview = format!("{} → {} items ({} dropped)", before_count, items.len(), dropped);
-            history
-                .update_run(&flow.id, run_id, |r| {
-                    if let Some(nr) = r.node_runs.iter_mut().find(|nr| nr.node_id == nid) {
-                        nr.status = RunStatus::Success;
-                        nr.finished_at = Some(Utc::now());
-                        nr.output_preview = Some(preview);
-                    }
-                })
-                .await;
+            store
+                .complete_node_run(&flow.id, run_id, &node.id, RunStatus::Success, Some(preview))
+                .await?;
         }
 
         // ── 3. PROMPT RENDERING ─────────────────────────────────────
@@ -391,9 +360,7 @@ impl FlowRunner {
             finished_at: None,
             output_preview: None,
         };
-        history
-            .update_run(&flow.id, run_id, |r| r.node_runs.push(exec_node_run))
-            .await;
+        store.push_node_run(&flow.id, run_id, exec_node_run).await?;
 
         let exec_start = std::time::Instant::now();
         let exec_result = executor
@@ -416,16 +383,9 @@ impl FlowRunner {
             exec_result.text.clone()
         };
 
-        let exec_nid = executor_node.id.clone();
-        history
-            .update_run(&flow.id, run_id, |r| {
-                if let Some(nr) = r.node_runs.iter_mut().find(|nr| nr.node_id == exec_nid) {
-                    nr.status = RunStatus::Success;
-                    nr.finished_at = Some(Utc::now());
-                    nr.output_preview = Some(preview);
-                }
-            })
-            .await;
+        store
+            .complete_node_run(&flow.id, run_id, &executor_node.id, RunStatus::Success, Some(preview))
+            .await?;
 
         // ── 5. SINKS ────────────────────────────────────────────────
         if !exec_result.text.is_empty() {
@@ -442,15 +402,12 @@ impl FlowRunner {
                     finished_at: None,
                     output_preview: None,
                 };
-                history
-                    .update_run(&flow.id, run_id, |r| r.node_runs.push(sink_run))
-                    .await;
+                store.push_node_run(&flow.id, run_id, sink_run).await?;
 
                 let sink_start = std::time::Instant::now();
                 let result = sink.deliver(&exec_result.text).await;
                 let sink_elapsed = sink_start.elapsed();
 
-                let nid = sink_node.id.clone();
                 let (status, preview) = match &result {
                     Ok(_) => {
                         tracing::info!(
@@ -470,15 +427,9 @@ impl FlowRunner {
                     }
                 };
 
-                history
-                    .update_run(&flow.id, run_id, |r| {
-                        if let Some(nr) = r.node_runs.iter_mut().find(|nr| nr.node_id == nid) {
-                            nr.status = status;
-                            nr.finished_at = Some(Utc::now());
-                            nr.output_preview = Some(preview);
-                        }
-                    })
-                    .await;
+                store
+                    .complete_node_run(&flow.id, run_id, &sink_node.id, status, Some(preview))
+                    .await?;
             }
         } else {
             tracing::warn!("⚠ Executor returned empty output, skipping sinks");
@@ -493,7 +444,7 @@ impl FlowRunner {
         &self,
         flow: &Flow,
         run_id: &str,
-        history: &RunHistory,
+        store: &dyn Store,
         extra_vars: HashMap<String, String>,
     ) -> Result<()> {
         let executor_node = flow
@@ -557,9 +508,7 @@ impl FlowRunner {
             finished_at: None,
             output_preview: None,
         };
-        history
-            .update_run(&flow.id, run_id, |r| r.node_runs.push(exec_node_run))
-            .await;
+        store.push_node_run(&flow.id, run_id, exec_node_run).await?;
 
         let exec_start = std::time::Instant::now();
         let exec_result = executor
@@ -582,16 +531,9 @@ impl FlowRunner {
             exec_result.text.clone()
         };
 
-        let exec_nid = executor_node.id.clone();
-        history
-            .update_run(&flow.id, run_id, |r| {
-                if let Some(nr) = r.node_runs.iter_mut().find(|nr| nr.node_id == exec_nid) {
-                    nr.status = RunStatus::Success;
-                    nr.finished_at = Some(Utc::now());
-                    nr.output_preview = Some(preview);
-                }
-            })
-            .await;
+        store
+            .complete_node_run(&flow.id, run_id, &executor_node.id, RunStatus::Success, Some(preview))
+            .await?;
 
         // Sinks
         let sink_nodes: Vec<_> = flow

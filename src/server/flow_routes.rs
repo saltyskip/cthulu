@@ -23,7 +23,7 @@ pub fn flow_router() -> Router<AppState> {
 }
 
 async fn list_flows(State(state): State<AppState>) -> Json<Value> {
-    let flows = state.flow_store.list().await;
+    let flows = state.store.list_flows().await;
 
     let summaries: Vec<Value> = flows
         .iter()
@@ -48,7 +48,7 @@ async fn get_flow(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    let flow = state.flow_store.get(&id).await.ok_or_else(|| {
+    let flow = state.store.get_flow(&id).await.ok_or_else(|| {
         (
             StatusCode::NOT_FOUND,
             Json(json!({ "error": "flow not found" })),
@@ -86,7 +86,7 @@ async fn create_flow(
     };
 
     let id = flow.id.clone();
-    if let Err(e) = state.flow_store.save(flow).await {
+    if let Err(e) = state.store.save_flow(flow).await {
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({ "error": format!("failed to save flow: {e}") })),
@@ -120,7 +120,7 @@ async fn update_flow(
     Path(id): Path<String>,
     Json(body): Json<UpdateFlowRequest>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    let mut flow = state.flow_store.get(&id).await.ok_or_else(|| {
+    let mut flow = state.store.get_flow(&id).await.ok_or_else(|| {
         (
             StatusCode::NOT_FOUND,
             Json(json!({ "error": "flow not found" })),
@@ -144,7 +144,7 @@ async fn update_flow(
     }
     flow.updated_at = Utc::now();
 
-    state.flow_store.save(flow.clone()).await.map_err(|e| {
+    state.store.save_flow(flow.clone()).await.map_err(|e| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({ "error": format!("failed to save flow: {e}") })),
@@ -166,7 +166,7 @@ async fn delete_flow(
     // Stop scheduler trigger before deleting
     state.scheduler.stop_flow(&id).await;
 
-    let existed = state.flow_store.delete(&id).await.map_err(|e| {
+    let existed = state.store.delete_flow(&id).await.map_err(|e| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({ "error": format!("failed to delete flow: {e}") })),
@@ -194,7 +194,7 @@ async fn trigger_flow(
     Path(id): Path<String>,
     body: String,
 ) -> Result<(StatusCode, Json<Value>), (StatusCode, Json<Value>)> {
-    let flow = state.flow_store.get(&id).await.ok_or_else(|| {
+    let flow = state.store.get_flow(&id).await.ok_or_else(|| {
         (
             StatusCode::NOT_FOUND,
             Json(json!({ "error": "flow not found" })),
@@ -234,11 +234,11 @@ async fn trigger_flow(
         github_client: state.github_client.clone(),
     };
 
-    let history = state.run_history.clone();
+    let store = state.store.clone();
     let flow_name = flow.name.clone();
 
     tokio::spawn(async move {
-        match runner.execute(&flow, &history).await {
+        match runner.execute(&flow, &*store).await {
             Ok(run) => {
                 tracing::info!(
                     flow = %flow_name,
@@ -262,7 +262,7 @@ async fn get_runs(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Json<Value> {
-    let runs = state.run_history.get_runs(&id).await;
+    let runs = state.store.get_runs(&id, 100).await;
     Json(json!({ "runs": runs }))
 }
 

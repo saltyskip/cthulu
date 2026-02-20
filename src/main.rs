@@ -17,9 +17,9 @@ use tracing_subscriber::EnvFilter;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 
-use crate::flows::history::RunHistory;
+use crate::flows::file_store::FileStore;
 use crate::flows::scheduler::FlowScheduler;
-use crate::flows::storage::FlowStore;
+use crate::flows::store::Store;
 use crate::github::client::{GithubClient, HttpGithubClient};
 
 #[tokio::main]
@@ -72,23 +72,20 @@ async fn main() -> Result<(), Box<dyn Error>> {
             Arc::new(HttpGithubClient::new((*http_client).clone(), token)) as Arc<dyn GithubClient>
         });
 
-    // Initialize flow store
-    let flows_dir = dirs::home_dir()
+    // Initialize unified store (flows + runs)
+    let base_dir = dirs::home_dir()
         .unwrap_or_else(|| std::path::PathBuf::from("."))
-        .join(".cthulu")
-        .join("flows");
-    let flow_store = Arc::new(FlowStore::new(flows_dir));
-    flow_store
+        .join(".cthulu");
+    let store: Arc<dyn Store> = Arc::new(FileStore::new(base_dir));
+    store
         .load_all()
         .await
-        .context("failed to load flows")?;
+        .context("failed to load store")?;
 
-    let run_history = Arc::new(RunHistory::new());
 
     // Create and start the flow scheduler
     let scheduler = Arc::new(FlowScheduler::new(
-        flow_store.clone(),
-        run_history.clone(),
+        store.clone(),
         http_client.clone(),
         github_client.clone(),
     ));
@@ -97,8 +94,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let app_state = server::AppState {
         github_client,
         http_client,
-        flow_store,
-        run_history,
+        store,
         scheduler,
     };
 
