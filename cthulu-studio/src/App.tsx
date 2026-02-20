@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import * as api from "./api/client";
 import { log, getEntries, subscribe } from "./api/logger";
-import type { Flow, FlowNode, FlowEdge, FlowSummary, NodeTypeSchema } from "./types/flow";
+import { subscribeToRuns } from "./api/runStream";
+import type { Flow, FlowNode, FlowEdge, FlowSummary, NodeTypeSchema, RunEvent } from "./types/flow";
 import TopBar from "./components/TopBar";
 import FlowList from "./components/FlowList";
 import Sidebar from "./components/Sidebar";
@@ -9,6 +10,7 @@ import Canvas, { type CanvasHandle } from "./components/Canvas";
 import PropertyPanel from "./components/PropertyPanel";
 import RunHistory from "./components/RunHistory";
 import Console from "./components/Console";
+import RunLog from "./components/RunLog";
 import ErrorBoundary from "./components/ErrorBoundary";
 
 export default function App() {
@@ -19,8 +21,11 @@ export default function App() {
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [showConsole, setShowConsole] = useState(false);
+  const [showRunLog, setShowRunLog] = useState(false);
   const [errorCount, setErrorCount] = useState(0);
   const [serverUrl, setServerUrlState] = useState(api.getServerUrl());
+  const [runEvents, setRunEvents] = useState<RunEvent[]>([]);
+  const [nodeRunStatus, setNodeRunStatus] = useState<Record<string, "running" | "completed" | "failed">>({});
   // Keep a light reference for TopBar (name, enabled) without driving Canvas
   const [activeFlowMeta, setActiveFlowMeta] = useState<{ id: string; name: string; description: string; enabled: boolean } | null>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -83,6 +88,45 @@ export default function App() {
       setErrorCount(errors);
     });
   }, []);
+
+  // --- SSE run event subscription ---
+  const clearTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const handleRunEvent = useCallback((event: RunEvent) => {
+    setRunEvents((prev) => {
+      const next = [...prev, event];
+      return next.length > 500 ? next.slice(-500) : next;
+    });
+
+    // Reset node statuses at start of a new run
+    if (event.event_type === "run_started") {
+      if (clearTimer.current) clearTimeout(clearTimer.current);
+      setNodeRunStatus({});
+    }
+
+    // Update node run status for canvas highlighting
+    if (event.node_id) {
+      if (event.event_type === "node_started") {
+        setNodeRunStatus((prev) => ({ ...prev, [event.node_id!]: "running" }));
+      } else if (event.event_type === "node_completed") {
+        setNodeRunStatus((prev) => ({ ...prev, [event.node_id!]: "completed" }));
+      } else if (event.event_type === "node_failed") {
+        setNodeRunStatus((prev) => ({ ...prev, [event.node_id!]: "failed" }));
+      }
+    }
+
+    // Clear all node statuses a while after a run finishes
+    if (event.event_type === "run_completed" || event.event_type === "run_failed") {
+      clearTimer.current = setTimeout(() => setNodeRunStatus({}), 10000);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!activeFlowId) return;
+    setRunEvents([]);
+    setNodeRunStatus({});
+    const cleanup = subscribeToRuns(activeFlowId, handleRunEvent);
+    return cleanup;
+  }, [activeFlowId, handleRunEvent]);
 
   // --- Boot ---
   const initialized = useRef(false);
@@ -148,6 +192,7 @@ export default function App() {
     if (!activeFlowMeta) return;
     try {
       log("info", `Triggering flow: ${activeFlowMeta.name}`);
+      setShowRunLog(true);
       await api.triggerFlow(activeFlowMeta.id);
     } catch { /* logged */ }
   };
@@ -182,7 +227,7 @@ export default function App() {
   };
 
   return (
-    <div className={showConsole ? "app-with-console" : ""}>
+    <div className={showConsole || showRunLog ? "app-with-console" : ""}>
       <TopBar
         flow={activeFlowMeta}
         onTrigger={handleTrigger}
@@ -190,6 +235,8 @@ export default function App() {
         onSettingsClick={() => setShowSettings(true)}
         consoleOpen={showConsole}
         onToggleConsole={() => setShowConsole((v) => !v)}
+        runLogOpen={showRunLog}
+        onToggleRunLog={() => setShowRunLog((v) => !v)}
         errorCount={errorCount}
       />
       <div className="app-layout">
@@ -211,6 +258,7 @@ export default function App() {
               initialFlow={initialFlow}
               onFlowSnapshot={handleFlowSnapshot}
               onSelectionChange={handleSelectionChange}
+              nodeRunStatus={nodeRunStatus}
             />
           </ErrorBoundary>
         ) : (
@@ -237,7 +285,8 @@ export default function App() {
         </div>
       </div>
 
-      {showConsole && <Console onClose={() => setShowConsole(false)} />}
+      {showRunLog && <RunLog events={runEvents} onClear={() => setRunEvents([])} onClose={() => setShowRunLog(false)} />}
+      {showConsole && !showRunLog && <Console onClose={() => setShowConsole(false)} />}
 
       {showSettings && (
         <div className="modal-overlay" onClick={() => setShowSettings(false)}>

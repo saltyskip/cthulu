@@ -453,6 +453,28 @@ button:disabled {
   stroke-width: 3 !important;
 }
 
+/* Node run status highlights */
+.custom-node.run-running {
+  border-color: var(--accent);
+  box-shadow: 0 0 8px rgba(88, 166, 255, 0.4);
+  animation: pulse-running 1.5s ease-in-out infinite;
+}
+
+.custom-node.run-completed {
+  border-color: #3fb950;
+  box-shadow: 0 0 8px rgba(63, 185, 80, 0.35);
+}
+
+.custom-node.run-failed {
+  border-color: var(--danger);
+  box-shadow: 0 0 8px rgba(248, 81, 73, 0.4);
+}
+
+@keyframes pulse-running {
+  0%, 100% { box-shadow: 0 0 8px rgba(88, 166, 255, 0.4); }
+  50% { box-shadow: 0 0 16px rgba(88, 166, 255, 0.7); }
+}
+
 .react-flow__node.selected .custom-node {
   border-color: var(--accent);
   box-shadow: 0 0 0 1px var(--accent);
@@ -694,6 +716,67 @@ button:disabled {
 
 .app-with-console .app-layout {
   height: calc(100vh - 48px - 280px);
+}
+
+/* Run Log */
+.run-log-panel {
+  height: 280px;
+}
+
+.run-log-group-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 12px;
+  font-size: 11px;
+  cursor: pointer;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border);
+  user-select: none;
+}
+
+.run-log-group-header:hover {
+  background: var(--bg-tertiary);
+}
+
+.run-log-chevron {
+  font-size: 9px;
+  color: var(--text-secondary);
+  width: 10px;
+  flex-shrink: 0;
+}
+
+.run-log-badge {
+  flex-shrink: 0;
+  font-weight: 600;
+  font-size: 10px;
+  width: 40px;
+  font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
+}
+
+.run-log-run-id {
+  color: var(--text-secondary);
+  opacity: 0.6;
+  font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
+  font-size: 10px;
+}
+
+.run-log-summary {
+  color: var(--text-secondary);
+  font-size: 11px;
+  margin-left: 4px;
+}
+
+.run-log-entry.run-log-failed {
+  background: rgba(248, 81, 73, 0.06);
+}
+
+.run-log-entry.run-log-completed {
+  background: rgba(63, 185, 80, 0.04);
+}
+
+.console-toggle-active {
+  color: var(--accent) !important;
 }
 
 /* Drag ghost */

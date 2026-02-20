@@ -17,6 +17,7 @@ use tracing_subscriber::EnvFilter;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 
+use crate::flows::events::RunEvent;
 use crate::flows::file_store::FileStore;
 use crate::flows::scheduler::FlowScheduler;
 use crate::flows::store::Store;
@@ -83,11 +84,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .context("failed to load store")?;
 
 
+    let (events_tx, _) = tokio::sync::broadcast::channel::<RunEvent>(256);
+
     // Create and start the flow scheduler
     let scheduler = Arc::new(FlowScheduler::new(
         store.clone(),
         http_client.clone(),
         github_client.clone(),
+        events_tx.clone(),
     ));
     scheduler.start_all().await;
 
@@ -96,6 +100,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         http_client,
         store,
         scheduler,
+        events_tx,
     };
 
     let app = server::create_app(app_state)

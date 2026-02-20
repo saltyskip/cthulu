@@ -8,6 +8,8 @@ interface TopBarProps {
   onSettingsClick: () => void;
   consoleOpen: boolean;
   onToggleConsole: () => void;
+  runLogOpen: boolean;
+  onToggleRunLog: () => void;
   errorCount: number;
 }
 
@@ -18,6 +20,8 @@ export default function TopBar({
   onSettingsClick,
   consoleOpen,
   onToggleConsole,
+  runLogOpen,
+  onToggleRunLog,
   errorCount,
 }: TopBarProps) {
   const [connected, setConnected] = useState(false);
@@ -75,6 +79,12 @@ export default function TopBar({
         />
         <span>{connected ? api.getServerUrl() : "Disconnected"}</span>
       </div>
+      <button
+        className={`ghost ${runLogOpen ? "console-toggle-active" : ""}`}
+        onClick={onToggleRunLog}
+      >
+        Log
+      </button>
       <button
         className={`ghost ${consoleOpen ? "console-toggle-active" : ""}`}
         onClick={onToggleConsole}

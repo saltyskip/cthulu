@@ -1,3 +1,4 @@
+pub mod events;
 pub mod file_store;
 pub mod history;
 pub mod runner;

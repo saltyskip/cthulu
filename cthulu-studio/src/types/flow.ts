@@ -68,3 +68,12 @@ export interface NodeTypeSchema {
   label: string;
   config_schema: Record<string, unknown>;
 }
+
+export interface RunEvent {
+  flow_id: string;
+  run_id: string;
+  timestamp: string;
+  node_id: string | null;
+  event_type: string;
+  message: string;
+}

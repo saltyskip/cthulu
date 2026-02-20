@@ -7,7 +7,10 @@ use chrono::Utc;
 use tracing::Instrument;
 use uuid::Uuid;
 
+use tokio::sync::broadcast;
+
 use crate::config::{SinkConfig, SourceConfig};
+use crate::flows::events::{RunEvent, RunEventType};
 use crate::flows::history::{FlowRun, NodeRun, RunStatus};
 use crate::flows::store::Store;
 use crate::flows::{Flow, NodeType};
@@ -23,6 +26,29 @@ use crate::tasks::pipeline::{format_items, resolve_sinks};
 pub struct FlowRunner {
     pub http_client: Arc<reqwest::Client>,
     pub github_client: Option<Arc<dyn GithubClient>>,
+    pub events_tx: Option<broadcast::Sender<RunEvent>>,
+}
+
+impl FlowRunner {
+    fn emit(
+        &self,
+        flow_id: &str,
+        run_id: &str,
+        node_id: Option<&str>,
+        event_type: RunEventType,
+        message: impl Into<String>,
+    ) {
+        if let Some(tx) = &self.events_tx {
+            let _ = tx.send(RunEvent {
+                flow_id: flow_id.to_string(),
+                run_id: run_id.to_string(),
+                timestamp: Utc::now(),
+                node_id: node_id.map(String::from),
+                event_type,
+                message: message.into(),
+            });
+        }
+    }
 }
 
 impl FlowRunner {
@@ -44,6 +70,7 @@ impl FlowRunner {
             error: None,
         };
         store.add_run(run.clone()).await?;
+        self.emit(&flow.id, &run_id, None, RunEventType::RunStarted, "Flow execution started (with context)");
 
         let span = tracing::info_span!("flow_run", flow = %flow.name, run = %short_id);
 
@@ -58,6 +85,7 @@ impl FlowRunner {
                 store
                     .complete_run(&flow.id, &run_id, RunStatus::Success, None)
                     .await?;
+                self.emit(&flow.id, &run_id, None, RunEventType::RunCompleted, format!("Completed in {:.1}s", elapsed.as_secs_f64()));
                 tracing::info!(parent: &span, elapsed = format_args!("{:.1}s", elapsed.as_secs_f64()), "✓ Completed");
             }
             Err(e) => {
@@ -65,6 +93,7 @@ impl FlowRunner {
                 store
                     .complete_run(&flow.id, &run_id, RunStatus::Failed, Some(err_msg.clone()))
                     .await?;
+                self.emit(&flow.id, &run_id, None, RunEventType::RunFailed, &err_msg);
                 tracing::error!(parent: &span, elapsed = format_args!("{:.1}s", elapsed.as_secs_f64()), error = %err_msg, "✗ Failed");
             }
         }
@@ -92,6 +121,7 @@ impl FlowRunner {
             error: None,
         };
         store.add_run(run.clone()).await?;
+        self.emit(&flow.id, &run_id, None, RunEventType::RunStarted, "Flow execution started");
 
         let span = tracing::info_span!("flow_run", flow = %flow.name, run = %short_id);
 
@@ -106,6 +136,7 @@ impl FlowRunner {
                 store
                     .complete_run(&flow.id, &run_id, RunStatus::Success, None)
                     .await?;
+                self.emit(&flow.id, &run_id, None, RunEventType::RunCompleted, format!("Completed in {:.1}s", elapsed.as_secs_f64()));
                 tracing::info!(parent: &span, elapsed = format_args!("{:.1}s", elapsed.as_secs_f64()), "✓ Completed");
             }
             Err(e) => {
@@ -113,6 +144,7 @@ impl FlowRunner {
                 store
                     .complete_run(&flow.id, &run_id, RunStatus::Failed, Some(err_msg.clone()))
                     .await?;
+                self.emit(&flow.id, &run_id, None, RunEventType::RunFailed, &err_msg);
                 tracing::error!(parent: &span, elapsed = format_args!("{:.1}s", elapsed.as_secs_f64()), error = %err_msg, "✗ Failed");
             }
         }
@@ -188,11 +220,20 @@ impl FlowRunner {
                 store.push_node_run(&flow.id, run_id, node_run).await?;
             }
 
+            for node in &source_nodes {
+                self.emit(&flow.id, run_id, Some(&node.id), RunEventType::NodeStarted, format!("Fetching {}...", node.label));
+            }
+
             let fetch_start = std::time::Instant::now();
             let result =
                 sources::fetch_all(&source_configs, &self.http_client, github_token.as_deref())
                     .await;
             let fetch_elapsed = fetch_start.elapsed();
+
+            let source_msg = format!("{} items fetched in {:.1}s", result.len(), fetch_elapsed.as_secs_f64());
+            for node in &source_nodes {
+                self.emit(&flow.id, run_id, Some(&node.id), RunEventType::NodeCompleted, &source_msg);
+            }
 
             tracing::info!(
                 items = result.len(),
@@ -242,10 +283,15 @@ impl FlowRunner {
             };
             store.push_node_run(&flow.id, run_id, filter_run).await?;
 
+            self.emit(&flow.id, run_id, Some(&node.id), RunEventType::NodeStarted, format!("Applying {}...", node.label));
+
             let filter = parse_filter_config(node)?;
             items = filter.apply(items);
 
             let dropped = before_count - items.len();
+            let filter_msg = format!("{} → {} items ({} dropped)", before_count, items.len(), dropped);
+            self.emit(&flow.id, run_id, Some(&node.id), RunEventType::NodeCompleted, &filter_msg);
+
             tracing::info!(
                 filter = %node.label,
                 "{} → {} items ({} dropped)",
@@ -317,6 +363,8 @@ impl FlowRunner {
             rendered
         };
 
+        self.emit(&flow.id, run_id, None, RunEventType::Log, format!("Prompt rendered ({} chars)", rendered.len()));
+
         tracing::info!(
             chars = rendered.len(),
             items = items.len(),
@@ -362,12 +410,19 @@ impl FlowRunner {
         };
         store.push_node_run(&flow.id, run_id, exec_node_run).await?;
 
+        self.emit(&flow.id, run_id, Some(&executor_node.id), RunEventType::NodeStarted, format!("Executing {}...", executor_node.kind));
+
         let exec_start = std::time::Instant::now();
         let exec_result = executor
             .execute(&rendered, &working_dir)
             .await
             .context("executor failed")?;
         let exec_elapsed = exec_start.elapsed();
+
+        self.emit(
+            &flow.id, run_id, Some(&executor_node.id), RunEventType::NodeCompleted,
+            format!("{} turns, ${:.4}, {} chars output", exec_result.num_turns, exec_result.cost_usd, exec_result.text.len()),
+        );
 
         tracing::info!(
             turns = exec_result.num_turns,
@@ -404,12 +459,15 @@ impl FlowRunner {
                 };
                 store.push_node_run(&flow.id, run_id, sink_run).await?;
 
+                self.emit(&flow.id, run_id, Some(&sink_node.id), RunEventType::NodeStarted, format!("Delivering to {}...", sink_node.label));
+
                 let sink_start = std::time::Instant::now();
                 let result = sink.deliver(&exec_result.text).await;
                 let sink_elapsed = sink_start.elapsed();
 
                 let (status, preview) = match &result {
                     Ok(_) => {
+                        self.emit(&flow.id, run_id, Some(&sink_node.id), RunEventType::NodeCompleted, format!("Delivered in {:.1}s", sink_elapsed.as_secs_f64()));
                         tracing::info!(
                             sink = %sink_node.label,
                             elapsed = format_args!("{:.1}s", sink_elapsed.as_secs_f64()),
@@ -418,6 +476,7 @@ impl FlowRunner {
                         (RunStatus::Success, format!("Delivered in {:.1}s", sink_elapsed.as_secs_f64()))
                     }
                     Err(e) => {
+                        self.emit(&flow.id, run_id, Some(&sink_node.id), RunEventType::NodeFailed, format!("Failed: {e}"));
                         tracing::error!(
                             sink = %sink_node.label,
                             error = %e,
@@ -474,6 +533,8 @@ impl FlowRunner {
 
         let rendered = render_prompt(&prompt_template, &vars);
 
+        self.emit(&flow.id, run_id, None, RunEventType::Log, format!("Prompt rendered ({} chars)", rendered.len()));
+
         tracing::info!(
             chars = rendered.len(),
             "✓ Prompt rendered (with context)",
@@ -510,12 +571,19 @@ impl FlowRunner {
         };
         store.push_node_run(&flow.id, run_id, exec_node_run).await?;
 
+        self.emit(&flow.id, run_id, Some(&executor_node.id), RunEventType::NodeStarted, format!("Executing {}...", executor_node.kind));
+
         let exec_start = std::time::Instant::now();
         let exec_result = executor
             .execute(&rendered, &working_dir)
             .await
             .context("executor failed")?;
         let exec_elapsed = exec_start.elapsed();
+
+        self.emit(
+            &flow.id, run_id, Some(&executor_node.id), RunEventType::NodeCompleted,
+            format!("{} turns, ${:.4}, {} chars output", exec_result.num_turns, exec_result.cost_usd, exec_result.text.len()),
+        );
 
         tracing::info!(
             turns = exec_result.num_turns,
@@ -548,10 +616,19 @@ impl FlowRunner {
 
             for (i, sink) in resolved_sinks.iter().enumerate() {
                 let sink_node = &sink_nodes[i];
+                self.emit(&flow.id, run_id, Some(&sink_node.id), RunEventType::NodeStarted, format!("Delivering to {}...", sink_node.label));
+                let sink_start = std::time::Instant::now();
                 let result = sink.deliver(&exec_result.text).await;
+                let sink_elapsed = sink_start.elapsed();
                 match &result {
-                    Ok(_) => tracing::info!(sink = %sink_node.label, "✓ Delivered"),
-                    Err(e) => tracing::error!(sink = %sink_node.label, error = %e, "✗ Delivery failed"),
+                    Ok(_) => {
+                        self.emit(&flow.id, run_id, Some(&sink_node.id), RunEventType::NodeCompleted, format!("Delivered in {:.1}s", sink_elapsed.as_secs_f64()));
+                        tracing::info!(sink = %sink_node.label, "✓ Delivered");
+                    }
+                    Err(e) => {
+                        self.emit(&flow.id, run_id, Some(&sink_node.id), RunEventType::NodeFailed, format!("Failed: {e}"));
+                        tracing::error!(sink = %sink_node.label, error = %e, "✗ Delivery failed");
+                    }
                 }
             }
         }
