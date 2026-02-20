@@ -24,14 +24,15 @@ const desktopNodes: Node[] = [
   { id: "6", type: "demo", position: { x: 740, y: 160 }, data: { label: "Notion", type: "sink", icon: "\ud83d\udcdd" }, ...commonNode },
 ];
 
-// Vertical layout (mobile)
+// Vertical branching layout (mobile)
+// All nodes are 140px wide. Pairs at x:0 and x:160, center nodes at x:80
 const mobileNodes: Node[] = [
-  { id: "1", type: "demoVertical", position: { x: 0, y: 0 }, data: { label: "Every 4 hours", type: "trigger", icon: "\u23f0" }, ...commonNode },
-  { id: "2", type: "demoVertical", position: { x: 0, y: 100 }, data: { label: "RSS Feeds", type: "source", icon: "\ud83d\udce1" }, ...commonNode },
-  { id: "3", type: "demoVertical", position: { x: 0, y: 200 }, data: { label: "Web Scraper", type: "source", icon: "\ud83c\udf10" }, ...commonNode },
-  { id: "4", type: "demoVertical", position: { x: 0, y: 300 }, data: { label: "Agent", type: "executor", icon: "\ud83e\udde0" }, ...commonNode },
-  { id: "5", type: "demoVertical", position: { x: 0, y: 400 }, data: { label: "Slack", type: "sink", icon: "\ud83d\udcac" }, ...commonNode },
-  { id: "6", type: "demoVertical", position: { x: 0, y: 500 }, data: { label: "Notion", type: "sink", icon: "\ud83d\udcdd" }, ...commonNode },
+  { id: "1", type: "demoVertical", position: { x: 80, y: 0 }, data: { label: "Every 4 hours", type: "trigger", icon: "\u23f0" }, ...commonNode },
+  { id: "2", type: "demoVertical", position: { x: 0, y: 130 }, data: { label: "RSS Feeds", type: "source", icon: "\ud83d\udce1" }, ...commonNode },
+  { id: "3", type: "demoVertical", position: { x: 160, y: 130 }, data: { label: "Web Scraper", type: "source", icon: "\ud83c\udf10" }, ...commonNode },
+  { id: "4", type: "demoVertical", position: { x: 80, y: 260 }, data: { label: "Agent", type: "executor", icon: "\ud83e\udde0" }, ...commonNode },
+  { id: "5", type: "demoVertical", position: { x: 0, y: 390 }, data: { label: "Slack", type: "sink", icon: "\ud83d\udcac" }, ...commonNode },
+  { id: "6", type: "demoVertical", position: { x: 160, y: 390 }, data: { label: "Notion", type: "sink", icon: "\ud83d\udcdd" }, ...commonNode },
 ];
 
 const desktopEdges: Edge[] = [
