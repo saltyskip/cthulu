@@ -99,15 +99,15 @@ impl ClaudeStream {
                     continue;
                 }
 
-                let event = match serde_json::from_str::<serde_json::Value>(&line) {
+                let events = match serde_json::from_str::<serde_json::Value>(&line) {
                     Ok(json) => parse_stream_json(&json),
                     Err(_) => {
                         // Not JSON, just raw text
-                        Some(ClaudeEvent::Text(line))
+                        vec![ClaudeEvent::Text(line)]
                     }
                 };
 
-                if let Some(ev) = event {
+                for ev in events {
                     if tx_stdout.send(ev).is_err() {
                         break; // receiver dropped
                     }
@@ -147,22 +147,32 @@ impl Drop for ClaudeStream {
     }
 }
 
-fn parse_stream_json(json: &serde_json::Value) -> Option<ClaudeEvent> {
-    let event_type = json.get("type")?.as_str()?;
+fn parse_stream_json(json: &serde_json::Value) -> Vec<ClaudeEvent> {
+    let event_type = match json.get("type").and_then(|v| v.as_str()) {
+        Some(t) => t,
+        None => return vec![],
+    };
 
     match event_type {
         "system" => {
-            Some(ClaudeEvent::System("Session initialized".to_string()))
+            vec![ClaudeEvent::System("Session initialized".to_string())]
         }
         "assistant" => {
-            let content = json
-                .get("message")?
-                .get("content")?
-                .as_array()?;
+            let content = match json
+                .get("message")
+                .and_then(|m| m.get("content"))
+                .and_then(|c| c.as_array())
+            {
+                Some(c) => c,
+                None => return vec![],
+            };
 
             let mut events = Vec::new();
             for block in content {
-                let block_type = block.get("type")?.as_str()?;
+                let block_type = match block.get("type").and_then(|v| v.as_str()) {
+                    Some(t) => t,
+                    None => continue,
+                };
                 match block_type {
                     "tool_use" => {
                         let tool = block
@@ -204,17 +214,7 @@ fn parse_stream_json(json: &serde_json::Value) -> Option<ClaudeEvent> {
                 }
             }
 
-            // Return the first event; we'll handle multi-events differently
-            // For now, combine them
-            if events.len() == 1 {
-                return events.into_iter().next();
-            } else if events.len() > 1 {
-                // Return the first one; the rest would need multi-send
-                // For simplicity, combine text events
-                return events.into_iter().next();
-            }
-
-            None
+            events
         }
         "result" => {
             let cost = json
@@ -231,8 +231,8 @@ fn parse_stream_json(json: &serde_json::Value) -> Option<ClaudeEvent> {
                 .unwrap_or("")
                 .to_string();
 
-            Some(ClaudeEvent::Result { text, cost, turns })
+            vec![ClaudeEvent::Result { text, cost, turns }]
         }
-        _ => None,
+        _ => vec![],
     }
 }

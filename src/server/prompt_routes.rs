@@ -124,15 +124,18 @@ Respond ONLY with valid JSON in this exact format:
         body.flow_name, body.flow_description, body.transcript
     );
 
+    // Use --allowedTools with no tools to prevent arbitrary tool execution
+    // (the summarize endpoint is HTTP-reachable and the transcript is user-controlled).
     let mut child = Command::new("claude")
         .arg("--print")
-        .arg("--dangerously-skip-permissions")
+        .arg("--allowedTools")
+        .arg("")
         .arg("-")
         .env_remove("CLAUDECODE")
         .env("CLAUDECODE", "")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        .stderr(Stdio::null())
         .spawn()
         .map_err(|e| {
             tracing::error!(error = %e, "failed to spawn claude for summarize");

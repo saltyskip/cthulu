@@ -123,6 +123,12 @@ impl App {
                     if let Some(flows_arr) = body.get("flows") {
                         if let Ok(flows) = serde_json::from_value::<Vec<FlowSummary>>(flows_arr.clone()) {
                             self.flows = flows;
+                            // Clamp index to new list length to prevent out-of-bounds panic
+                            if !self.flows.is_empty() {
+                                self.flow_list_index = self.flow_list_index.min(self.flows.len() - 1);
+                            } else {
+                                self.flow_list_index = 0;
+                            }
                         }
                     }
                 }

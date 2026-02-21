@@ -327,16 +327,16 @@ fn resolve_working_dir(session_info: &Option<crate::flows::runner::SessionInfo>)
 }
 
 /// Truncate a string to ~80 chars for use as a summary, breaking at word boundary.
+/// Uses char-safe indexing to avoid panics on multi-byte UTF-8 characters.
 fn make_summary(text: &str) -> String {
     let trimmed = text.trim();
-    if trimmed.len() <= 80 {
+    if trimmed.chars().count() <= 80 {
         return trimmed.to_string();
     }
-    // Find last space before 80
-    let boundary = trimmed[..80]
-        .rfind(' ')
-        .unwrap_or(80);
-    format!("{}...", &trimmed[..boundary])
+    // Collect first 80 chars safely, then find a word boundary
+    let truncated: String = trimmed.chars().take(80).collect();
+    let boundary = truncated.rfind(' ').unwrap_or(truncated.len());
+    format!("{}...", &truncated[..boundary])
 }
 
 /// GET /flows/{id}/interact/sessions — list all sessions for a workflow
@@ -426,7 +426,10 @@ async fn new_session(
     flow_sessions.active_session = new_id.clone();
     flow_sessions.flow_name = flow.name.clone();
 
-    super::save_sessions(&state.sessions_path, &all_sessions);
+    // Clone data for persistence and drop the write lock before disk I/O
+    let sessions_snapshot = all_sessions.clone();
+    drop(all_sessions);
+    super::save_sessions(&state.sessions_path, &sessions_snapshot);
 
     let mut resp = json!({ "session_id": new_id, "created_at": now });
     if let Some(w) = warning {
@@ -476,7 +479,10 @@ async fn delete_session(
         flow_sessions.active_session.clone()
     }; // flow_sessions borrow dropped here
 
-    super::save_sessions(&state.sessions_path, &all_sessions);
+    // Clone and drop write lock before disk I/O
+    let sessions_snapshot = all_sessions.clone();
+    drop(all_sessions);
+    super::save_sessions(&state.sessions_path, &sessions_snapshot);
 
     Ok(Json(json!({
         "deleted": true,
@@ -592,7 +598,10 @@ async fn interact_flow(
         // Update active_session
         flow_sessions.active_session = sid.clone();
 
-        super::save_sessions(&state.sessions_path, &all_sessions);
+        // Clone and drop write lock before disk I/O
+        let sessions_snapshot = all_sessions.clone();
+        drop(all_sessions);
+        super::save_sessions(&state.sessions_path, &sessions_snapshot);
 
         (sid, is_new, wdir)
     };
@@ -833,7 +842,10 @@ async fn interact_flow(
                     s.total_cost += session_cost;
                 }
             }
-            super::save_sessions(&sessions_path, &all_sessions);
+            // Clone and drop write lock before disk I/O
+            let sessions_snapshot = all_sessions.clone();
+            drop(all_sessions);
+            super::save_sessions(&sessions_path, &sessions_snapshot);
         }
 
         match exit_result {
@@ -854,10 +866,20 @@ async fn interact_flow(
 }
 
 fn kill_pid(pid: u32) {
-    // Best-effort kill via std::process::Command (avoids libc dep)
-    let _ = std::process::Command::new("kill")
-        .args(["-TERM", &pid.to_string()])
-        .spawn();
+    // Best-effort process termination, platform-specific
+    #[cfg(unix)]
+    {
+        // Send SIGTERM via the kill binary
+        let _ = std::process::Command::new("kill")
+            .args(["-TERM", &pid.to_string()])
+            .spawn();
+    }
+    #[cfg(windows)]
+    {
+        let _ = std::process::Command::new("taskkill")
+            .args(["/PID", &pid.to_string(), "/F"])
+            .spawn();
+    }
 }
 
 /// POST /flows/{id}/interact/reset — clear ALL sessions, create one fresh session
@@ -879,7 +901,10 @@ async fn reset_interact(
     }
     // Remove the entry entirely (next interact will create fresh)
     all_sessions.remove(&id);
-    super::save_sessions(&state.sessions_path, &all_sessions);
+    // Clone and drop write lock before disk I/O
+    let sessions_snapshot = all_sessions.clone();
+    drop(all_sessions);
+    super::save_sessions(&state.sessions_path, &sessions_snapshot);
     Ok(Json(json!({ "status": "reset" })))
 }
 

@@ -16,7 +16,7 @@ use crate::flows::store::Store;
 use crate::github::client::GithubClient;
 
 /// A single Claude Code session (one tab in the History list).
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InteractSession {
     /// The Claude session ID (UUID). Used with `--session-id` on first message,
     /// `--resume` on subsequent messages.
@@ -41,7 +41,7 @@ pub struct InteractSession {
 }
 
 /// All sessions for a single workflow.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FlowSessions {
     pub flow_name: String,
     /// The session_id that was last used (default tab when opening History).

@@ -132,7 +132,7 @@ fn render_output(frame: &mut Frame, area: Rect, app: &App) {
         let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
             .begin_symbol(Some("▲"))
             .end_symbol(Some("▼"));
-        frame.render_stateful_widget(scrollbar, area, &mut scrollbar_state);
+        frame.render_stateful_widget(scrollbar, inner_area, &mut scrollbar_state);
     }
 }
 

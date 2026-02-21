@@ -217,9 +217,11 @@ export default function InteractPanel({
         }
       } catch (err) {
         if (!cancelled) {
+          const errorTabId = "_error";
+          setActiveSessionId(errorTabId);
           setTabs((prev) => ({
             ...prev,
-            _error: {
+            [errorTabId]: {
               prompt: "",
               outputLines: [
                 {
