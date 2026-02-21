@@ -215,6 +215,53 @@ impl FlowRunner {
         })
     }
 
+    /// Prepare a session for a specific executor node (node-level chat).
+    /// Does NOT run sources/filters — just resolves the node's own config
+    /// (prompt, permissions, working_dir, system_prompt).
+    pub fn prepare_node_session(flow: &Flow, node_id: &str) -> Result<SessionInfo> {
+        let executor_node = flow
+            .nodes
+            .iter()
+            .find(|n| n.id == node_id && n.node_type == NodeType::Executor)
+            .with_context(|| format!("executor node '{}' not found in flow", node_id))?;
+
+        let permissions: Vec<String> = executor_node.config["permissions"]
+            .as_array()
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        let working_dir = executor_node.config["working_dir"]
+            .as_str()
+            .map(PathBuf::from)
+            .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+
+        let append_system_prompt = executor_node.config["append_system_prompt"]
+            .as_str()
+            .map(String::from);
+
+        // For node-level chat the prompt is informational only — the user types
+        // their own messages. We still resolve it so the UI can show it.
+        let prompt = executor_node.config["prompt"]
+            .as_str()
+            .unwrap_or("")
+            .to_string();
+
+        Ok(SessionInfo {
+            flow_id: flow.id.clone(),
+            flow_name: flow.name.clone(),
+            prompt,
+            permissions,
+            append_system_prompt,
+            working_dir: working_dir.to_string_lossy().to_string(),
+            sources_summary: "N/A (node-level chat)".into(),
+            sinks_summary: "N/A (node-level chat)".into(),
+        })
+    }
+
     pub async fn execute_with_context(
         &self,
         flow: &Flow,

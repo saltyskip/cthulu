@@ -116,7 +116,7 @@ async fn run_server() -> Result<(), Box<dyn Error>> {
     let base_dir = dirs::home_dir()
         .unwrap_or_else(|| std::path::PathBuf::from("."))
         .join(".cthulu");
-    let store: Arc<dyn Store> = Arc::new(FileStore::new(base_dir));
+    let store: Arc<dyn Store> = Arc::new(FileStore::new(base_dir.clone()));
     store
         .load_all()
         .await
@@ -148,6 +148,8 @@ async fn run_server() -> Result<(), Box<dyn Error>> {
         events_tx,
         interact_sessions: Arc::new(tokio::sync::RwLock::new(persisted_sessions)),
         sessions_path,
+        data_dir: base_dir,
+        live_processes: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
     };
 
     let app = server::create_app(app_state)

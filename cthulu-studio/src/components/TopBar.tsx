@@ -3,13 +3,27 @@ import * as api from "../api/client";
 import { log } from "../api/logger";
 import type { FlowNode } from "../types/flow";
 
+function formatRelativeTime(iso: string): string {
+  const now = Date.now();
+  const target = new Date(iso).getTime();
+  const diffMs = target - now;
+  if (diffMs < 0) return "now";
+  const diffMin = Math.round(diffMs / 60000);
+  if (diffMin < 1) return "<1m";
+  if (diffMin < 60) return `${diffMin}m`;
+  const diffHr = Math.floor(diffMin / 60);
+  const remMin = diffMin % 60;
+  if (diffHr < 24) return remMin > 0 ? `${diffHr}h ${remMin}m` : `${diffHr}h`;
+  const diffDays = Math.floor(diffHr / 24);
+  return `${diffDays}d ${diffHr % 24}h`;
+}
+
 interface TopBarProps {
   flow: { name: string; enabled: boolean } | null;
+  flowId: string | null;
   onTrigger: () => void;
   onToggleEnabled: () => void;
   onSettingsClick: () => void;
-  interactOpen: boolean;
-  onToggleInteract: () => void;
   consoleOpen: boolean;
   onToggleConsole: () => void;
   runLogOpen: boolean;
@@ -22,11 +36,10 @@ interface TopBarProps {
 
 export default function TopBar({
   flow,
+  flowId,
   onTrigger,
   onToggleEnabled,
   onSettingsClick,
-  interactOpen,
-  onToggleInteract,
   consoleOpen,
   onToggleConsole,
   runLogOpen,
@@ -38,12 +51,30 @@ export default function TopBar({
 }: TopBarProps) {
   const [connected, setConnected] = useState(false);
   const [showValidationGate, setShowValidationGate] = useState(false);
+  const [nextRun, setNextRun] = useState<string | null>(null);
   const retryRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Auto-dismiss gate when errors are fixed
   useEffect(() => {
     if (!flowHasErrors) setShowValidationGate(false);
   }, [flowHasErrors]);
+
+  // Fetch next run time for current flow
+  useEffect(() => {
+    if (!flowId || !connected) {
+      setNextRun(null);
+      return;
+    }
+    let cancelled = false;
+    api.getFlowSchedule(flowId).then((info) => {
+      if (!cancelled) {
+        setNextRun(info.next_run ?? null);
+      }
+    }).catch(() => {
+      if (!cancelled) setNextRun(null);
+    });
+    return () => { cancelled = true; };
+  }, [flowId, connected, flow?.enabled]);
 
   useEffect(() => {
     let cancelled = false;
@@ -96,24 +127,35 @@ export default function TopBar({
         {flow && (
           <>
             <span className="flow-name">{flow.name}</span>
-            <button className="ghost" onClick={onToggleEnabled}>
+            <button
+              className={`ghost flow-toggle ${flow.enabled ? "flow-toggle-enabled" : "flow-toggle-disabled"}`}
+              onClick={onToggleEnabled}
+            >
+              <span className={`flow-toggle-dot ${flow.enabled ? "enabled" : "disabled"}`} />
               {flow.enabled ? "Enabled" : "Disabled"}
             </button>
+            {nextRun && flow.enabled && (
+              <span className="next-run-label" title={new Date(nextRun).toLocaleString()}>
+                Next: {formatRelativeTime(nextRun)}
+              </span>
+            )}
           </>
         )}
         <div className="spacer" />
         {flow && (
-          <button className="primary" onClick={handleRunClick} disabled={!connected}>
-            Run
-          </button>
-        )}
-        {flow && (
           <button
-            className={`ghost ${interactOpen ? "console-toggle-active" : ""}`}
-            onClick={onToggleInteract}
+            className="primary"
+            onClick={handleRunClick}
             disabled={!connected}
+            title={
+              !connected
+                ? "Server disconnected"
+                : !flow.enabled
+                  ? "Flow is disabled — manual run still works"
+                  : undefined
+            }
           >
-            Interact
+            Run{!flow.enabled ? " (Manual)" : ""}
           </button>
         )}
         <div className="connection-status">

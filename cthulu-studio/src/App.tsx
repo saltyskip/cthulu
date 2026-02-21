@@ -10,9 +10,8 @@ import Sidebar from "./components/Sidebar";
 import Canvas, { type CanvasHandle } from "./components/Canvas";
 import PropertyPanel from "./components/PropertyPanel";
 import RunHistory from "./components/RunHistory";
-import Console from "./components/Console";
-import RunLog from "./components/RunLog";
-import InteractPanel, { type InteractPanelState } from "./components/InteractPanel";
+import BottomPanel, { type BottomTab } from "./components/BottomPanel";
+import type { NodeChatState } from "./components/NodeChat";
 import ErrorBoundary from "./components/ErrorBoundary";
 
 export default function App() {
@@ -22,13 +21,12 @@ export default function App() {
   const [nodeTypes, setNodeTypes] = useState<NodeTypeSchema[]>([]);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
-  const [showConsole, setShowConsole] = useState(false);
-  const [showRunLog, setShowRunLog] = useState(false);
-  const [showInteract, setShowInteract] = useState(false);
+  const [activeBottomTab, setActiveBottomTab] = useState<BottomTab | null>(null);
+  const [bottomPanelHeight, setBottomPanelHeight] = useState(280);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleteSaving, setDeleteSaving] = useState(false);
   const [errorCount, setErrorCount] = useState(0);
-  const sessionsRef = useRef<Map<string, InteractPanelState>>(new Map());
+  const nodeChatStatesRef = useRef<Map<string, NodeChatState>>(new Map());
   const [serverUrl, setServerUrlState] = useState(api.getServerUrl());
   const [runEvents, setRunEvents] = useState<RunEvent[]>([]);
   const [nodeRunStatus, setNodeRunStatus] = useState<Record<string, "running" | "completed" | "failed">>({});
@@ -203,15 +201,37 @@ export default function App() {
     }, 500);
   }, [activeFlowId, activeFlowMeta]);
 
+  // Executor nodes for bottom panel tabs
+  const executorNodes = useMemo(() => {
+    void snapshotVersion;
+    return (latestSnapshotRef.current?.nodes ?? []).filter(
+      (n) => n.node_type === "executor"
+    );
+  }, [snapshotVersion]);
+
   const handleSelectionChange = useCallback((nodeId: string | null) => {
     setSelectedNodeId(nodeId);
+    // If an executor node was clicked, open its bottom tab
+    if (nodeId) {
+      const snap = latestSnapshotRef.current;
+      if (snap) {
+        const node = snap.nodes.find((n) => n.id === nodeId);
+        if (node && node.node_type === "executor") {
+          setActiveBottomTab({
+            kind: "executor",
+            nodeId: node.id,
+            label: node.label || "Executor",
+          });
+        }
+      }
+    }
   }, []);
 
   const handleTrigger = async () => {
     if (!activeFlowMeta) return;
     try {
       log("info", `Triggering flow: ${activeFlowMeta.name}`);
-      setShowRunLog(true);
+      setActiveBottomTab({ kind: "log" });
       await api.triggerFlow(activeFlowMeta.id);
     } catch { /* logged */ }
   };
@@ -226,46 +246,27 @@ export default function App() {
     } catch { /* logged */ }
   };
 
-  const handleToggleInteract = useCallback(() => {
-    setShowInteract((v) => {
-      if (!v) {
-        // Opening interact — close other bottom panels
-        setShowConsole(false);
-        setShowRunLog(false);
-      }
-      return !v;
-    });
+  const handleNodeChatStateChange = useCallback((key: string, state: NodeChatState) => {
+    nodeChatStatesRef.current.set(key, state);
   }, []);
 
-  const handleInteractStateChange = useCallback((state: InteractPanelState) => {
-    if (activeFlowId) {
-      sessionsRef.current.set(activeFlowId, state);
-    }
-  }, [activeFlowId]);
 
   const handleDeleteFlow = async () => {
     if (!activeFlowId) return;
-    // If there's session history in any tab, show the confirmation dialog
-    const panelState = sessionsRef.current.get(activeFlowId);
-    if (panelState) {
-      const hasHistory = Object.values(panelState.tabs).some(
-        (tab) => tab.outputLines.length > 0
-      );
-      if (hasHistory) {
-        setShowDeleteConfirm(true);
-        return;
-      }
-    }
-    // No session history — delete directly
-    await doDeleteFlow();
+    setShowDeleteConfirm(true);
   };
 
   const doDeleteFlow = async () => {
     if (!activeFlowId) return;
     try {
       await api.deleteFlow(activeFlowId);
-      sessionsRef.current.delete(activeFlowId);
-      setShowInteract(false);
+      // Clean up node chat states for this flow
+      for (const key of nodeChatStatesRef.current.keys()) {
+        if (key.startsWith(activeFlowId + "::")) {
+          nodeChatStatesRef.current.delete(key);
+        }
+      }
+      setActiveBottomTab(null);
       setShowDeleteConfirm(false);
       setActiveFlowId(null);
       setInitialFlow(null);
@@ -279,26 +280,24 @@ export default function App() {
     if (!activeFlowId || !activeFlowMeta) return;
     setDeleteSaving(true);
     try {
-      const panelState = sessionsRef.current.get(activeFlowId);
-      // Gather output from all tabs into a single transcript
-      const allLines = panelState
-        ? Object.values(panelState.tabs).flatMap((tab) => tab.outputLines)
-        : [];
-      const transcript = allLines
-        .map((l) => `[${l.type}] ${l.text}`)
-        .join("\n");
-      const result = await api.summarizeSession(
-        transcript,
-        activeFlowMeta.name,
-        activeFlowMeta.description
-      );
-      await api.savePrompt({
-        title: result.title,
-        summary: result.summary,
-        source_flow_name: activeFlowMeta.name,
-        tags: result.tags,
-      });
-      log("info", `Saved session summary as prompt: ${result.title}`);
+      // Gather transcript from all node chat states for this flow
+      const allLines: { type: string; text: string }[] = [];
+      for (const [key, state] of nodeChatStatesRef.current.entries()) {
+        if (key.startsWith(activeFlowId + "::") && state.outputLines.length > 0) {
+          allLines.push(...state.outputLines);
+        }
+      }
+      if (allLines.length > 0) {
+        const transcript = allLines.map((l) => `[${l.type}] ${l.text}`).join("\n");
+        const result = await api.summarizeSession(transcript, activeFlowMeta.name, activeFlowMeta.description);
+        await api.savePrompt({
+          title: result.title,
+          summary: result.summary,
+          source_flow_name: activeFlowMeta.name,
+          tags: result.tags,
+        });
+        log("info", `Saved session summary as prompt: ${result.title}`);
+      }
     } catch (err) {
       log("error", `Failed to save session summary: ${(err as Error).message}`);
     }
@@ -314,27 +313,24 @@ export default function App() {
   };
 
   return (
-    <div className={showConsole || showRunLog || showInteract ? "app-with-console" : ""}>
+    <div className={activeBottomTab ? "app-with-console" : ""}>
       <TopBar
         flow={activeFlowMeta}
+        flowId={activeFlowId}
         onTrigger={handleTrigger}
         onToggleEnabled={handleToggleEnabled}
         onSettingsClick={() => setShowSettings(true)}
-        interactOpen={showInteract}
-        onToggleInteract={handleToggleInteract}
-        consoleOpen={showConsole}
+        consoleOpen={activeBottomTab?.kind === "console"}
         onToggleConsole={() => {
-          setShowConsole((v) => {
-            if (!v) { setShowRunLog(false); setShowInteract(false); }
-            return !v;
-          });
+          setActiveBottomTab((prev) =>
+            prev?.kind === "console" ? null : { kind: "console" }
+          );
         }}
-        runLogOpen={showRunLog}
+        runLogOpen={activeBottomTab?.kind === "log"}
         onToggleRunLog={() => {
-          setShowRunLog((v) => {
-            if (!v) { setShowConsole(false); setShowInteract(false); }
-            return !v;
-          });
+          setActiveBottomTab((prev) =>
+            prev?.kind === "log" ? null : { kind: "log" }
+          );
         }}
         errorCount={errorCount}
         flowHasErrors={flowHasErrors}
@@ -342,7 +338,7 @@ export default function App() {
         flowNodes={latestSnapshotRef.current?.nodes ?? []}
       />
       <div className="app-layout">
-        <div style={{ display: "flex", flexDirection: "column" }}>
+        <div style={{ display: "flex", flexDirection: "column", overflow: "hidden" }}>
           <FlowList
             flows={flows}
             activeFlowId={activeFlowId}
@@ -389,17 +385,19 @@ export default function App() {
         </div>
       </div>
 
-      {showRunLog && !showInteract && <RunLog events={runEvents} onClear={() => setRunEvents([])} onClose={() => setShowRunLog(false)} />}
-      {showConsole && !showRunLog && !showInteract && <Console onClose={() => setShowConsole(false)} />}
-      {showInteract && activeFlowId && (
-        <InteractPanel
-          key={activeFlowId}
-          flowId={activeFlowId}
-          onClose={() => setShowInteract(false)}
-          initialState={sessionsRef.current.get(activeFlowId) ?? null}
-          onStateChange={handleInteractStateChange}
-        />
-      )}
+      <BottomPanel
+        activeTab={activeBottomTab}
+        onSelectTab={setActiveBottomTab}
+        height={bottomPanelHeight}
+        onHeightChange={setBottomPanelHeight}
+        flowId={activeFlowId}
+        executorNodes={executorNodes}
+        runEvents={runEvents}
+        onRunEventsClear={() => setRunEvents([])}
+        nodeChatStates={nodeChatStatesRef.current}
+        onNodeChatStateChange={handleNodeChatStateChange}
+        errorCount={errorCount}
+      />
 
       {showDeleteConfirm && (
         <div className="modal-overlay" onClick={() => setShowDeleteConfirm(false)}>

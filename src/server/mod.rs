@@ -8,12 +8,17 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use tokio::sync::{broadcast, RwLock};
+use tokio::sync::{broadcast, Mutex, RwLock};
 
 use crate::flows::events::RunEvent;
 use crate::flows::scheduler::FlowScheduler;
 use crate::flows::store::Store;
 use crate::github::client::GithubClient;
+
+/// Build a composite key for node-scoped sessions: `"flow_id::node_id"`.
+pub fn node_sessions_key(flow_id: &str, node_id: &str) -> String {
+    format!("{flow_id}::{node_id}")
+}
 
 /// A single Claude Code session (one tab in the History list).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -24,6 +29,10 @@ pub struct InteractSession {
     /// Short summary of what this session is about (first ~80 chars of first prompt).
     #[serde(default)]
     pub summary: String,
+    /// If set, this session belongs to a specific node (node-level chat).
+    /// When None, it's a flow-level session.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub node_id: Option<String>,
     /// Mounted path — working directory for the claude process.
     pub working_dir: String,
     /// PID of the currently running claude process (if any).
@@ -38,6 +47,9 @@ pub struct InteractSession {
     pub total_cost: f64,
     /// When this session was created (ISO 8601).
     pub created_at: String,
+    /// Path to the .skills/ directory for this session.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub skills_dir: Option<String>,
 }
 
 /// All sessions for a single workflow.
@@ -121,9 +133,10 @@ pub fn load_sessions(path: &Path) -> HashMap<String, FlowSessions> {
             .sessions
             .into_iter()
             .map(|(flow_id, old)| {
-                let session = InteractSession {
+                    let session = InteractSession {
                     session_id: old.session_id.clone(),
                     summary: String::new(),
+                    node_id: None,
                     working_dir: if old.working_dir.is_empty() {
                         ".".to_string()
                     } else {
@@ -134,6 +147,7 @@ pub fn load_sessions(path: &Path) -> HashMap<String, FlowSessions> {
                     message_count: old.message_count,
                     total_cost: old.total_cost,
                     created_at: chrono::Utc::now().to_rfc3339(),
+                    skills_dir: None,
                 };
                 let flow_sessions = FlowSessions {
                     flow_name: if old.flow_name.is_empty() {
@@ -166,12 +180,14 @@ pub fn save_sessions(path: &Path, sessions: &HashMap<String, FlowSessions>) {
                     .map(|s| InteractSession {
                         session_id: s.session_id.clone(),
                         summary: s.summary.clone(),
+                        node_id: s.node_id.clone(),
                         working_dir: s.working_dir.clone(),
                         active_pid: None,
                         busy: false,
                         message_count: s.message_count,
                         total_cost: s.total_cost,
                         created_at: s.created_at.clone(),
+                        skills_dir: s.skills_dir.clone(),
                     })
                     .collect();
                 (
@@ -204,6 +220,21 @@ pub fn save_sessions(path: &Path, sessions: &HashMap<String, FlowSessions>) {
     }
 }
 
+/// A persistent Claude CLI process kept alive between messages.
+/// Uses `--input-format stream-json` so we can write multiple prompts to stdin.
+pub struct LiveClaudeProcess {
+    /// Writer end of the child's stdin.
+    pub stdin: tokio::process::ChildStdin,
+    /// Reader that yields stdout lines.
+    pub stdout_lines: tokio::sync::mpsc::UnboundedReceiver<String>,
+    /// Reader that yields stderr lines.
+    pub stderr_lines: tokio::sync::mpsc::UnboundedReceiver<String>,
+    /// The child process handle (for kill).
+    pub child: tokio::process::Child,
+    /// Whether the process is currently processing a message.
+    pub busy: bool,
+}
+
 #[derive(Clone)]
 pub struct AppState {
     pub github_client: Option<Arc<dyn GithubClient>>,
@@ -215,6 +246,10 @@ pub struct AppState {
     pub interact_sessions: Arc<RwLock<HashMap<String, FlowSessions>>>,
     /// Path to `sessions.yaml` for write-through persistence.
     pub sessions_path: PathBuf,
+    /// Base data directory (~/.cthulu) for attachments etc.
+    pub data_dir: PathBuf,
+    /// Persistent Claude CLI processes keyed by session key (flow_id::node_id).
+    pub live_processes: Arc<Mutex<HashMap<String, LiveClaudeProcess>>>,
 }
 
 pub fn create_app(state: AppState) -> Router {

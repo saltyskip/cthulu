@@ -1,4 +1,4 @@
-import { useState, useEffect, type RefObject } from "react";
+import { useState, useEffect, useRef, type RefObject } from "react";
 import * as api from "../api/client";
 import type { FlowNode, SavedPrompt } from "../types/flow";
 import type { CanvasHandle } from "./Canvas";
@@ -105,25 +105,11 @@ function renderConfigFields(
     case "cron": {
       const scheduleErr = fieldHasError(errors, "schedule");
       return (
-        <>
-          <div className="form-group">
-            <label>Schedule (cron)</label>
-            <input
-              className={scheduleErr ? "input-error" : ""}
-              value={(config.schedule as string) || ""}
-              onChange={(e) => onChange("schedule", e.target.value)}
-              placeholder="0 */4 * * *"
-            />
-            {scheduleErr && <span className="field-error">{scheduleErr}</span>}
-          </div>
-          <div className="form-group">
-            <label>Working Directory</label>
-            <input
-              value={(config.working_dir as string) || "."}
-              onChange={(e) => onChange("working_dir", e.target.value)}
-            />
-          </div>
-        </>
+        <CronFields
+          config={config}
+          onChange={onChange}
+          scheduleErr={scheduleErr}
+        />
       );
     }
     case "rss": {
@@ -597,6 +583,85 @@ function ClaudeCodeFields({
           </div>
         </div>
       )}
+    </>
+  );
+}
+
+function CronFields({
+  config,
+  onChange,
+  scheduleErr,
+}: {
+  config: Record<string, unknown>;
+  onChange: (key: string, value: unknown) => void;
+  scheduleErr: string | undefined;
+}) {
+  const [cronPreview, setCronPreview] = useState<api.CronValidation | null>(null);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const schedule = (config.schedule as string) || "";
+
+  useEffect(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+
+    if (!schedule.trim()) {
+      setCronPreview(null);
+      return;
+    }
+
+    debounceRef.current = setTimeout(() => {
+      api.validateCron(schedule.trim()).then(setCronPreview).catch(() => {});
+    }, 400);
+
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  }, [schedule]);
+
+  const formatTime = (iso: string) => {
+    try {
+      const d = new Date(iso);
+      return d.toLocaleString(undefined, {
+        month: "short",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+      });
+    } catch {
+      return iso;
+    }
+  };
+
+  return (
+    <>
+      <div className="form-group">
+        <label>Schedule (cron)</label>
+        <input
+          className={scheduleErr || (cronPreview && !cronPreview.valid) ? "input-error" : ""}
+          value={schedule}
+          onChange={(e) => onChange("schedule", e.target.value)}
+          placeholder="0 */4 * * *"
+        />
+        {scheduleErr && <span className="field-error">{scheduleErr}</span>}
+        {cronPreview && !cronPreview.valid && !scheduleErr && (
+          <span className="field-error">{cronPreview.error}</span>
+        )}
+        {cronPreview && cronPreview.valid && cronPreview.next_runs.length > 0 && (
+          <div className="cron-preview">
+            <span className="cron-preview-label">Next runs:</span>
+            {cronPreview.next_runs.map((t, i) => (
+              <span key={i} className="cron-preview-time">{formatTime(t)}</span>
+            ))}
+          </div>
+        )}
+      </div>
+      <div className="form-group">
+        <label>Working Directory</label>
+        <input
+          value={(config.working_dir as string) || "."}
+          onChange={(e) => onChange("working_dir", e.target.value)}
+        />
+      </div>
     </>
   );
 }

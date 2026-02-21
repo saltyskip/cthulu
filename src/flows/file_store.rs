@@ -44,6 +44,10 @@ impl FileStore {
         self.base_dir.join("prompts")
     }
 
+    pub fn attachments_dir(&self, flow_id: &str, node_id: &str) -> PathBuf {
+        self.base_dir.join("attachments").join(flow_id).join(node_id)
+    }
+
     fn flush_run(&self, flow_id: &str, run: &FlowRun) -> Result<()> {
         let dir = self.runs_dir().join(flow_id);
         std::fs::create_dir_all(&dir)
