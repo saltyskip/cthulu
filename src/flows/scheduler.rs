@@ -163,6 +163,12 @@ impl FlowScheduler {
         self.start_flow(flow_id).await
     }
 
+    /// Return the set of flow IDs that currently have active scheduler tasks.
+    pub async fn active_flow_ids(&self) -> Vec<String> {
+        let handles = self.handles.lock().await;
+        handles.keys().cloned().collect()
+    }
+
     /// Execute a specific PR review through a flow with github-pr trigger.
     /// Used by manual trigger endpoint.
     pub async fn trigger_pr_review(
@@ -647,12 +653,14 @@ mod tests {
     use std::sync::Mutex as StdMutex;
 
     // --- Mock GithubClient ---
+    #[allow(dead_code)]
     struct MockGithubClient {
         prs: StdMutex<Vec<PullRequest>>,
         comments_posted: StdMutex<Vec<(String, u64, String)>>,
         diff: String,
     }
 
+    #[allow(dead_code)]
     impl MockGithubClient {
         fn new(prs: Vec<PullRequest>, diff: &str) -> Self {
             Self {

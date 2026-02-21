@@ -1,0 +1,174 @@
+name: Code Review Agent
+
+on:
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: review-agent-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  review:
+    name: GPT-4o-mini Code Review
+    runs-on: ubuntu-latest
+    # Skip if PR is from dependabot
+    if: github.actor != 'dependabot[bot]'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get PR diff
+        id: diff
+        run: |
+          DIFF=$(git diff origin/${{ github.base_ref }}...HEAD)
+          # Truncate to ~100k chars to stay within API limits
+          TRUNCATED=$(echo "$DIFF" | head -c 100000)
+          # Write to file to avoid shell escaping issues
+          echo "$TRUNCATED" > /tmp/pr-diff.txt
+          echo "diff_file=/tmp/pr-diff.txt" >> "$GITHUB_OUTPUT"
+
+      - name: Get changed file list
+        id: files
+        run: |
+          FILES=$(git diff --name-only origin/${{ github.base_ref }}...HEAD)
+          echo "$FILES" > /tmp/changed-files.txt
+          echo "files_file=/tmp/changed-files.txt" >> "$GITHUB_OUTPUT"
+
+      - name: Run code review
+        id: review
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          if [ -z "$OPENAI_API_KEY" ]; then
+            echo "OPENAI_API_KEY not set — skipping review"
+            echo "skipped=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          DIFF=$(cat /tmp/pr-diff.txt)
+          FILES=$(cat /tmp/changed-files.txt)
+          HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+
+          # Build the prompt
+          PROMPT=$(cat <<'PROMPT_EOF'
+          You are a senior code reviewer for a Rust + TypeScript/React monorepo (Cthulu — an AI-powered flow runner).
+
+          The backend is Rust (Axum, Tokio, serde). The frontend is React + TypeScript (Vite, React Flow, Tauri). The repo uses an Nx monorepo structure.
+
+          Focus on:
+          1. Security issues (command injection, path traversal, secrets in code, unsafe permissions)
+          2. Correctness bugs (logic errors, race conditions, unhandled errors, borrow checker concerns)
+          3. Type safety issues (Rust type mismatches, TypeScript any-casts, missing error handling)
+          4. Concurrency concerns (lock contention, deadlocks, pipe buffer deadlocks, missing Clone/Send/Sync)
+          5. Performance (unnecessary clones, holding locks during I/O, N+1 queries, missing memoization in React)
+          6. Cross-platform issues (Unix-only code paths, hardcoded paths)
+          7. React anti-patterns (useEffect for derived state, wholesale node replacement in React Flow)
+
+          Do NOT comment on:
+          - Style/formatting
+          - Import ordering
+          - Minor naming preferences
+          - Cargo.lock or package-lock.json changes
+
+          For each finding, provide:
+          - Severity: critical, warning, or info
+          - File and approximate line
+          - Clear description of the issue
+          - Suggested fix
+
+          If you find no issues, respond with exactly: "No issues found."
+
+          Changed files:
+          PROMPT_EOF
+          )
+
+          # Call OpenAI API
+          RESPONSE=$(curl -s https://api.openai.com/v1/chat/completions \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer $OPENAI_API_KEY" \
+            -d "$(jq -n \
+              --arg prompt "$PROMPT" \
+              --arg files "$FILES" \
+              --arg diff "$DIFF" \
+              '{
+                model: "gpt-4o-mini",
+                messages: [
+                  { role: "system", content: $prompt },
+                  { role: "user", content: ("Files:\n" + $files + "\n\nDiff:\n" + $diff) }
+                ],
+                max_tokens: 4096,
+                temperature: 0.1
+              }')")
+
+          # Extract the review content
+          REVIEW=$(echo "$RESPONSE" | jq -r '.choices[0].message.content // "Error: No response from API"')
+
+          # Write to file for the next step
+          echo "$REVIEW" > /tmp/review-output.txt
+          echo "review_file=/tmp/review-output.txt" >> "$GITHUB_OUTPUT"
+
+          # Check if there are findings
+          if echo "$REVIEW" | grep -qi "no issues found"; then
+            echo "has_findings=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_findings=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Post review comment
+        if: steps.review.outputs.skipped != 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const review = fs.readFileSync('/tmp/review-output.txt', 'utf-8');
+            const headSha = context.payload.pull_request.head.sha;
+            const hasFindings = '${{ steps.review.outputs.has_findings }}' === 'true';
+
+            const shaMarker = `<!-- review-agent sha:${headSha} -->`;
+            const statusIcon = hasFindings ? '🔍' : '✅';
+            const statusText = hasFindings ? 'Findings detected' : 'No issues found';
+
+            const body = [
+              shaMarker,
+              `## ${statusIcon} Code Review Agent — ${statusText}`,
+              '',
+              `**Model:** gpt-4o-mini | **SHA:** \`${headSha.slice(0, 8)}\``,
+              '',
+              review,
+              '',
+              '---',
+              `*Automated review by code-review-agent workflow*`,
+            ].join('\n');
+
+            // Find and update existing review comment (avoids duplicate comments on force-push)
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+
+            const existing = comments.find(c =>
+              c.body?.includes('<!-- review-agent sha:')
+            );
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }

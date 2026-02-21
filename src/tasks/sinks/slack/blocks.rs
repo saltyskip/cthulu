@@ -80,9 +80,15 @@ pub enum ContextElement {
 // -- Rich text block elements --
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub enum RichTextElement {
-    Section { elements: Vec<RichTextInline> },
-    List { style: ListStyle, elements: Vec<RichTextListItem> },
+    Section {
+        elements: Vec<RichTextInline>,
+    },
+    List {
+        style: ListStyle,
+        elements: Vec<RichTextListItem>,
+    },
 }
 
 impl Serialize for RichTextElement {
@@ -97,10 +103,13 @@ impl Serialize for RichTextElement {
             RichTextElement::List { style, elements } => {
                 let mut map = serializer.serialize_map(Some(3))?;
                 map.serialize_entry("type", "rich_text_list")?;
-                map.serialize_entry("style", match style {
-                    ListStyle::Bullet => "bullet",
-                    ListStyle::Ordered => "ordered",
-                })?;
+                map.serialize_entry(
+                    "style",
+                    match style {
+                        ListStyle::Bullet => "bullet",
+                        ListStyle::Ordered => "ordered",
+                    },
+                )?;
                 map.serialize_entry("elements", elements)?;
                 map.end()
             }
@@ -109,6 +118,7 @@ impl Serialize for RichTextElement {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub enum ListStyle {
     Bullet,
     Ordered,
@@ -130,9 +140,18 @@ impl Serialize for RichTextListItem {
 
 #[derive(Debug, Clone)]
 pub enum RichTextInline {
-    Text { text: String, style: Option<RichTextStyle> },
-    Link { url: String, text: Option<String>, style: Option<RichTextStyle> },
-    Emoji { name: String },
+    Text {
+        text: String,
+        style: Option<RichTextStyle>,
+    },
+    Link {
+        url: String,
+        text: Option<String>,
+        style: Option<RichTextStyle>,
+    },
+    Emoji {
+        name: String,
+    },
 }
 
 impl Serialize for RichTextInline {
@@ -154,8 +173,12 @@ impl Serialize for RichTextInline {
             RichTextInline::Link { url, text, style } => {
                 let has_style = style.as_ref().is_some_and(|s| s.has_any());
                 let mut count = 2;
-                if text.is_some() { count += 1; }
-                if has_style { count += 1; }
+                if text.is_some() {
+                    count += 1;
+                }
+                if has_style {
+                    count += 1;
+                }
                 let mut map = serializer.serialize_map(Some(count))?;
                 map.serialize_entry("type", "link")?;
                 map.serialize_entry("url", url)?;

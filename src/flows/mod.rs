@@ -10,6 +10,16 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SavedPrompt {
+    pub id: String,
+    pub title: String,
+    pub summary: String,
+    pub source_flow_name: String,
+    pub tags: Vec<String>,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Flow {
     pub id: String,
     pub name: String,

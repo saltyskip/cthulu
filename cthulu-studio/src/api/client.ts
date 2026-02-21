@@ -6,6 +6,9 @@ import type {
   FlowSummary,
   FlowRun,
   NodeTypeSchema,
+  SessionInfo,
+  SavedPrompt,
+  FlowSessionsInfo,
 } from "../types/flow";
 
 const DEFAULT_BASE_URL = "http://localhost:8081";
@@ -132,6 +135,182 @@ export async function getFlowRuns(id: string): Promise<FlowRun[]> {
 export async function getNodeTypes(): Promise<NodeTypeSchema[]> {
   const data = await apiFetch<{ node_types: NodeTypeSchema[] }>("/node-types");
   return data.node_types;
+}
+
+export async function getSession(flowId: string): Promise<SessionInfo> {
+  return apiFetch<SessionInfo>(`/flows/${flowId}/session`);
+}
+
+export async function listPrompts(): Promise<SavedPrompt[]> {
+  const data = await apiFetch<{ prompts: SavedPrompt[] }>("/prompts");
+  return data.prompts;
+}
+
+export async function savePrompt(prompt: {
+  title: string;
+  summary: string;
+  source_flow_name: string;
+  tags: string[];
+}): Promise<{ id: string }> {
+  return apiFetch<{ id: string }>("/prompts", {
+    method: "POST",
+    body: JSON.stringify(prompt),
+  });
+}
+
+export async function deletePrompt(id: string): Promise<void> {
+  await apiFetch(`/prompts/${id}`, { method: "DELETE" });
+}
+
+export async function summarizeSession(
+  transcript: string,
+  flowName: string,
+  flowDescription: string
+): Promise<{ title: string; summary: string; tags: string[] }> {
+  return apiFetch("/prompts/summarize", {
+    method: "POST",
+    body: JSON.stringify({
+      transcript,
+      flow_name: flowName,
+      flow_description: flowDescription,
+    }),
+  });
+}
+
+export async function listInteractSessions(
+  flowId: string
+): Promise<FlowSessionsInfo> {
+  return apiFetch<FlowSessionsInfo>(`/flows/${flowId}/interact/sessions`);
+}
+
+export async function newInteractSession(
+  flowId: string
+): Promise<{ session_id: string; created_at: string; warning?: string }> {
+  return apiFetch(`/flows/${flowId}/interact/new`, { method: "POST" });
+}
+
+export async function deleteInteractSession(
+  flowId: string,
+  sessionId: string
+): Promise<{ deleted: boolean; active_session: string }> {
+  return apiFetch(`/flows/${flowId}/interact/sessions/${sessionId}`, {
+    method: "DELETE",
+  });
+}
+
+export async function resetInteract(flowId: string): Promise<void> {
+  await apiFetch(`/flows/${flowId}/interact/reset`, { method: "POST" });
+}
+
+export async function stopInteract(
+  flowId: string,
+  sessionId?: string
+): Promise<void> {
+  await apiFetch(`/flows/${flowId}/interact/stop`, {
+    method: "POST",
+    body: sessionId ? JSON.stringify({ session_id: sessionId }) : undefined,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Node-level chat API
+// ---------------------------------------------------------------------------
+
+export async function getNodeSession(
+  flowId: string,
+  nodeId: string
+): Promise<SessionInfo> {
+  return apiFetch<SessionInfo>(`/flows/${flowId}/nodes/${nodeId}/session`);
+}
+
+export async function listNodeInteractSessions(
+  flowId: string,
+  nodeId: string
+): Promise<FlowSessionsInfo> {
+  return apiFetch<FlowSessionsInfo>(
+    `/flows/${flowId}/nodes/${nodeId}/interact/sessions`
+  );
+}
+
+export async function newNodeInteractSession(
+  flowId: string,
+  nodeId: string
+): Promise<{ session_id: string; created_at: string; warning?: string }> {
+  return apiFetch(`/flows/${flowId}/nodes/${nodeId}/interact/new`, {
+    method: "POST",
+  });
+}
+
+export async function deleteNodeInteractSession(
+  flowId: string,
+  nodeId: string,
+  sessionId: string
+): Promise<{ deleted: boolean; active_session: string }> {
+  return apiFetch(
+    `/flows/${flowId}/nodes/${nodeId}/interact/sessions/${sessionId}`,
+    { method: "DELETE" }
+  );
+}
+
+export async function stopNodeInteract(
+  flowId: string,
+  nodeId: string,
+  sessionId?: string
+): Promise<void> {
+  await apiFetch(`/flows/${flowId}/nodes/${nodeId}/interact/stop`, {
+    method: "POST",
+    body: sessionId ? JSON.stringify({ session_id: sessionId }) : undefined,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Scheduler / Cron API
+// ---------------------------------------------------------------------------
+
+export interface ScheduleInfo {
+  flow_id: string;
+  trigger_kind: string | null;
+  enabled?: boolean;
+  schedule?: string;
+  next_run: string | null;
+  next_runs?: string[];
+  poll_interval_secs?: number;
+  error?: string;
+}
+
+export async function getFlowSchedule(flowId: string): Promise<ScheduleInfo> {
+  return apiFetch<ScheduleInfo>(`/flows/${flowId}/schedule`);
+}
+
+export interface SchedulerFlowStatus {
+  flow_id: string;
+  name: string;
+  enabled: boolean;
+  scheduler_active: boolean;
+}
+
+export interface SchedulerStatus {
+  active_count: number;
+  total_flows: number;
+  flows: SchedulerFlowStatus[];
+}
+
+export async function getSchedulerStatus(): Promise<SchedulerStatus> {
+  return apiFetch<SchedulerStatus>("/scheduler/status");
+}
+
+export interface CronValidation {
+  valid: boolean;
+  expression?: string;
+  error?: string;
+  next_runs: string[];
+}
+
+export async function validateCron(expression: string): Promise<CronValidation> {
+  return apiFetch<CronValidation>("/validate/cron", {
+    method: "POST",
+    body: JSON.stringify({ expression }),
+  });
 }
 
 export async function checkConnection(): Promise<boolean> {

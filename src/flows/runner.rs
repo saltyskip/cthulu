@@ -23,6 +23,20 @@ use crate::tasks::filters::keyword::{KeywordFilter, MatchField};
 use crate::tasks::sources::{self, ContentItem};
 use crate::tasks::pipeline::{format_items, resolve_sinks};
 
+/// Data returned by `prepare_session()` — everything needed to start
+/// an interactive Claude Code session for a flow.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct SessionInfo {
+    pub flow_id: String,
+    pub flow_name: String,
+    pub prompt: String,
+    pub permissions: Vec<String>,
+    pub append_system_prompt: Option<String>,
+    pub working_dir: String,
+    pub sources_summary: String,
+    pub sinks_summary: String,
+}
+
 pub struct FlowRunner {
     pub http_client: Arc<reqwest::Client>,
     pub github_client: Option<Arc<dyn GithubClient>>,
@@ -52,6 +66,202 @@ impl FlowRunner {
 }
 
 impl FlowRunner {
+    /// Prepare a session for interactive Claude Code use.
+    /// Runs sources + filters + prompt rendering but stops before executing.
+    /// Returns everything the TUI needs to launch an interactive session.
+    pub async fn prepare_session(&self, flow: &Flow) -> Result<SessionInfo> {
+        let executor_node = flow
+            .nodes
+            .iter()
+            .find(|n| n.node_type == NodeType::Executor)
+            .context("flow has no executor node")?;
+
+        let source_nodes: Vec<_> = flow
+            .nodes
+            .iter()
+            .filter(|n| n.node_type == NodeType::Source)
+            .collect();
+
+        let filter_nodes: Vec<_> = flow
+            .nodes
+            .iter()
+            .filter(|n| n.node_type == NodeType::Filter)
+            .collect();
+
+        let sink_nodes: Vec<_> = flow
+            .nodes
+            .iter()
+            .filter(|n| n.node_type == NodeType::Sink)
+            .collect();
+
+        // Build summaries
+        let sources_summary = if source_nodes.is_empty() {
+            "No sources configured".to_string()
+        } else {
+            let parts: Vec<String> = source_nodes
+                .iter()
+                .map(|n| format!("{} ({})", n.kind, n.label))
+                .collect();
+            format!("{} source(s): {}", source_nodes.len(), parts.join(", "))
+        };
+
+        let sinks_summary = if sink_nodes.is_empty() {
+            "No sinks configured".to_string()
+        } else {
+            let parts: Vec<String> = sink_nodes
+                .iter()
+                .map(|n| format!("{} ({})", n.kind, n.label))
+                .collect();
+            format!("{} sink(s): {}", sink_nodes.len(), parts.join(", "))
+        };
+
+        // 1. Fetch sources
+        let source_configs = parse_source_configs(&source_nodes)?;
+        let github_token = self
+            .github_client
+            .as_ref()
+            .and_then(|_| std::env::var("GITHUB_TOKEN").ok());
+
+        let items: Vec<ContentItem> = if !source_configs.is_empty() {
+            sources::fetch_all(&source_configs, &self.http_client, github_token.as_deref())
+                .await
+        } else {
+            vec![]
+        };
+
+        // 2. Apply filters
+        let mut items = items;
+        for node in &filter_nodes {
+            let filter = parse_filter_config(node)?;
+            items = filter.apply(items);
+        }
+
+        // 3. Render prompt
+        let content = format_items(&items);
+        let timestamp = Utc::now().format("%Y-%m-%d %H:%M UTC").to_string();
+
+        let mut vars = HashMap::new();
+        vars.insert("content".to_string(), content.clone());
+        vars.insert("item_count".to_string(), items.len().to_string());
+        vars.insert("timestamp".to_string(), timestamp);
+
+        let prompt_path = executor_node.config["prompt"]
+            .as_str()
+            .context("executor node missing 'prompt' config")?;
+
+        let prompt_template = if prompt_path.ends_with(".md")
+            || prompt_path.ends_with(".txt")
+            || std::path::Path::new(prompt_path).exists()
+        {
+            std::fs::read_to_string(prompt_path)
+                .with_context(|| format!("failed to read prompt file: {prompt_path}"))?
+        } else {
+            prompt_path.to_string()
+        };
+
+        // Fetch market data if needed
+        if prompt_template.contains("{{market_data}}") {
+            let market_data = match tokio::time::timeout(
+                std::time::Duration::from_secs(15),
+                crate::tasks::sources::market::fetch_market_snapshot(&self.http_client),
+            )
+            .await
+            {
+                Ok(Ok(data)) => data,
+                _ => "Market data unavailable.".to_string(),
+            };
+            vars.insert("market_data".to_string(), market_data);
+        }
+
+        let rendered = render_prompt(&prompt_template, &vars);
+
+        let rendered = if !items.is_empty() && !prompt_template.contains("{{content}}") {
+            format!(
+                "{rendered}\n\n<<<\n{}\n>>>",
+                vars.get("content").cloned().unwrap_or_default()
+            )
+        } else {
+            rendered
+        };
+
+        // Extract executor config
+        let permissions: Vec<String> = executor_node.config["permissions"]
+            .as_array()
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        let working_dir = executor_node.config["working_dir"]
+            .as_str()
+            .map(PathBuf::from)
+            .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+
+        let append_system_prompt = executor_node.config["append_system_prompt"]
+            .as_str()
+            .map(String::from);
+
+        Ok(SessionInfo {
+            flow_id: flow.id.clone(),
+            flow_name: flow.name.clone(),
+            prompt: rendered,
+            permissions,
+            append_system_prompt,
+            working_dir: working_dir.to_string_lossy().to_string(),
+            sources_summary,
+            sinks_summary,
+        })
+    }
+
+    /// Prepare a session for a specific executor node (node-level chat).
+    /// Does NOT run sources/filters — just resolves the node's own config
+    /// (prompt, permissions, working_dir, system_prompt).
+    pub fn prepare_node_session(flow: &Flow, node_id: &str) -> Result<SessionInfo> {
+        let executor_node = flow
+            .nodes
+            .iter()
+            .find(|n| n.id == node_id && n.node_type == NodeType::Executor)
+            .with_context(|| format!("executor node '{}' not found in flow", node_id))?;
+
+        let permissions: Vec<String> = executor_node.config["permissions"]
+            .as_array()
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        let working_dir = executor_node.config["working_dir"]
+            .as_str()
+            .map(PathBuf::from)
+            .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+
+        let append_system_prompt = executor_node.config["append_system_prompt"]
+            .as_str()
+            .map(String::from);
+
+        // For node-level chat the prompt is informational only — the user types
+        // their own messages. We still resolve it so the UI can show it.
+        let prompt = executor_node.config["prompt"]
+            .as_str()
+            .unwrap_or("")
+            .to_string();
+
+        Ok(SessionInfo {
+            flow_id: flow.id.clone(),
+            flow_name: flow.name.clone(),
+            prompt,
+            permissions,
+            append_system_prompt,
+            working_dir: working_dir.to_string_lossy().to_string(),
+            sources_summary: "N/A (node-level chat)".into(),
+            sinks_summary: "N/A (node-level chat)".into(),
+        })
+    }
+
     pub async fn execute_with_context(
         &self,
         flow: &Flow,

@@ -1,5 +1,6 @@
-import { useState, useEffect, type RefObject } from "react";
-import type { FlowNode } from "../types/flow";
+import { useState, useEffect, useRef, type RefObject } from "react";
+import * as api from "../api/client";
+import type { FlowNode, SavedPrompt } from "../types/flow";
 import type { CanvasHandle } from "./Canvas";
 
 interface PropertyPanelProps {
@@ -104,25 +105,11 @@ function renderConfigFields(
     case "cron": {
       const scheduleErr = fieldHasError(errors, "schedule");
       return (
-        <>
-          <div className="form-group">
-            <label>Schedule (cron)</label>
-            <input
-              className={scheduleErr ? "input-error" : ""}
-              value={(config.schedule as string) || ""}
-              onChange={(e) => onChange("schedule", e.target.value)}
-              placeholder="0 */4 * * *"
-            />
-            {scheduleErr && <span className="field-error">{scheduleErr}</span>}
-          </div>
-          <div className="form-group">
-            <label>Working Directory</label>
-            <input
-              value={(config.working_dir as string) || "."}
-              onChange={(e) => onChange("working_dir", e.target.value)}
-            />
-          </div>
-        </>
+        <CronFields
+          config={config}
+          onChange={onChange}
+          scheduleErr={scheduleErr}
+        />
       );
     }
     case "rss": {
@@ -206,49 +193,11 @@ function renderConfigFields(
     case "claude-code": {
       const promptErr = fieldHasError(errors, "prompt");
       return (
-        <>
-          <div className="form-group">
-            <label>Prompt (file path or inline)</label>
-            <textarea
-              className={promptErr ? "input-error" : ""}
-              value={(config.prompt as string) || ""}
-              onChange={(e) => onChange("prompt", e.target.value)}
-              placeholder="prompts/my_prompt.md"
-            />
-            {promptErr && <span className="field-error">{promptErr}</span>}
-          </div>
-          <div className="form-group">
-            <label>Permissions (comma separated)</label>
-            <input
-              value={
-                Array.isArray(config.permissions)
-                  ? (config.permissions as string[]).join(", ")
-                  : ""
-              }
-              onChange={(e) =>
-                onChange(
-                  "permissions",
-                  e.target.value.split(",").map((s) => s.trim()).filter(Boolean)
-                )
-              }
-              placeholder="Bash, Read, Grep, Glob"
-            />
-          </div>
-          <div className="form-group">
-            <label>System Prompt</label>
-            <textarea
-              value={(config.append_system_prompt as string) || ""}
-              onChange={(e) =>
-                onChange(
-                  "append_system_prompt",
-                  e.target.value || null
-                )
-              }
-              placeholder="Additional instructions appended to Claude's system prompt"
-              rows={4}
-            />
-          </div>
-        </>
+        <ClaudeCodeFields
+          config={config}
+          onChange={onChange}
+          promptErr={promptErr}
+        />
       );
     }
     case "web-scrape": {
@@ -516,4 +465,203 @@ function renderConfigFields(
         </div>
       );
   }
+}
+
+function ClaudeCodeFields({
+  config,
+  onChange,
+  promptErr,
+}: {
+  config: Record<string, unknown>;
+  onChange: (key: string, value: unknown) => void;
+  promptErr: string | undefined;
+}) {
+  const [showLibrary, setShowLibrary] = useState(false);
+  const [savedPrompts, setSavedPrompts] = useState<SavedPrompt[]>([]);
+  const [loadingPrompts, setLoadingPrompts] = useState(false);
+
+  const handleOpenLibrary = () => {
+    setShowLibrary(true);
+    setLoadingPrompts(true);
+    api.listPrompts()
+      .then(setSavedPrompts)
+      .catch(() => {})
+      .finally(() => setLoadingPrompts(false));
+  };
+
+  const handleImportPrompt = (saved: SavedPrompt) => {
+    onChange("prompt", saved.summary);
+    setShowLibrary(false);
+  };
+
+  return (
+    <>
+      <div className="form-group">
+        <label>Prompt (file path or inline)</label>
+        <textarea
+          className={promptErr ? "input-error" : ""}
+          value={(config.prompt as string) || ""}
+          onChange={(e) => onChange("prompt", e.target.value)}
+          placeholder="prompts/my_prompt.md"
+        />
+        {promptErr && <span className="field-error">{promptErr}</span>}
+        <button
+          className="ghost"
+          style={{ marginTop: 6, fontSize: 11 }}
+          onClick={handleOpenLibrary}
+        >
+          Import from Library
+        </button>
+      </div>
+      <div className="form-group">
+        <label>Permissions (comma separated)</label>
+        <input
+          value={
+            Array.isArray(config.permissions)
+              ? (config.permissions as string[]).join(", ")
+              : ""
+          }
+          onChange={(e) =>
+            onChange(
+              "permissions",
+              e.target.value.split(",").map((s) => s.trim()).filter(Boolean)
+            )
+          }
+          placeholder="Bash, Read, Grep, Glob"
+        />
+      </div>
+      <div className="form-group">
+        <label>System Prompt</label>
+        <textarea
+          value={(config.append_system_prompt as string) || ""}
+          onChange={(e) =>
+            onChange(
+              "append_system_prompt",
+              e.target.value || null
+            )
+          }
+          placeholder="Additional instructions appended to Claude's system prompt"
+          rows={4}
+        />
+      </div>
+
+      {showLibrary && (
+        <div className="modal-overlay" onClick={() => setShowLibrary(false)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h2>Prompts Library</h2>
+            {loadingPrompts ? (
+              <p style={{ color: "var(--text-secondary)", fontSize: 13 }}>Loading...</p>
+            ) : savedPrompts.length === 0 ? (
+              <p style={{ color: "var(--text-secondary)", fontSize: 13 }}>
+                No saved prompts yet. Prompts are saved when you delete a flow with interact session history.
+              </p>
+            ) : (
+              <div className="prompt-library-list">
+                {savedPrompts.map((p) => (
+                  <div
+                    key={p.id}
+                    className="prompt-library-item"
+                    onClick={() => handleImportPrompt(p)}
+                  >
+                    <div className="prompt-library-title">{p.title}</div>
+                    <div className="prompt-library-meta">
+                      from {p.source_flow_name}
+                      {p.tags.length > 0 && ` \u00b7 ${p.tags.join(", ")}`}
+                    </div>
+                    <div className="prompt-library-preview">
+                      {p.summary.length > 120 ? p.summary.slice(0, 120) + "..." : p.summary}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="modal-actions">
+              <button className="ghost" onClick={() => setShowLibrary(false)}>
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+function CronFields({
+  config,
+  onChange,
+  scheduleErr,
+}: {
+  config: Record<string, unknown>;
+  onChange: (key: string, value: unknown) => void;
+  scheduleErr: string | undefined;
+}) {
+  const [cronPreview, setCronPreview] = useState<api.CronValidation | null>(null);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const schedule = (config.schedule as string) || "";
+
+  useEffect(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+
+    if (!schedule.trim()) {
+      setCronPreview(null);
+      return;
+    }
+
+    debounceRef.current = setTimeout(() => {
+      api.validateCron(schedule.trim()).then(setCronPreview).catch(() => {});
+    }, 400);
+
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  }, [schedule]);
+
+  const formatTime = (iso: string) => {
+    try {
+      const d = new Date(iso);
+      return d.toLocaleString(undefined, {
+        month: "short",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+      });
+    } catch {
+      return iso;
+    }
+  };
+
+  return (
+    <>
+      <div className="form-group">
+        <label>Schedule (cron)</label>
+        <input
+          className={scheduleErr || (cronPreview && !cronPreview.valid) ? "input-error" : ""}
+          value={schedule}
+          onChange={(e) => onChange("schedule", e.target.value)}
+          placeholder="0 */4 * * *"
+        />
+        {scheduleErr && <span className="field-error">{scheduleErr}</span>}
+        {cronPreview && !cronPreview.valid && !scheduleErr && (
+          <span className="field-error">{cronPreview.error}</span>
+        )}
+        {cronPreview && cronPreview.valid && cronPreview.next_runs.length > 0 && (
+          <div className="cron-preview">
+            <span className="cron-preview-label">Next runs:</span>
+            {cronPreview.next_runs.map((t, i) => (
+              <span key={i} className="cron-preview-time">{formatTime(t)}</span>
+            ))}
+          </div>
+        )}
+      </div>
+      <div className="form-group">
+        <label>Working Directory</label>
+        <input
+          value={(config.working_dir as string) || "."}
+          onChange={(e) => onChange("working_dir", e.target.value)}
+        />
+      </div>
+    </>
+  );
 }

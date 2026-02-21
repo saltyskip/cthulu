@@ -1,0 +1,13 @@
+{
+  "name": "cthulu-studio",
+  "root": "cthulu-studio",
+  "sourceRoot": "cthulu-studio/src",
+  "projectType": "application",
+  "tags": ["scope:frontend"],
+  "implicitDependencies": ["cthulu"],
+  "targets": {
+    "build": {
+      "outputs": ["{projectRoot}/dist"]
+    }
+  }
+}

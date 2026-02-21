@@ -3,10 +3,12 @@ mod flows;
 mod github;
 mod server;
 mod tasks;
+mod tui;
 
 use anyhow::{Context, Result};
 use axum::body::Body;
 use axum::extract::Request;
+use clap::Parser;
 use dotenvy::dotenv;
 use sentry::integrations::tower::{NewSentryLayer, SentryHttpLayer};
 use std::error::Error;
@@ -23,10 +25,47 @@ use crate::flows::scheduler::FlowScheduler;
 use crate::flows::store::Store;
 use crate::github::client::{GithubClient, HttpGithubClient};
 
+#[derive(Parser)]
+#[command(name = "cthulu", about = "AI-powered flow runner")]
+enum Cli {
+    /// Start the HTTP server (default when no subcommand is given)
+    #[command(alias = "run")]
+    Serve,
+    /// Open interactive TUI session
+    Tui {
+        /// Jump directly to a flow by ID
+        #[arg(long)]
+        flow: Option<String>,
+        /// Server URL to connect to
+        #[arg(long, default_value = "http://localhost:8081")]
+        server: String,
+    },
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     dotenv().ok();
 
+    // Parse CLI args — default to Serve when no subcommand is given,
+    // but still allow --help and --version to work.
+    let args: Vec<String> = std::env::args().collect();
+    let cli = if args.len() <= 1 {
+        // No subcommand given, default to serve
+        Cli::Serve
+    } else {
+        Cli::parse()
+    };
+
+    match cli {
+        Cli::Serve => run_server().await,
+        Cli::Tui { flow, server } => {
+            tui::run(server, flow).await?;
+            Ok(())
+        }
+    }
+}
+
+async fn run_server() -> Result<(), Box<dyn Error>> {
     let config = config::Config::from_env();
 
     let filter = tracing_subscriber::EnvFilter::try_from_default_env()
@@ -77,7 +116,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let base_dir = dirs::home_dir()
         .unwrap_or_else(|| std::path::PathBuf::from("."))
         .join(".cthulu");
-    let store: Arc<dyn Store> = Arc::new(FileStore::new(base_dir));
+    let store: Arc<dyn Store> = Arc::new(FileStore::new(base_dir.clone()));
     store
         .load_all()
         .await
@@ -95,12 +134,22 @@ async fn main() -> Result<(), Box<dyn Error>> {
     ));
     scheduler.start_all().await;
 
+    // Load persisted interact sessions from sessions.yaml in the current directory
+    let sessions_path = std::env::current_dir()
+        .unwrap_or_else(|_| std::path::PathBuf::from("."))
+        .join("sessions.yaml");
+    let persisted_sessions = server::load_sessions(&sessions_path);
+
     let app_state = server::AppState {
         github_client,
         http_client,
         store,
         scheduler,
         events_tx,
+        interact_sessions: Arc::new(tokio::sync::RwLock::new(persisted_sessions)),
+        sessions_path,
+        data_dir: base_dir,
+        live_processes: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
     };
 
     let app = server::create_app(app_state)
