@@ -32,10 +32,10 @@ cargo build --release
 
 # Set up environment
 cp .env.example .env
-# Edit .env with your API keys (see Environment Variables below)
+# Update .env with your API keys (explore .env for details)
 
 # Run
-cargo run
+./target/release/cthulu run or ./target/release/cthulu
 ```
 
 The server starts on `http://localhost:8081`. Use Studio or the REST API to create and manage flows.
