@@ -14,8 +14,8 @@ export default function FlowList({
   onCreate,
 }: FlowListProps) {
   return (
-    <div className="sidebar">
-      <div className="sidebar-header">
+    <div style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0, overflow: "hidden" }}>
+      <div className="sidebar-header" style={{ flexShrink: 0 }}>
         <h2>Flows</h2>
         <button className="ghost" onClick={onCreate}>
           + New

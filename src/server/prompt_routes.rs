@@ -18,7 +18,7 @@ pub fn prompt_router() -> Router<AppState> {
         .route("/prompts", get(list_prompts).post(create_prompt))
         .route(
             "/prompts/{id}",
-            get(get_prompt).delete(delete_prompt),
+            get(get_prompt).put(update_prompt).delete(delete_prompt),
         )
         .route("/prompts/summarize", post(summarize_session))
 }
@@ -94,6 +94,46 @@ async fn delete_prompt(
     }
 
     Ok(Json(json!({ "deleted": true })))
+}
+
+#[derive(Deserialize)]
+struct UpdatePromptRequest {
+    title: Option<String>,
+    summary: Option<String>,
+    #[serde(default)]
+    tags: Option<Vec<String>>,
+}
+
+async fn update_prompt(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(body): Json<UpdatePromptRequest>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let mut prompt = state.store.get_prompt(&id).await.ok_or_else(|| {
+        (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "error": "prompt not found" })),
+        )
+    })?;
+
+    if let Some(title) = body.title {
+        prompt.title = title;
+    }
+    if let Some(summary) = body.summary {
+        prompt.summary = summary;
+    }
+    if let Some(tags) = body.tags {
+        prompt.tags = tags;
+    }
+
+    state.store.save_prompt(prompt.clone()).await.map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": format!("failed to update prompt: {e}") })),
+        )
+    })?;
+
+    Ok(Json(serde_json::to_value(&prompt).unwrap()))
 }
 
 #[derive(Deserialize)]

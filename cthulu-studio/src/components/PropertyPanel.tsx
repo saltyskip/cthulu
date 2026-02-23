@@ -531,7 +531,7 @@ function ClaudeCodeFields({
           className={promptErr ? "input-error" : ""}
           value={(config.prompt as string) || ""}
           onChange={(e) => onChange("prompt", e.target.value)}
-          placeholder="prompts/my_prompt.md"
+          placeholder="examples/my_prompt.md"
         />
         {promptErr && <span className="field-error">{promptErr}</span>}
         <button

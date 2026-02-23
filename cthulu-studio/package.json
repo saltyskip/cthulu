@@ -12,6 +12,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@uiw/react-md-editor": "^4.0.11",
     "@xyflow/react": "^12.6.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0"

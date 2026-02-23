@@ -6,6 +6,8 @@ import type { Flow, FlowNode, FlowEdge, FlowSummary, NodeTypeSchema, RunEvent } 
 import { validateFlow } from "./utils/validateNode";
 import TopBar from "./components/TopBar";
 import FlowList from "./components/FlowList";
+import PromptLibrary from "./components/PromptLibrary";
+import PromptEditor from "./components/PromptEditor";
 import Sidebar from "./components/Sidebar";
 import Canvas, { type CanvasHandle } from "./components/Canvas";
 import PropertyPanel from "./components/PropertyPanel";
@@ -17,8 +19,10 @@ import ErrorBoundary from "./components/ErrorBoundary";
 export default function App() {
   const [flows, setFlows] = useState<FlowSummary[]>([]);
   const [activeFlowId, setActiveFlowId] = useState<string | null>(null);
+  const [activePromptId, setActivePromptId] = useState<string | null>(null);
   const [initialFlow, setInitialFlow] = useState<Flow | null>(null);
   const [nodeTypes, setNodeTypes] = useState<NodeTypeSchema[]>([]);
+  const [sidebarTab, setSidebarTab] = useState<"nodes" | "prompts">("nodes");
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [activeBottomTab, setActiveBottomTab] = useState<BottomTab | null>(null);
@@ -168,8 +172,31 @@ export default function App() {
       const flow = await api.getFlow(id);
       setInitialFlow(flow);
       setActiveFlowId(flow.id);
+      setActivePromptId(null);
       setActiveFlowMeta({ id: flow.id, name: flow.name, description: flow.description, enabled: flow.enabled });
       setSelectedNodeId(null);
+      setSidebarTab("nodes");
+    } catch { /* logged */ }
+  };
+
+  const selectPrompt = (id: string) => {
+    setActivePromptId(id);
+    setActiveFlowId(null);
+    setInitialFlow(null);
+    setActiveFlowMeta(null);
+    setSelectedNodeId(null);
+    setSidebarTab("prompts");
+  };
+
+  const createPrompt = async () => {
+    try {
+      const { id } = await api.savePrompt({
+        title: "New Prompt",
+        summary: "",
+        source_flow_name: "",
+        tags: [],
+      });
+      selectPrompt(id);
     } catch { /* logged */ }
   };
 
@@ -337,17 +364,50 @@ export default function App() {
         flowNodes={latestSnapshotRef.current?.nodes ?? []}
       />
       <div className="app-layout">
-        <div style={{ display: "flex", flexDirection: "column", overflow: "hidden" }}>
-          <FlowList
-            flows={flows}
-            activeFlowId={activeFlowId}
-            onSelect={selectFlow}
-            onCreate={createFlow}
-          />
-          <Sidebar nodeTypes={nodeTypes} onGrab={handleGrab} />
+        <div style={{ display: "flex", flexDirection: "column", overflow: "hidden", width: 260, background: "var(--bg-secondary)", borderRight: "1px solid var(--border)" }}>
+          {/* Navigator — top half */}
+          <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+            <FlowList
+              flows={flows}
+              activeFlowId={activeFlowId}
+              onSelect={selectFlow}
+              onCreate={createFlow}
+            />
+          </div>
+
+          {/* Palette — bottom half */}
+          <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", overflow: "hidden", borderTop: "1px solid var(--border)" }}>
+            <div className="sidebar-tab-bar">
+              <button
+                className={`sidebar-tab ${sidebarTab === "nodes" ? "active" : ""}`}
+                onClick={() => setSidebarTab("nodes")}
+              >
+                Nodes
+              </button>
+              <button
+                className={`sidebar-tab ${sidebarTab === "prompts" ? "active" : ""}`}
+                onClick={() => setSidebarTab("prompts")}
+              >
+                Prompts
+              </button>
+            </div>
+            <div style={{ flex: 1, overflowY: "auto", minHeight: 0 }}>
+              {sidebarTab === "nodes" ? (
+                <Sidebar nodeTypes={nodeTypes} onGrab={handleGrab} />
+              ) : (
+                <PromptLibrary
+                  activePromptId={activePromptId}
+                  onSelect={selectPrompt}
+                  onCreate={createPrompt}
+                />
+              )}
+            </div>
+          </div>
         </div>
 
-        {activeFlowId ? (
+        {activePromptId ? (
+          <PromptEditor promptId={activePromptId} />
+        ) : activeFlowId ? (
           <ErrorBoundary>
             <Canvas
               ref={canvasRef}
