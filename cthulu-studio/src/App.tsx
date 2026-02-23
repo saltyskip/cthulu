@@ -253,6 +253,16 @@ export default function App() {
     }
   }, []);
 
+  const handleRename = async (name: string) => {
+    if (!activeFlowMeta || !activeFlowId) return;
+    const updated = { ...activeFlowMeta, name };
+    setActiveFlowMeta(updated);
+    try {
+      await api.updateFlow(activeFlowId, { name });
+      loadFlows();
+    } catch { /* logged */ }
+  };
+
   const handleTrigger = async () => {
     if (!activeFlowMeta) return;
     try {
@@ -345,6 +355,7 @@ export default function App() {
         flowId={activeFlowId}
         onTrigger={handleTrigger}
         onToggleEnabled={handleToggleEnabled}
+        onRename={handleRename}
         onSettingsClick={() => setShowSettings(true)}
         consoleOpen={activeBottomTab?.kind === "console"}
         onToggleConsole={() => {

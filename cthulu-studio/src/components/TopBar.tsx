@@ -23,6 +23,7 @@ interface TopBarProps {
   flowId: string | null;
   onTrigger: () => void;
   onToggleEnabled: () => void;
+  onRename: (name: string) => void;
   onSettingsClick: () => void;
   consoleOpen: boolean;
   onToggleConsole: () => void;
@@ -39,6 +40,7 @@ export default function TopBar({
   flowId,
   onTrigger,
   onToggleEnabled,
+  onRename,
   onSettingsClick,
   consoleOpen,
   onToggleConsole,
@@ -53,6 +55,9 @@ export default function TopBar({
   const [showValidationGate, setShowValidationGate] = useState(false);
   const [nextRun, setNextRun] = useState<string | null>(null);
   const retryRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [editName, setEditName] = useState("");
+  const nameInputRef = useRef<HTMLInputElement>(null);
 
   // Auto-dismiss gate when errors are fixed
   useEffect(() => {
@@ -126,7 +131,32 @@ export default function TopBar({
         <h1>Cthulu Studio</h1>
         {flow && (
           <>
-            <span className="flow-name">{flow.name}</span>
+            {editing ? (
+              <input
+                ref={nameInputRef}
+                className="flow-name-input"
+                value={editName}
+                onChange={(e) => setEditName(e.target.value)}
+                onBlur={() => {
+                  const trimmed = editName.trim();
+                  if (trimmed && trimmed !== flow.name) onRename(trimmed);
+                  setEditing(false);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                  if (e.key === "Escape") { setEditName(flow.name); setEditing(false); }
+                }}
+              />
+            ) : (
+              <span
+                className="flow-name"
+                onClick={() => { setEditName(flow.name); setEditing(true); setTimeout(() => nameInputRef.current?.select(), 0); }}
+                title="Click to rename"
+                style={{ cursor: "text" }}
+              >
+                {flow.name}
+              </span>
+            )}
             <button
               className={`ghost flow-toggle ${flow.enabled ? "flow-toggle-enabled" : "flow-toggle-disabled"}`}
               onClick={onToggleEnabled}
