@@ -138,6 +138,15 @@ async fn run_server(start_disabled: bool) -> Result<(), Box<dyn Error>> {
     ));
     if start_disabled {
         tracing::info!("Starting with all flow triggers disabled (--start-disabled)");
+        let flows = store.list_flows().await;
+        for mut flow in flows {
+            if flow.enabled {
+                flow.enabled = false;
+                if let Err(e) = store.save_flow(flow).await {
+                    tracing::warn!(error = %e, "Failed to disable flow");
+                }
+            }
+        }
     } else {
         scheduler.start_all().await;
     }

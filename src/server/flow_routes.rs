@@ -46,7 +46,6 @@ pub fn flow_router() -> Router<AppState> {
 
 async fn list_flows(State(state): State<AppState>) -> Json<Value> {
     let flows = state.store.list_flows().await;
-    let active_ids = state.scheduler.active_flow_ids().await;
 
     let summaries: Vec<Value> = flows
         .iter()
@@ -55,7 +54,7 @@ async fn list_flows(State(state): State<AppState>) -> Json<Value> {
                 "id": f.id,
                 "name": f.name,
                 "description": f.description,
-                "enabled": f.enabled && active_ids.contains(&f.id),
+                "enabled": f.enabled,
                 "node_count": f.nodes.len(),
                 "edge_count": f.edges.len(),
                 "created_at": f.created_at,
@@ -78,10 +77,7 @@ async fn get_flow(
         )
     })?;
 
-    let active_ids = state.scheduler.active_flow_ids().await;
-    let mut val = serde_json::to_value(&flow).unwrap();
-    val["enabled"] = json!(flow.enabled && active_ids.contains(&flow.id));
-    Ok(Json(val))
+    Ok(Json(serde_json::to_value(&flow).unwrap()))
 }
 
 #[derive(Deserialize)]
@@ -182,10 +178,7 @@ async fn update_flow(
         tracing::warn!(flow_id = %id, error = %e, "Failed to restart trigger for updated flow");
     }
 
-    let active_ids = state.scheduler.active_flow_ids().await;
-    let mut val = serde_json::to_value(&flow).unwrap();
-    val["enabled"] = json!(flow.enabled && active_ids.contains(&flow.id));
-    Ok(Json(val))
+    Ok(Json(serde_json::to_value(&flow).unwrap()))
 }
 
 async fn delete_flow(
