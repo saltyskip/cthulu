@@ -30,7 +30,11 @@ use crate::github::client::{GithubClient, HttpGithubClient};
 enum Cli {
     /// Start the HTTP server (default when no subcommand is given)
     #[command(alias = "run")]
-    Serve,
+    Serve {
+        /// Start with all flow triggers disabled
+        #[arg(long)]
+        start_disabled: bool,
+    },
     /// Open interactive TUI session
     Tui {
         /// Jump directly to a flow by ID
@@ -51,13 +55,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let args: Vec<String> = std::env::args().collect();
     let cli = if args.len() <= 1 {
         // No subcommand given, default to serve
-        Cli::Serve
+        Cli::Serve { start_disabled: false }
     } else {
         Cli::parse()
     };
 
     match cli {
-        Cli::Serve => run_server().await,
+        Cli::Serve { start_disabled } => run_server(start_disabled).await,
         Cli::Tui { flow, server } => {
             tui::run(server, flow).await?;
             Ok(())
@@ -65,7 +69,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     }
 }
 
-async fn run_server() -> Result<(), Box<dyn Error>> {
+async fn run_server(start_disabled: bool) -> Result<(), Box<dyn Error>> {
     let config = config::Config::from_env();
 
     let filter = tracing_subscriber::EnvFilter::try_from_default_env()
@@ -132,7 +136,11 @@ async fn run_server() -> Result<(), Box<dyn Error>> {
         github_client.clone(),
         events_tx.clone(),
     ));
-    scheduler.start_all().await;
+    if start_disabled {
+        tracing::info!("Starting with all flow triggers disabled (--start-disabled)");
+    } else {
+        scheduler.start_all().await;
+    }
 
     // Load persisted interact sessions from sessions.yaml in the current directory
     let sessions_path = std::env::current_dir()
