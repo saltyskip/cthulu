@@ -192,7 +192,6 @@ export default function App() {
         await api.updateFlow(activeFlowId, {
           name: activeFlowMeta.name,
           description: activeFlowMeta.description,
-          enabled: activeFlowMeta.enabled,
           nodes: snapshot.nodes,
           edges: snapshot.edges,
         });

@@ -150,12 +150,12 @@ export default function TopBar({
             title={
               !connected
                 ? "Server disconnected"
-                : !flow.enabled
+                : !(flow.enabled)
                   ? "Flow is disabled — manual run still works"
                   : undefined
             }
           >
-            Run{!flow.enabled ? " (Manual)" : ""}
+            Run{!(flow.enabled) ? " (Manual)" : ""}
           </button>
         )}
         <div className="connection-status">

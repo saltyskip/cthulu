@@ -25,7 +25,7 @@ export default function FlowList({
         {flows.map((flow) => (
           <div
             key={flow.id}
-            className={`flow-item ${flow.id === activeFlowId ? "active" : ""}${!flow.enabled ? " flow-item-disabled" : ""}`}
+            className={`flow-item ${flow.id === activeFlowId ? "active" : ""}${!(flow.enabled) ? " flow-item-disabled" : ""}`}
             onClick={() => onSelect(flow.id)}
           >
             <div className="flow-item-name">
