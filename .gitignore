@@ -3,3 +3,11 @@
 *.p8
 .DS_STORE
 .personal/
+
+# Sessions (local Claude session state, auto-managed)
+sessions.yaml
+sessions.yaml.tmp
+
+# Nx
+.nx/
+node_modules/

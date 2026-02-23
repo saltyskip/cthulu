@@ -170,11 +170,18 @@ const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(
       if (!rfInstance.current) return null;
       const position = rfInstance.current.screenToFlowPosition({ x: screenX, y: screenY });
 
+      // Auto-name executor nodes: Executor - E01, E02, ...
+      let finalLabel = label;
+      if (nodeType === "executor") {
+        const existingCount = nodes.filter((n) => n.type === "executor").length;
+        finalLabel = `Executor - E${String(existingCount + 1).padStart(2, "0")}`;
+      }
+
       const newNode: RFNode = {
         id: crypto.randomUUID(),
         type: nodeType,
         position,
-        data: { label, kind, config: {} },
+        data: { label: finalLabel, kind, config: {} },
         sourcePosition: Position.Right,
         targetPosition: Position.Left,
       };
@@ -188,7 +195,7 @@ const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(
         kind,
         config: {},
         position: { x: position.x, y: position.y },
-        label,
+        label: finalLabel,
       };
     },
 

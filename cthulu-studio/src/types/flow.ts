@@ -1,4 +1,4 @@
-export type NodeType = "trigger" | "source" | "executor" | "sink";
+export type NodeType = "trigger" | "source" | "filter" | "executor" | "sink";
 
 export interface Position {
   x: number;
@@ -76,4 +76,44 @@ export interface RunEvent {
   node_id: string | null;
   event_type: string;
   message: string;
+}
+
+export interface SessionInfo {
+  flow_id: string;
+  flow_name: string;
+  prompt: string;
+  permissions: string[];
+  append_system_prompt: string | null;
+  working_dir: string;
+  sources_summary: string;
+  sinks_summary: string;
+}
+
+export interface OutputLine {
+  type: "system" | "text" | "tool_use" | "tool_result" | "result" | "error" | "cost";
+  text: string;
+}
+
+export interface InteractSessionInfo {
+  session_id: string;
+  summary: string;
+  message_count: number;
+  total_cost: number;
+  created_at: string;
+  busy: boolean;
+}
+
+export interface FlowSessionsInfo {
+  flow_name: string;
+  active_session: string;
+  sessions: InteractSessionInfo[];
+}
+
+export interface SavedPrompt {
+  id: string;
+  title: string;
+  summary: string;
+  source_flow_name: string;
+  tags: string[];
+  created_at: string;
 }

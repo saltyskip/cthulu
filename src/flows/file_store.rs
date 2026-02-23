@@ -7,6 +7,7 @@ use chrono::Utc;
 use tokio::sync::RwLock;
 
 use super::Flow;
+use super::SavedPrompt;
 use super::history::{FlowRun, NodeRun, RunStatus, MAX_RUNS_PER_FLOW};
 use super::store::Store;
 
@@ -14,6 +15,7 @@ pub struct FileStore {
     base_dir: PathBuf,
     flows: RwLock<HashMap<String, Flow>>,
     runs: RwLock<HashMap<String, VecDeque<FlowRun>>>,
+    prompts: RwLock<HashMap<String, SavedPrompt>>,
 }
 
 impl FileStore {
@@ -22,6 +24,7 @@ impl FileStore {
             base_dir,
             flows: RwLock::new(HashMap::new()),
             runs: RwLock::new(HashMap::new()),
+            prompts: RwLock::new(HashMap::new()),
         }
     }
 
@@ -35,6 +38,14 @@ impl FileStore {
 
     fn run_file(&self, flow_id: &str, run_id: &str) -> PathBuf {
         self.runs_dir().join(flow_id).join(format!("{run_id}.json"))
+    }
+
+    fn prompts_dir(&self) -> PathBuf {
+        self.base_dir.join("prompts")
+    }
+
+    pub fn attachments_dir(&self, flow_id: &str, node_id: &str) -> PathBuf {
+        self.base_dir.join("attachments").join(flow_id).join(node_id)
     }
 
     fn flush_run(&self, flow_id: &str, run: &FlowRun) -> Result<()> {
@@ -183,6 +194,41 @@ impl Store for FileStore {
         .await
     }
 
+    async fn list_prompts(&self) -> Vec<SavedPrompt> {
+        self.prompts.read().await.values().cloned().collect()
+    }
+
+    async fn get_prompt(&self, id: &str) -> Option<SavedPrompt> {
+        self.prompts.read().await.get(id).cloned()
+    }
+
+    async fn save_prompt(&self, prompt: SavedPrompt) -> Result<()> {
+        let dir = self.prompts_dir();
+        std::fs::create_dir_all(&dir)
+            .with_context(|| format!("failed to create prompts dir: {}", dir.display()))?;
+
+        let path = dir.join(format!("{}.json", prompt.id));
+        let content = serde_json::to_string_pretty(&prompt)
+            .context("failed to serialize prompt")?;
+        std::fs::write(&path, content)
+            .with_context(|| format!("failed to write prompt file: {}", path.display()))?;
+
+        self.prompts.write().await.insert(prompt.id.clone(), prompt);
+        Ok(())
+    }
+
+    async fn delete_prompt(&self, id: &str) -> Result<bool> {
+        let path = self.prompts_dir().join(format!("{id}.json"));
+        let existed = self.prompts.write().await.remove(id).is_some();
+
+        if path.exists() {
+            std::fs::remove_file(&path)
+                .with_context(|| format!("failed to delete prompt file: {}", path.display()))?;
+        }
+
+        Ok(existed)
+    }
+
     async fn load_all(&self) -> Result<()> {
         // Load flows
         let flows_dir = self.flows_dir();
@@ -269,6 +315,39 @@ impl Store for FileStore {
         }
 
         *self.runs.write().await = loaded_runs;
+
+        // Load prompts
+        let prompts_dir = self.prompts_dir();
+        std::fs::create_dir_all(&prompts_dir)
+            .with_context(|| format!("failed to create prompts dir: {}", prompts_dir.display()))?;
+
+        let mut loaded_prompts = HashMap::new();
+        let prompt_entries = std::fs::read_dir(&prompts_dir)
+            .with_context(|| format!("failed to read prompts dir: {}", prompts_dir.display()))?;
+
+        for entry in prompt_entries {
+            let entry = entry?;
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("json") {
+                continue;
+            }
+            let content = std::fs::read_to_string(&path)
+                .with_context(|| format!("failed to read prompt file: {}", path.display()))?;
+            match serde_json::from_str::<SavedPrompt>(&content) {
+                Ok(prompt) => {
+                    loaded_prompts.insert(prompt.id.clone(), prompt);
+                }
+                Err(e) => {
+                    tracing::warn!(path = %path.display(), error = %e, "Skipping invalid prompt file");
+                }
+            }
+        }
+
+        let prompt_count = loaded_prompts.len();
+        if prompt_count > 0 {
+            tracing::info!(count = prompt_count, "Loaded saved prompts");
+        }
+        *self.prompts.write().await = loaded_prompts;
 
         Ok(())
     }

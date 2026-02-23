@@ -20,25 +20,58 @@ Trigger → Sources → Filters → Executor (Claude Code) → Sinks
 
 - [Rust](https://rustup.rs/) (latest stable)
 - [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) installed and logged in (`claude` must be on your PATH)
-- [Node.js](https://nodejs.org/) 18+ (for Studio only)
+- [Node.js](https://nodejs.org/) 18+ (for Studio and site)
 
 ## Quick Start
 
 ```bash
-# Clone and build
+# Clone and install
 git clone <repo-url>
 cd cthulu
-cargo build --release
+npm install          # installs Nx, plugins, and workspace dependencies
 
 # Set up environment
 cp .env.example .env
-# Edit .env with your API keys (see Environment Variables below)
+# Update .env with your API keys (explore .env for details)
 
-# Run
-cargo run
+# Start backend + Studio in parallel (one command)
+npm run dev
 ```
 
-The server starts on `http://localhost:8081`. Use Studio or the REST API to create and manage flows.
+This starts the Rust backend on `http://localhost:8081` and Studio's Vite dev server on `http://localhost:1420` simultaneously.
+
+### Other Commands
+
+```bash
+npm run dev:all        # Start backend + Studio + Site
+npm run dev:studio     # Start Studio only
+npm run dev:site       # Start Site only (Next.js on port 3000)
+npm run build          # Build all projects
+npm run test           # Run all tests (Rust + JS)
+npm run lint           # Lint all projects
+npm run graph          # Visualize project dependency graph
+
+# Or use Nx directly:
+npx nx dev cthulu              # Start only the Rust backend
+npx nx build cthulu            # cargo build --release
+npx nx test cthulu             # cargo test
+npx nx dev cthulu-studio       # Start only Studio
+npx nx build cthulu-studio     # tsc + vite build
+npx nx dev cthulu-site         # Start only the Site
+```
+
+### Without Nx (standalone)
+
+You can still run projects individually without Nx:
+
+```bash
+# Backend only
+cargo build --release
+./target/release/cthulu serve
+
+# Studio only
+cd cthulu-studio && npm run dev
+```
 
 ## Environment Variables
 
@@ -109,17 +142,15 @@ See `prompts/` for examples.
 
 Studio is a visual flow editor for creating and monitoring pipelines. It connects to the running server via REST API.
 
-### Build & Run Studio
+### Run Studio (with Nx)
 
 ```bash
-cd cthulu-studio
-npm install
-npm run tauri dev
+npm run dev         # starts backend + studio together
+# or individually:
+npm run dev:studio  # studio only (backend must be running separately)
 ```
 
-This opens the desktop app pointing at `http://localhost:8081`. Make sure the server is running first.
-
-### Build for Distribution
+### Build for Distribution (Tauri desktop app)
 
 ```bash
 cd cthulu-studio
@@ -176,20 +207,31 @@ flow_run{flow=news-brief run=ba4fa70b}
 
 ## Project Structure
 
+This is an Nx monorepo with three projects:
+
 ```
 cthulu/
-├── src/
+├── package.json           # Root: Nx workspace, scripts, workspaces
+├── nx.json                # Nx config: plugins, caching, target defaults
+├── project.json           # Rust backend project (Nx targets for cargo)
+├── Cargo.toml             # Rust dependencies
+├── src/                   # Rust backend source
 │   ├── config.rs          # Env-based configuration
 │   ├── flows/             # Flow model, runner, storage, scheduler, history
 │   ├── github/            # GitHub API client
 │   ├── server/            # Axum HTTP server + API routes
+│   ├── tui/               # Terminal UI (ratatui)
 │   └── tasks/
 │       ├── sources/       # RSS, web scrape, GitHub PRs, market data
 │       ├── filters/       # Keyword filter
 │       ├── executors/     # Claude Code executor
 │       └── sinks/         # Slack, Notion
-├── cthulu-studio/         # Tauri + React Flow desktop app
-├── cthulu-site/           # Marketing site (Next.js)
+├── cthulu-studio/         # Tauri + React Flow desktop app (Nx: @nx/vite)
+├── cthulu-site/           # Marketing site, Next.js (Nx: @nx/next)
 ├── prompts/               # Prompt templates
 └── examples/              # Sample flow JSON + TOML for reference
 ```
+
+### Nx Project Graph
+
+Run `npm run graph` to visualize how the projects depend on each other. Studio has an implicit dependency on the backend (it needs the API running).

@@ -1,0 +1,32 @@
+{
+  "name": "cthulu",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "cthulu-studio",
+    "cthulu-site"
+  ],
+  "scripts": {
+    "dev": "bash scripts/dev.sh",
+    "dev:all": "nx run-many -t dev",
+    "dev:studio": "nx dev cthulu-studio",
+    "dev:site": "nx dev cthulu-site",
+    "build": "nx run-many -t build",
+    "build:backend": "nx build cthulu",
+    "build:studio": "nx build cthulu-studio",
+    "build:site": "nx build cthulu-site",
+    "test": "nx run-many -t test",
+    "lint": "nx run-many -t lint",
+    "graph": "nx graph"
+  },
+  "devDependencies": {
+    "nx": "^20.8.0",
+    "@nx/vite": "^20.8.0",
+    "@nx/next": "^20.8.0"
+  },
+  "overrides": {
+    "minimatch": "^10.2.1",
+    "koa": "^3.1.1",
+    "webpack": "^5.105.0"
+  }
+}

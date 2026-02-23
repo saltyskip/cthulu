@@ -2,6 +2,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 
 use super::Flow;
+use super::SavedPrompt;
 use super::history::{FlowRun, NodeRun, RunStatus};
 
 #[async_trait]
@@ -36,6 +37,12 @@ pub trait Store: Send + Sync {
         status: RunStatus,
         output_preview: Option<String>,
     ) -> Result<()>;
+
+    // Prompts
+    async fn list_prompts(&self) -> Vec<SavedPrompt>;
+    async fn get_prompt(&self, id: &str) -> Option<SavedPrompt>;
+    async fn save_prompt(&self, prompt: SavedPrompt) -> Result<()>;
+    async fn delete_prompt(&self, id: &str) -> Result<bool>;
 
     // Lifecycle
     async fn load_all(&self) -> Result<()>;

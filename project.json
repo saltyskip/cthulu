@@ -1,0 +1,46 @@
+{
+  "name": "cthulu",
+  "root": ".",
+  "sourceRoot": "src",
+  "projectType": "application",
+  "tags": ["scope:backend", "lang:rust"],
+  "targets": {
+    "build": {
+      "command": "cargo build --release",
+      "inputs": ["rust"],
+      "outputs": ["{workspaceRoot}/target/release/cthulu"],
+      "cache": true,
+      "metadata": {
+        "description": "Build the Rust backend (release mode)",
+        "technologies": ["rust"]
+      }
+    },
+    "dev": {
+      "command": "cargo run -- serve",
+      "continuous": true,
+      "metadata": {
+        "description": "Run the Rust backend in development mode",
+        "technologies": ["rust"]
+      }
+    },
+    "test": {
+      "command": "cargo test",
+      "inputs": ["rust"],
+      "outputs": [],
+      "cache": true,
+      "metadata": {
+        "description": "Run Rust unit tests",
+        "technologies": ["rust"]
+      }
+    },
+    "lint": {
+      "command": "cargo clippy -- -D warnings",
+      "inputs": ["rust"],
+      "cache": true,
+      "metadata": {
+        "description": "Lint Rust code with clippy",
+        "technologies": ["rust"]
+      }
+    }
+  }
+}

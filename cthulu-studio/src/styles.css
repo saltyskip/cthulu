@@ -217,6 +217,9 @@ button:disabled {
 .flow-item .flow-item-name {
   font-size: 13px;
   font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .flow-item .flow-item-meta {
@@ -225,10 +228,91 @@ button:disabled {
   margin-top: 2px;
 }
 
+/* S.1: Flow status dot in sidebar list */
+.flow-status-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.flow-status-dot.enabled {
+  background: var(--success);
+}
+
+.flow-status-dot.disabled {
+  background: var(--text-secondary);
+  opacity: 0.5;
+}
+
+.flow-item-disabled {
+  opacity: 0.6;
+}
+
+.flow-item-disabled .flow-item-name {
+  color: var(--text-secondary);
+}
+
+/* S.2: Enable/Disable toggle button */
+.flow-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.flow-toggle-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.flow-toggle-dot.enabled {
+  background: var(--success);
+}
+
+.flow-toggle-dot.disabled {
+  background: var(--text-secondary);
+}
+
+.flow-toggle-enabled {
+  border-color: var(--success) !important;
+  color: var(--success) !important;
+}
+
+.flow-toggle-enabled:hover {
+  background: rgba(63, 185, 80, 0.1) !important;
+}
+
+.flow-toggle-disabled {
+  border-color: var(--text-secondary) !important;
+  color: var(--text-secondary) !important;
+}
+
+.flow-toggle-disabled:hover {
+  background: rgba(139, 148, 158, 0.1) !important;
+}
+
+/* S.3: Next run time label in TopBar */
+.next-run-label {
+  font-size: 11px;
+  color: var(--text-secondary);
+  font-family: "SF Mono", "Fira Code", monospace;
+  padding: 2px 8px;
+  background: var(--bg-tertiary);
+  border-radius: 4px;
+  cursor: default;
+}
+
 /* Node Palette */
 .node-palette {
   border-top: 1px solid var(--border);
   padding: 12px;
+  overflow-y: auto;
+  min-height: 0;
+  flex-shrink: 1;
+  max-height: 50%;
 }
 
 .node-palette h3 {
@@ -710,17 +794,14 @@ button:disabled {
 }
 
 /* Adjust app layout when console is open */
-.app-with-console {
-  height: calc(100vh - 280px);
-}
-
 .app-with-console .app-layout {
-  height: calc(100vh - 48px - 280px);
+  flex: 1;
+  min-height: 0;
 }
 
 /* Run Log */
 .run-log-panel {
-  height: 280px;
+  /* height controlled by bottom panel */
 }
 
 .run-log-group-header {
@@ -899,4 +980,517 @@ button:disabled {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
+}
+
+/* ── Interact Panel ── */
+.interact-panel {
+  font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
+}
+
+.interact-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.interact-title {
+  white-space: nowrap;
+}
+
+.interact-badge {
+  font-size: 10px;
+  padding: 2px 8px;
+  border-radius: 3px;
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.interact-output {
+  flex: 1;
+  overflow-y: auto;
+  padding: 6px 12px;
+}
+
+.interact-line {
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  padding: 1px 0;
+}
+
+.interact-line-system {
+  color: var(--text-secondary);
+  font-style: italic;
+}
+
+.interact-line-text {
+  color: var(--text);
+}
+
+.interact-line-tool {
+  color: var(--accent);
+  font-size: 11px;
+}
+
+.interact-line-tool-result {
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.interact-line-result {
+  color: var(--success);
+  font-weight: 500;
+}
+
+.interact-line-error {
+  color: var(--danger);
+}
+
+.interact-line-cost {
+  color: var(--warning);
+  font-size: 11px;
+}
+
+/* Interact prompt area */
+.interact-prompt-area {
+  display: flex;
+  gap: 8px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-secondary);
+  align-items: flex-end;
+}
+
+.interact-prompt-area textarea {
+  flex: 1;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  color: var(--text);
+  font-size: 12px;
+  font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
+  resize: none;
+  line-height: 1.4;
+}
+
+.interact-prompt-area textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.interact-prompt-area textarea:disabled {
+  opacity: 0.5;
+}
+
+.interact-send {
+  padding: 8px 16px;
+  align-self: flex-end;
+}
+
+/* Saved prompt suggestions */
+.interact-suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  padding: 8px 0;
+  margin-top: 4px;
+}
+
+.interact-suggestions-label {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-right: 4px;
+}
+
+.interact-suggestion-chip {
+  font-size: 11px;
+  padding: 3px 10px;
+  border-radius: 12px;
+  background: var(--bg-tertiary);
+  color: var(--accent);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.interact-suggestion-chip:hover {
+  background: var(--bg-secondary);
+  border-color: var(--accent);
+}
+
+.interact-suggestion-dismiss {
+  font-size: 10px;
+  padding: 2px 8px;
+  background: transparent;
+  color: var(--text-secondary);
+  border: none;
+  cursor: pointer;
+  opacity: 0.6;
+}
+
+.interact-suggestion-dismiss:hover {
+  opacity: 1;
+}
+
+/* ── Interact History Dropdown ── */
+.interact-history-wrapper {
+  position: relative;
+}
+
+.interact-history-dropdown {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 4px;
+  width: 280px;
+  max-height: 320px;
+  overflow-y: auto;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  z-index: 60;
+  padding: 4px;
+}
+
+.interact-history-item {
+  position: relative;
+  padding: 8px 28px 8px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.interact-history-item:hover {
+  background: var(--bg-tertiary);
+}
+
+.interact-history-item.active {
+  background: var(--bg-tertiary);
+  border-left: 2px solid var(--accent);
+}
+
+.interact-history-summary {
+  font-size: 12px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.4;
+}
+
+.interact-history-meta {
+  font-size: 10px;
+  color: var(--text-secondary);
+  margin-top: 2px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+}
+
+.interact-history-close {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 14px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.15s, background 0.15s;
+}
+
+.interact-history-item:hover .interact-history-close {
+  opacity: 1;
+}
+
+.interact-history-close:hover {
+  background: var(--danger);
+  color: #fff;
+  opacity: 1;
+}
+
+.interact-history-new {
+  width: 100%;
+  padding: 8px 10px;
+  margin-top: 4px;
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--accent);
+  font-size: 12px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  cursor: pointer;
+  text-align: center;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.interact-history-new:hover {
+  background: var(--bg-tertiary);
+  border-color: var(--accent);
+}
+
+.interact-session-subtitle {
+  font-size: 11px;
+  color: var(--text-secondary);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  max-width: 160px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-style: italic;
+}
+
+/* ── Prompts Library picker (modal) ── */
+.prompt-library-list {
+  max-height: 320px;
+  overflow-y: auto;
+  margin-bottom: 16px;
+}
+
+.prompt-library-item {
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  margin-bottom: 8px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.prompt-library-item:hover {
+  background: var(--bg-tertiary);
+  border-color: var(--accent);
+}
+
+.prompt-library-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 2px;
+}
+
+.prompt-library-meta {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-bottom: 4px;
+}
+
+.prompt-library-preview {
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.4;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* ── Bottom Panel (VS Code-like tabbed terminal) ── */
+.bottom-panel {
+  /* height set via inline style */
+  background: var(--bg);
+  border-top: 2px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.bottom-panel-drag-handle {
+  height: 4px;
+  cursor: ns-resize;
+  background: transparent;
+  flex-shrink: 0;
+  transition: background 0.15s;
+}
+
+.bottom-panel-drag-handle:hover {
+  background: var(--accent);
+}
+
+.bottom-panel-tabs {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  padding: 0 4px;
+  height: 28px;
+}
+
+.bottom-panel-tab {
+  padding: 0 12px;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color 0.12s, border-color 0.12s, background 0.12s;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 4px 4px 0 0;
+}
+
+.bottom-panel-tab:hover {
+  color: var(--text);
+  background: var(--bg-tertiary);
+}
+
+.bottom-panel-tab.active {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+  background: var(--bg);
+}
+
+.bottom-panel-tab.executor {
+  font-style: italic;
+}
+
+.bottom-panel-tab.executor.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+  background: var(--bg);
+  font-style: normal;
+}
+
+.bottom-tab-badge {
+  background: var(--danger);
+  color: #fff;
+  font-size: 9px;
+  padding: 1px 5px;
+  border-radius: 8px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.bottom-panel-close {
+  font-size: 16px !important;
+  padding: 0 12px !important;
+  color: var(--text-secondary);
+  border: none;
+  background: none;
+  cursor: pointer;
+}
+
+.bottom-panel-close:hover {
+  color: var(--text);
+}
+
+.bottom-panel-content {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* When Console/RunLog are inside BottomPanel, override their fixed positioning */
+.bottom-panel-content .console-panel {
+  position: static;
+  height: auto;
+  flex: 1;
+  min-height: 0;
+  border-top: none;
+}
+
+/* Node Chat (inside bottom panel) */
+.node-chat {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
+}
+
+.node-chat-output {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+  padding: 8px 12px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.node-chat-input-drag {
+  height: 4px;
+  cursor: ns-resize;
+  background: var(--border);
+  flex-shrink: 0;
+  transition: background 0.15s;
+}
+.node-chat-input-drag:hover {
+  background: var(--accent);
+}
+
+.node-chat-input {
+  display: flex;
+  gap: 6px;
+  padding: 6px 12px;
+  background: var(--bg-secondary);
+  flex-shrink: 0;
+}
+
+.node-chat-input textarea {
+  flex: 1;
+  resize: none;
+  min-height: 32px;
+  font-size: 12px;
+  font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 4px 8px;
+}
+
+.node-chat-input textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.node-chat-send {
+  align-self: flex-end;
+  font-size: 12px !important;
+  padding: 4px 12px !important;
+}
+
+/* Cron preview (next fire times) */
+.cron-preview {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+  align-items: center;
+}
+
+.cron-preview-label {
+  font-size: 10px;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-right: 2px;
+}
+
+.cron-preview-time {
+  font-size: 11px;
+  color: var(--accent);
+  background: rgba(88, 166, 255, 0.1);
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-family: "SF Mono", "Fira Code", monospace;
 }

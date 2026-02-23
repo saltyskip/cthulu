@@ -1,0 +1,12 @@
+{
+  "name": "cthulu-site",
+  "root": "cthulu-site",
+  "sourceRoot": "cthulu-site/app",
+  "projectType": "application",
+  "tags": ["scope:site"],
+  "targets": {
+    "build": {
+      "outputs": ["{projectRoot}/out", "{projectRoot}/.next/!(cache)"]
+    }
+  }
+}
