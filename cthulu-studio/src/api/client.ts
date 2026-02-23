@@ -158,6 +158,16 @@ export async function savePrompt(prompt: {
   });
 }
 
+export async function updatePrompt(
+  id: string,
+  updates: { title?: string; summary?: string; tags?: string[] }
+): Promise<SavedPrompt> {
+  return apiFetch<SavedPrompt>(`/prompts/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(updates),
+  });
+}
+
 export async function deletePrompt(id: string): Promise<void> {
   await apiFetch(`/prompts/${id}`, { method: "DELETE" });
 }

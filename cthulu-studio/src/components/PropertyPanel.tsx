@@ -410,9 +410,37 @@ function renderConfigFields(
         </>
       );
     }
-    case "github-pr":
+    case "github-pr": {
+      const repos = (config.repos as { slug: string; path: string }[]) || [];
+      const updateRepo = (index: number, field: "slug" | "path", value: string) => {
+        const updated = repos.map((r, i) => i === index ? { ...r, [field]: value } : r);
+        onChange("repos", updated);
+      };
+      const addRepo = () => onChange("repos", [...repos, { slug: "", path: "." }]);
+      const removeRepo = (index: number) => onChange("repos", repos.filter((_, i) => i !== index));
       return (
         <>
+          <div className="form-group">
+            <label>Repositories</label>
+            {repos.map((repo, i) => (
+              <div key={i} style={{ display: "flex", gap: "4px", marginBottom: "4px" }}>
+                <input
+                  style={{ flex: 1 }}
+                  placeholder="owner/repo"
+                  value={repo.slug}
+                  onChange={(e) => updateRepo(i, "slug", e.target.value)}
+                />
+                <input
+                  style={{ flex: 1 }}
+                  placeholder="local path"
+                  value={repo.path}
+                  onChange={(e) => updateRepo(i, "path", e.target.value)}
+                />
+                <button className="ghost" style={{ padding: "2px 6px" }} onClick={() => removeRepo(i)}>×</button>
+              </div>
+            ))}
+            <button className="ghost" style={{ fontSize: "12px" }} onClick={addRepo}>+ Add repo</button>
+          </div>
           <div className="form-group">
             <label>Poll Interval (seconds)</label>
             <input
@@ -447,6 +475,7 @@ function renderConfigFields(
           </div>
         </>
       );
+    }
     default:
       return (
         <div className="form-group">
@@ -502,7 +531,7 @@ function ClaudeCodeFields({
           className={promptErr ? "input-error" : ""}
           value={(config.prompt as string) || ""}
           onChange={(e) => onChange("prompt", e.target.value)}
-          placeholder="prompts/my_prompt.md"
+          placeholder="examples/my_prompt.md"
         />
         {promptErr && <span className="field-error">{promptErr}</span>}
         <button
