@@ -158,7 +158,9 @@ impl Executor for SandboxExecutor {
             }
         }
 
-        let _ = handle.stop().await;
+        // Destroy the sandbox to release resources (workspace dirs, VM state, TAP devices).
+        // Each execute() provisions a fresh sandbox, so there's nothing to preserve.
+        let _ = handle.destroy().await;
 
         Ok(ExecutionResult {
             text: result_text.unwrap_or_default(),

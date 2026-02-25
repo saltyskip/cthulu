@@ -15,6 +15,7 @@ use crate::flows::store::Store;
 use crate::flows::NodeType;
 use crate::github::client::GithubClient;
 use crate::github::models::RepoConfig;
+use crate::sandbox::provider::SandboxProvider;
 use crate::tasks::diff;
 
 pub struct FlowScheduler {
@@ -24,6 +25,7 @@ pub struct FlowScheduler {
     events_tx: broadcast::Sender<RunEvent>,
     handles: Mutex<HashMap<String, JoinHandle<()>>>,
     seen_prs: Arc<Mutex<HashMap<String, HashMap<u64, String>>>>,
+    sandbox_provider: Arc<dyn SandboxProvider>,
 }
 
 impl FlowScheduler {
@@ -32,6 +34,7 @@ impl FlowScheduler {
         http_client: Arc<reqwest::Client>,
         github_client: Option<Arc<dyn GithubClient>>,
         events_tx: broadcast::Sender<RunEvent>,
+        sandbox_provider: Arc<dyn SandboxProvider>,
     ) -> Self {
         Self {
             store,
@@ -40,6 +43,7 @@ impl FlowScheduler {
             events_tx,
             handles: Mutex::new(HashMap::new()),
             seen_prs: Arc::new(Mutex::new(HashMap::new())),
+            sandbox_provider,
         }
     }
 
@@ -90,6 +94,7 @@ impl FlowScheduler {
 
                 tracing::info!(flow = %flow.name, schedule = %schedule, "Started cron trigger");
 
+                let sandbox_provider = self.sandbox_provider.clone();
                 let handle = tokio::spawn(async move {
                     cron_loop(
                         &flow_id,
@@ -99,6 +104,7 @@ impl FlowScheduler {
                         http_client,
                         github_client,
                         events_tx,
+                        sandbox_provider,
                     )
                     .await;
                 });
@@ -118,6 +124,7 @@ impl FlowScheduler {
                 let trigger_config = trigger_node.config.clone();
                 let events_tx = self.events_tx.clone();
 
+                let sandbox_provider = self.sandbox_provider.clone();
                 let handle = tokio::spawn(async move {
                     github_pr_loop(
                         &flow_id,
@@ -128,6 +135,7 @@ impl FlowScheduler {
                         github_client,
                         seen_prs,
                         events_tx,
+                        sandbox_provider,
                     )
                     .await;
                 });
@@ -252,7 +260,7 @@ impl FlowScheduler {
             http_client: self.http_client.clone(),
             github_client: self.github_client.clone(),
             events_tx: Some(self.events_tx.clone()),
-            sandbox_provider: None,
+            sandbox_provider: Some(self.sandbox_provider.clone()),
         };
 
         runner
@@ -274,6 +282,7 @@ async fn cron_loop(
     http_client: Arc<reqwest::Client>,
     github_client: Option<Arc<dyn GithubClient>>,
     events_tx: broadcast::Sender<RunEvent>,
+    sandbox_provider: Arc<dyn SandboxProvider>,
 ) {
     let cron = match Cron::new(schedule).parse() {
         Ok(c) => c,
@@ -328,7 +337,7 @@ async fn cron_loop(
             http_client: http_client.clone(),
             github_client: github_client.clone(),
             events_tx: Some(events_tx.clone()),
-            sandbox_provider: None,
+            sandbox_provider: Some(sandbox_provider.clone()),
         };
 
         if let Err(e) = runner.execute(&flow, &*store, None).await {
@@ -348,6 +357,7 @@ async fn github_pr_loop(
     github_client: Arc<dyn GithubClient>,
     seen_prs: Arc<Mutex<HashMap<String, HashMap<u64, String>>>>,
     events_tx: broadcast::Sender<RunEvent>,
+    sandbox_provider: Arc<dyn SandboxProvider>,
 ) {
     let poll_interval = trigger_config["poll_interval"].as_u64().unwrap_or(60);
     let skip_drafts = trigger_config["skip_drafts"].as_bool().unwrap_or(true);
@@ -578,7 +588,7 @@ async fn github_pr_loop(
                     http_client: http_client.clone(),
                     github_client: Some(github_client.clone()),
                     events_tx: Some(events_tx.clone()),
-                    sandbox_provider: None,
+                    sandbox_provider: Some(sandbox_provider.clone()),
                 };
 
                 match runner

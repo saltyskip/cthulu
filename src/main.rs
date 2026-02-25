@@ -130,33 +130,11 @@ async fn run_server(start_disabled: bool) -> Result<(), Box<dyn Error>> {
 
     let (events_tx, _) = tokio::sync::broadcast::channel::<RunEvent>(256);
 
-    // Create and start the flow scheduler
-    let scheduler = Arc::new(FlowScheduler::new(
-        store.clone(),
-        http_client.clone(),
-        github_client.clone(),
-        events_tx.clone(),
-    ));
-    if start_disabled {
-        tracing::info!("Starting with all flow triggers disabled (--start-disabled)");
-        let flows = store.list_flows().await;
-        for mut flow in flows {
-            if flow.enabled {
-                flow.enabled = false;
-                if let Err(e) = store.save_flow(flow).await {
-                    tracing::warn!(error = %e, "Failed to disable flow");
-                }
-            }
-        }
-    } else {
-        scheduler.start_all().await;
-    }
-
     // Load persisted interact sessions from ~/.cthulu/sessions.yaml (alongside other state)
     let sessions_path = base_dir.join("sessions.yaml");
     let persisted_sessions = server::load_sessions(&sessions_path);
 
-    // Initialize sandbox provider
+    // Initialize sandbox provider (before scheduler, so scheduler can use it)
     //
     // Priority:
     //   1. FIRECRACKER_SSH_HOST → RemoteSsh (real Linux server with /dev/kvm)
@@ -271,6 +249,29 @@ async fn run_server(start_disabled: bool) -> Result<(), Box<dyn Error>> {
                     .context("failed to initialize sandbox provider")?,
             )
         };
+
+    // Create and start the flow scheduler
+    let scheduler = Arc::new(FlowScheduler::new(
+        store.clone(),
+        http_client.clone(),
+        github_client.clone(),
+        events_tx.clone(),
+        sandbox_provider.clone(),
+    ));
+    if start_disabled {
+        tracing::info!("Starting with all flow triggers disabled (--start-disabled)");
+        let flows = store.list_flows().await;
+        for mut flow in flows {
+            if flow.enabled {
+                flow.enabled = false;
+                if let Err(e) = store.save_flow(flow).await {
+                    tracing::warn!(error = %e, "Failed to disable flow");
+                }
+            }
+        }
+    } else {
+        scheduler.start_all().await;
+    }
 
     let app_state = server::AppState {
         github_client,
