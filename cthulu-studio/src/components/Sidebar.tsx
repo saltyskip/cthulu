@@ -1,8 +1,11 @@
 import type { NodeTypeSchema } from "../types/flow";
+import type { PromptFile } from "../api/client";
 
 interface SidebarProps {
   nodeTypes: NodeTypeSchema[];
   onGrab: (nodeType: NodeTypeSchema) => void;
+  promptFiles: PromptFile[];
+  onSelectPrompt?: (file: PromptFile) => void;
 }
 
 const typeColors: Record<string, string> = {
@@ -13,7 +16,7 @@ const typeColors: Record<string, string> = {
   sink: "var(--sink-color)",
 };
 
-export default function Sidebar({ nodeTypes, onGrab }: SidebarProps) {
+export default function Sidebar({ nodeTypes, onGrab, promptFiles, onSelectPrompt }: SidebarProps) {
   const grouped = {
     trigger: nodeTypes.filter((n) => n.node_type === "trigger"),
     source: nodeTypes.filter((n) => n.node_type === "source"),
@@ -45,6 +48,24 @@ export default function Sidebar({ nodeTypes, onGrab }: SidebarProps) {
           ))}
         </div>
       ))}
+
+      {promptFiles.length > 0 && (
+        <>
+          <h3 style={{ marginTop: 16 }}>Prompts</h3>
+          {promptFiles.map((pf) => (
+            <div
+              key={pf.path}
+              className="palette-item prompt-file-item"
+              onClick={() => onSelectPrompt?.(pf)}
+              title={pf.path}
+            >
+              <div className="palette-dot" style={{ background: "var(--text-secondary)" }} />
+              <span className="prompt-file-title">{pf.title}</span>
+              <span className="prompt-file-path">{pf.path}</span>
+            </div>
+          ))}
+        </>
+      )}
     </div>
   );
 }

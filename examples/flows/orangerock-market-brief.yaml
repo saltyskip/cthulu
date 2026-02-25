@@ -1,0 +1,68 @@
+# ============================================================================
+# orangerock-market-brief
+# ============================================================================
+# Crypto market brief from top RSS sources, generated every 4 hours.
+# Pulls the latest 10 articles from 5 outlets, produces a structured
+# market brief with sections for regulation, markets, DeFi, institutional
+# adoption, and signals to watch.
+#
+# Pipeline: cron --> 5x RSS --> claude-code --> notion
+# ============================================================================
+
+name: orangerock-market-brief
+description: Crypto market brief from top RSS sources -- every 4 hours
+enabled: false
+
+trigger:
+  kind: cron
+  config:
+    schedule: "0 */4 * * *"       # Every 4 hours
+    working_dir: "."
+
+sources:
+  - kind: rss
+    label: "RSS: thedefiant.io"
+    config:
+      url: "https://thedefiant.io/feed"
+      limit: 10
+
+  - kind: rss
+    label: "RSS: blockworks.co"
+    config:
+      url: "https://blockworks.co/feed"
+      limit: 10
+
+  - kind: rss
+    label: "RSS: www.dlnews.com"
+    config:
+      url: "https://www.dlnews.com/feed/"
+      limit: 10
+
+  - kind: rss
+    label: "RSS: www.theblock.co"
+    config:
+      url: "https://www.theblock.co/rss"
+      limit: 10
+
+  - kind: rss
+    label: "RSS: unchainedcrypto.com"
+    config:
+      url: "https://unchainedcrypto.com/feed/"
+      limit: 10
+
+executors:
+  - kind: claude-code
+    label: "Claude: orangerock_brief.md"
+    config:
+      prompt: examples/prompts/orangerock_brief.md
+      permissions:
+        - Bash
+        - Read
+        - Grep
+        - Glob
+
+sinks:
+  - kind: notion
+    config:
+      token_env: NOTION_TOKEN
+      database_id: "REPLACE_WITH_YOUR_NOTION_DATABASE_UUID"

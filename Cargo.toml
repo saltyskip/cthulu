@@ -9,36 +9,38 @@ debug-assertions = false
 overflow-checks = false
 
 [dependencies]
-axum = { version = "0.8.4", features = ["json"] }
-tokio = { version = "1.38.0", features = ["full"] }
-tokio-stream = { version = "0.1.17", features = ["io-util"] }
-futures = "0.3.31"
+axum = { version = "0.8.8", features = ["json"] }
+tokio = { version = "1.49.0", features = ["full"] }
+tokio-stream = { version = "0.1.18", features = ["io-util"] }
+futures = "0.3.32"
 async-stream = "0.3.6"
-serde = { version = "1.0.219", features = ["derive"] }
-serde_json = "1.0.117"
-serde_yaml = "0.9"
-async-trait = "0.1"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
+serde_yaml = "0.9.34"
+async-trait = "0.1.89"
 hyper = { version = "1", default-features = false, features = ["http1", "http2", "server", "client"] }
 reqwest = { version = "0.12.22", default-features = false, features = ["json", "rustls-tls"] }
-anyhow = "1.0.98"
-thiserror = "2.0.12"
+anyhow = "1.0.102"
+thiserror = "2.0.18"
 dotenvy = "0.15.7"
-chrono = { version = "0.4.41", features = ["serde"] }
-uuid = { version = "1.17.0", features = ["v4"] }
-feed-rs = "2.3"
+chrono = { version = "0.4.44", features = ["serde"] }
+uuid = { version = "1.21.0", features = ["v4"] }
+feed-rs = "2.3.1"
 scraper = "0.23"
 croner = "2"
-dirs = "5"
-tower-http = { version = "0.6", features = ["cors"] }
-clap = { version = "4", features = ["derive"] }
+dirs = "6.0.0"
+tower-http = { version = "0.6.8", features = ["cors"] }
+clap = { version = "4.5.60", features = ["derive"] }
 ratatui = "0.29"
 crossterm = { version = "0.28", features = ["event-stream"] }
+tokio-tungstenite = "0.28"
+futures-util = "0.3.32"
 
 # Tracing
-tracing = "0.1.41"
-tracing-subscriber = { version = "0.3.20", features = ["env-filter", "fmt", "json", "time", "local-time"] }
-sentry = { version = "0.46.0", features = ["tower-axum-matched-path", "tracing", "logs"] }
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.22", features = ["env-filter", "fmt", "json", "time", "local-time"] }
+sentry = { version = "0.46.2", features = ["tower-axum-matched-path", "tracing", "logs"] }
 tracing-tree = "0.4.1"
 
 [dev-dependencies]
-tempfile = "3"
+tempfile = "3.26.0"

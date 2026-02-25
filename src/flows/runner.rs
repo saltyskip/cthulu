@@ -17,9 +17,11 @@ use crate::flows::{Flow, NodeType};
 use crate::github::client::GithubClient;
 use crate::tasks::context::render_prompt;
 use crate::sandbox::provider::SandboxProvider;
+use crate::server::VmMapping;
 use crate::tasks::executors::Executor;
 use crate::tasks::executors::claude_code::ClaudeCodeExecutor;
 use crate::tasks::executors::sandbox::SandboxExecutor;
+use crate::tasks::executors::vm_executor::VmExecutor;
 use crate::tasks::filters::Filter;
 use crate::tasks::filters::keyword::{KeywordFilter, MatchField};
 use crate::tasks::sources::{self, ContentItem};
@@ -44,6 +46,9 @@ pub struct FlowRunner {
     pub github_client: Option<Arc<dyn GithubClient>>,
     pub events_tx: Option<broadcast::Sender<RunEvent>>,
     pub sandbox_provider: Option<Arc<dyn SandboxProvider>>,
+    /// VM mappings keyed by "flow_id::node_id" -> VmMapping.
+    /// Used to look up web_terminal_url for vm-sandbox executors.
+    pub vm_mappings: HashMap<String, VmMapping>,
 }
 
 impl FlowRunner {
@@ -336,8 +341,8 @@ impl FlowRunner {
         store: &dyn Store,
         context: Option<HashMap<String, String>>,
     ) -> Result<()> {
-        // Find nodes by type
-        let executor_node = flow
+        // Find nodes by type — use first executor for prompt resolution
+        let first_executor_node = flow
             .nodes
             .iter()
             .find(|n| n.node_type == NodeType::Executor)
@@ -356,7 +361,7 @@ impl FlowRunner {
             let timestamp = Utc::now().format("%Y-%m-%d %H:%M UTC").to_string();
             vars.entry("timestamp".to_string()).or_insert(timestamp);
 
-            let prompt_path = executor_node.config["prompt"]
+            let prompt_path = first_executor_node.config["prompt"]
                 .as_str()
                 .context("executor node missing 'prompt' config")?;
 
@@ -391,7 +396,7 @@ impl FlowRunner {
                 "Pipeline: {} source(s) → {} filter(s) → {} → {} sink(s)",
                 source_nodes.len(),
                 filter_nodes.len(),
-                executor_node.kind,
+                first_executor_node.kind,
                 sink_nodes.len(),
             );
 
@@ -507,7 +512,7 @@ impl FlowRunner {
             vars.insert("item_count".to_string(), items.len().to_string());
             vars.insert("timestamp".to_string(), timestamp);
 
-            let prompt_path = executor_node.config["prompt"]
+            let prompt_path = first_executor_node.config["prompt"]
                 .as_str()
                 .context("executor node missing 'prompt' config")?;
 
@@ -565,84 +570,143 @@ impl FlowRunner {
             (rendered, count)
         };
 
-        // ── 4. EXECUTOR ─────────────────────────────────────────────
+        // ── 4. EXECUTORS (sequential, edge-ordered) ────────────────
         let trigger_node = flow.nodes.iter().find(|n| n.node_type == NodeType::Trigger);
 
-        // Resolve working_dir: trigger node > executor node > cwd
+        // Collect all executor nodes in topological (edge) order
+        let executor_nodes = topo_sort_executors(
+            &flow.nodes.iter().filter(|n| n.node_type == NodeType::Executor).collect::<Vec<_>>(),
+            &flow.edges,
+        );
+
+        if executor_nodes.is_empty() {
+            bail!("flow has no executor node");
+        }
+
+        // Resolve working_dir: trigger node > first executor node > cwd
         let working_dir = trigger_node
             .and_then(|n| n.config["working_dir"].as_str())
-            .or_else(|| executor_node.config["working_dir"].as_str())
+            .or_else(|| executor_nodes[0].config["working_dir"].as_str())
             .map(PathBuf::from)
             .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
 
-        let permissions: Vec<String> = executor_node.config["permissions"]
-            .as_array()
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(|v| v.as_str().map(String::from))
-                    .collect()
-            })
-            .unwrap_or_default();
+        tracing::info!(
+            executor_count = executor_nodes.len(),
+            "⟶ Executing {} executor(s) sequentially",
+            executor_nodes.len(),
+        );
 
-        let append_system_prompt = executor_node.config["append_system_prompt"]
-            .as_str()
-            .map(String::from);
-
-        let has_system_prompt = append_system_prompt.is_some();
-
-        let executor: Box<dyn Executor> = match executor_node.kind.as_str() {
-            "sandbox" => {
-                let provider = self.sandbox_provider.as_ref()
-                    .context("sandbox executor requested but no sandbox provider configured")?;
-                Box::new(SandboxExecutor::new(provider.clone(), permissions.clone(), append_system_prompt))
-            }
-            _ => Box::new(ClaudeCodeExecutor::new(permissions.clone(), append_system_prompt)),
+        // Run each executor sequentially, piping output from one to the next
+        let mut current_input = rendered;
+        let mut last_result = crate::tasks::executors::ExecutionResult {
+            text: String::new(),
+            cost_usd: 0.0,
+            num_turns: 0,
         };
 
-        let perms_display = if permissions.is_empty() { "ALL".to_string() } else { permissions.join(", ") };
-        tracing::info!(
-            executor = %executor_node.kind,
-            permissions = %perms_display,
-            system_prompt = has_system_prompt,
-            "⟶ Executing",
-        );
+        for (i, executor_node) in executor_nodes.iter().enumerate() {
+            let permissions: Vec<String> = executor_node.config["permissions"]
+                .as_array()
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|v| v.as_str().map(String::from))
+                        .collect()
+                })
+                .unwrap_or_default();
 
-        let exec_node_run = NodeRun {
-            node_id: executor_node.id.clone(),
-            status: RunStatus::Running,
-            started_at: Utc::now(),
-            finished_at: None,
-            output_preview: None,
-        };
-        store.push_node_run(&flow.id, run_id, exec_node_run).await?;
+            let append_system_prompt = executor_node.config["append_system_prompt"]
+                .as_str()
+                .map(String::from);
 
-        self.emit(&flow.id, run_id, Some(&executor_node.id), RunEventType::NodeStarted, format!("Executing {}...", executor_node.kind));
+            let has_system_prompt = append_system_prompt.is_some();
 
-        let exec_start = std::time::Instant::now();
-        let exec_result = executor
-            .execute(&rendered, &working_dir)
-            .await
-            .context("executor failed")?;
-        let exec_elapsed = exec_start.elapsed();
+            let executor: Box<dyn Executor> = match executor_node.kind.as_str() {
+                "sandbox" => {
+                    let provider = self.sandbox_provider.as_ref()
+                        .context("sandbox executor requested but no sandbox provider configured")?;
+                    Box::new(SandboxExecutor::new(provider.clone(), permissions.clone(), append_system_prompt))
+                }
+                "vm-sandbox" => {
+                    let vm_key = format!("{}::{}", flow.id, executor_node.id);
+                    let mapping = self.vm_mappings.get(&vm_key)
+                        .with_context(|| format!(
+                            "no VM provisioned for executor node '{}' (key: {}). Enable the flow first.",
+                            executor_node.label, vm_key
+                        ))?;
+                    tracing::info!(
+                        vm_name = %mapping.vm_name,
+                        vm_id = mapping.vm_id,
+                        url = %mapping.web_terminal_url,
+                        "using VM for executor"
+                    );
+                    Box::new(VmExecutor::new(
+                        mapping.web_terminal_url.clone(),
+                        permissions.clone(),
+                        append_system_prompt,
+                    ))
+                }
+                _ => Box::new(ClaudeCodeExecutor::new(permissions.clone(), append_system_prompt)),
+            };
 
-        self.emit(
-            &flow.id, run_id, Some(&executor_node.id), RunEventType::NodeCompleted,
-            format!("{} turns, ${:.4}, {} chars output", exec_result.num_turns, exec_result.cost_usd, exec_result.text.len()),
-        );
+            let perms_display = if permissions.is_empty() { "ALL".to_string() } else { permissions.join(", ") };
+            tracing::info!(
+                executor = %executor_node.kind,
+                step = i + 1,
+                total = executor_nodes.len(),
+                permissions = %perms_display,
+                system_prompt = has_system_prompt,
+                input_chars = current_input.len(),
+                "⟶ Executing step {}/{}",
+                i + 1,
+                executor_nodes.len(),
+            );
 
-        tracing::info!(
-            turns = exec_result.num_turns,
-            cost = format_args!("${:.4}", exec_result.cost_usd),
-            output_chars = exec_result.text.len(),
-            elapsed = format_args!("{:.1}s", exec_elapsed.as_secs_f64()),
-            "✓ Executor finished",
-        );
+            let exec_node_run = NodeRun {
+                node_id: executor_node.id.clone(),
+                status: RunStatus::Running,
+                started_at: Utc::now(),
+                finished_at: None,
+                output_preview: None,
+            };
+            store.push_node_run(&flow.id, run_id, exec_node_run).await?;
 
-        let preview = truncate(&exec_result.text, 500);
+            self.emit(&flow.id, run_id, Some(&executor_node.id), RunEventType::NodeStarted,
+                format!("Executing {} (step {}/{})...", executor_node.kind, i + 1, executor_nodes.len()));
 
-        store
-            .complete_node_run(&flow.id, run_id, &executor_node.id, RunStatus::Success, Some(preview))
-            .await?;
+            let exec_start = std::time::Instant::now();
+            let exec_result = executor
+                .execute(&current_input, &working_dir)
+                .await
+                .with_context(|| format!("executor '{}' failed (step {}/{})", executor_node.label, i + 1, executor_nodes.len()))?;
+            let exec_elapsed = exec_start.elapsed();
+
+            self.emit(
+                &flow.id, run_id, Some(&executor_node.id), RunEventType::NodeCompleted,
+                format!("{} turns, ${:.4}, {} chars output", exec_result.num_turns, exec_result.cost_usd, exec_result.text.len()),
+            );
+
+            tracing::info!(
+                turns = exec_result.num_turns,
+                cost = format_args!("${:.4}", exec_result.cost_usd),
+                output_chars = exec_result.text.len(),
+                elapsed = format_args!("{:.1}s", exec_elapsed.as_secs_f64()),
+                "✓ Executor step {}/{} finished",
+                i + 1,
+                executor_nodes.len(),
+            );
+
+            let preview = truncate(&exec_result.text, 500);
+            store
+                .complete_node_run(&flow.id, run_id, &executor_node.id, RunStatus::Success, Some(preview))
+                .await?;
+
+            // Pipe output to next executor's input
+            current_input = exec_result.text.clone();
+            last_result = exec_result;
+        }
+
+        // Use the final executor's result for sinks
+        let exec_result = last_result;
 
         // ── 5. SINKS ────────────────────────────────────────────────
         if !exec_result.text.is_empty() && !sink_nodes.is_empty() {
@@ -829,4 +893,73 @@ fn parse_sink_configs(nodes: &[&crate::flows::Node]) -> Result<Vec<SinkConfig>> 
         configs.push(config);
     }
     Ok(configs)
+}
+
+/// Sort executor nodes in topological order based on edges.
+///
+/// Uses edge connections between executor nodes to determine order.
+/// If no edges connect executors (e.g., single executor flow), returns
+/// them in their original array order.
+fn topo_sort_executors<'a>(
+    executor_nodes: &[&'a crate::flows::Node],
+    edges: &[crate::flows::Edge],
+) -> Vec<&'a crate::flows::Node> {
+    use std::collections::{HashMap as StdHashMap, HashSet, VecDeque};
+
+    if executor_nodes.len() <= 1 {
+        return executor_nodes.to_vec();
+    }
+
+    // Build a set of executor node IDs for fast lookup
+    let exec_ids: HashSet<&str> = executor_nodes.iter().map(|n| n.id.as_str()).collect();
+    let id_to_node: StdHashMap<&str, &'a crate::flows::Node> =
+        executor_nodes.iter().map(|n| (n.id.as_str(), *n)).collect();
+
+    // Build adjacency list for executor-to-executor edges only
+    let mut in_degree: StdHashMap<&str, usize> = exec_ids.iter().map(|id| (*id, 0)).collect();
+    let mut adj: StdHashMap<&str, Vec<&str>> = StdHashMap::new();
+
+    for edge in edges {
+        if exec_ids.contains(edge.source.as_str()) && exec_ids.contains(edge.target.as_str()) {
+            adj.entry(edge.source.as_str())
+                .or_default()
+                .push(edge.target.as_str());
+            *in_degree.entry(edge.target.as_str()).or_insert(0) += 1;
+        }
+    }
+
+    // Kahn's algorithm
+    let mut queue: VecDeque<&str> = in_degree
+        .iter()
+        .filter(|(_, deg)| **deg == 0)
+        .map(|(&id, _)| id)
+        .collect();
+
+    let mut sorted = Vec::new();
+    while let Some(node_id) = queue.pop_front() {
+        sorted.push(node_id);
+        if let Some(neighbors) = adj.get(node_id) {
+            for &next in neighbors {
+                let deg = in_degree.get_mut(next).unwrap();
+                *deg -= 1;
+                if *deg == 0 {
+                    queue.push_back(next);
+                }
+            }
+        }
+    }
+
+    // If topo sort didn't include all executors (no edges between them),
+    // append any missing ones in their original order
+    let sorted_set: HashSet<&str> = sorted.iter().copied().collect();
+    for node in executor_nodes {
+        if !sorted_set.contains(node.id.as_str()) {
+            sorted.push(node.id.as_str());
+        }
+    }
+
+    sorted
+        .into_iter()
+        .filter_map(|id| id_to_node.get(id).copied())
+        .collect()
 }

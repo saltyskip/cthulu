@@ -146,6 +146,65 @@ pub(crate) async fn update_flow(
         tracing::warn!(flow_id = %id, error = %e, "Failed to restart trigger for updated flow");
     }
 
+    // VM lifecycle: provision on enable, destroy on disable
+    if body.enabled.is_some() {
+        if let Some(vm_manager) = &state.vm_manager {
+            if flow.enabled {
+                // Flow was enabled — provision VMs for all executor nodes
+                let oauth = state.oauth_token.clone();
+                let vm_mgr = vm_manager.clone();
+                let flow_clone = flow.clone();
+                let vm_mappings = state.vm_mappings.clone();
+                let sessions_path = state.sessions_path.clone();
+                let interact_sessions = state.interact_sessions.clone();
+
+                tokio::spawn(async move {
+                    match vm_mgr.provision_flow_vms(&flow_clone, oauth.as_deref()).await {
+                        Ok(results) => {
+                            let mut map = vm_mappings.write().await;
+                            for (node_id, vm_name, vm) in results {
+                                let key = format!("{}::{}", flow_clone.id, node_id);
+                                map.insert(key, crate::server::VmMapping {
+                                    vm_id: vm.vm_id,
+                                    vm_name,
+                                    web_terminal_url: vm.web_terminal.clone(),
+                                });
+                            }
+                            // Persist
+                            let sessions = interact_sessions.read().await.clone();
+                            crate::server::save_sessions(&sessions_path, &sessions, &map);
+                            tracing::info!(flow = %flow_clone.name, "VMs provisioned for enabled flow");
+                        }
+                        Err(e) => {
+                            tracing::error!(flow = %flow_clone.name, error = %e, "Failed to provision VMs");
+                        }
+                    }
+                });
+            } else {
+                // Flow was disabled — destroy VMs
+                let vm_mgr = vm_manager.clone();
+                let flow_clone = flow.clone();
+                let vm_mappings = state.vm_mappings.clone();
+                let sessions_path = state.sessions_path.clone();
+                let interact_sessions = state.interact_sessions.clone();
+
+                tokio::spawn(async move {
+                    if let Err(e) = vm_mgr.destroy_flow_vms(&flow_clone).await {
+                        tracing::error!(flow = %flow_clone.name, error = %e, "Failed to destroy VMs");
+                    }
+                    // Remove VM mappings for this flow
+                    let mut map = vm_mappings.write().await;
+                    let prefix = format!("{}::", flow_clone.id);
+                    map.retain(|k, _| !k.starts_with(&prefix));
+                    // Persist
+                    let sessions = interact_sessions.read().await.clone();
+                    crate::server::save_sessions(&sessions_path, &sessions, &map);
+                    tracing::info!(flow = %flow_clone.name, "VMs destroyed for disabled flow");
+                });
+            }
+        }
+    }
+
     Ok(Json(serde_json::to_value(&flow).unwrap()))
 }
 
@@ -219,11 +278,13 @@ pub(crate) async fn trigger_flow(
     }
 
     // Default: one-shot flow execution
+    let vm_mappings_snapshot = state.vm_mappings.read().await.clone();
     let runner = crate::flows::runner::FlowRunner {
         http_client: state.http_client.clone(),
         github_client: state.github_client.clone(),
         events_tx: Some(state.events_tx.clone()),
         sandbox_provider: Some(state.sandbox_provider.clone()),
+        vm_mappings: vm_mappings_snapshot,
     };
 
     let store = state.store.clone();
@@ -401,7 +462,9 @@ pub(crate) async fn get_node_types() -> Json<Value> {
                 "label": "VM Sandbox",
                 "config_schema": {
                     "tier": { "type": "string", "description": "VM tier: nano (1 vCPU, 512MB) or micro (2 vCPU, 1024MB)", "default": "nano" },
-                    "api_key": { "type": "string", "description": "Anthropic API key to inject into the VM (optional, uses server default if omitted)" }
+                    "prompt": { "type": "string", "description": "Prompt template (inline or file path)" },
+                    "permissions": { "type": "array", "description": "Tool permissions (e.g. Bash, Read)", "default": [] },
+                    "append_system_prompt": { "type": "string", "description": "Additional system prompt appended to Claude's instructions" }
                 }
             },
             {
@@ -423,6 +486,43 @@ pub(crate) async fn get_node_types() -> Json<Value> {
                     "database_id": { "type": "string", "description": "Notion database ID", "required": true }
                 }
             }
-        ]
+         ]
     }))
+}
+
+/// GET /api/prompt-files — list prompt files from examples/prompts/ directory.
+///
+/// Returns each file's relative path (for use in executor config) and first
+/// line as a title hint.
+pub(crate) async fn list_prompt_files() -> Json<Value> {
+    let dir = std::path::Path::new("examples/prompts");
+    let mut files: Vec<Value> = Vec::new();
+
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        let mut entries: Vec<_> = entries.filter_map(|e| e.ok()).collect();
+        entries.sort_by_key(|e| e.file_name());
+
+        for entry in entries {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) == Some("md") {
+                let rel_path = format!("examples/prompts/{}", entry.file_name().to_string_lossy());
+                let title = std::fs::read_to_string(&path)
+                    .ok()
+                    .and_then(|content| {
+                        content.lines().find(|l| !l.trim().is_empty()).map(|l| {
+                            l.trim_start_matches('#').trim().to_string()
+                        })
+                    })
+                    .unwrap_or_else(|| entry.file_name().to_string_lossy().to_string());
+
+                files.push(serde_json::json!({
+                    "path": rel_path,
+                    "filename": entry.file_name().to_string_lossy(),
+                    "title": title,
+                }));
+            }
+        }
+    }
+
+    Json(serde_json::json!({ "files": files }))
 }

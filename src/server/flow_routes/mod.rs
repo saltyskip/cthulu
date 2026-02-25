@@ -22,6 +22,7 @@ pub fn flow_router() -> Router<AppState> {
         .route("/flows/{id}/runs", get(crud::get_runs))
         .route("/flows/{id}/runs/live", get(crud::stream_runs))
         .route("/node-types", get(crud::get_node_types))
+        .route("/prompt-files", get(crud::list_prompt_files))
         // Flow-level interact
         .route("/flows/{id}/session", get(interact::get_session))
         .route("/flows/{id}/interact", post(interact::interact_flow))
@@ -44,8 +45,8 @@ pub fn flow_router() -> Router<AppState> {
         // Sandbox
         .route("/sandbox/info", get(sandbox::sandbox_info))
         .route("/sandbox/list", get(sandbox::sandbox_list))
-        // VM Manager
-        .route("/sandbox/vm/{flow_id}", get(sandbox::get_flow_vm).post(sandbox::create_flow_vm).delete(sandbox::delete_flow_vm))
+        // VM Manager (per-node VMs)
+        .route("/sandbox/vm/{flow_id}/{node_id}", get(sandbox::get_node_vm).post(sandbox::create_node_vm).delete(sandbox::delete_node_vm))
 }
 
 // ---------------------------------------------------------------------------

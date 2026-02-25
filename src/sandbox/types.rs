@@ -401,8 +401,6 @@ pub enum SpriteFileSyncMode {
 pub struct VmManagerConfig {
     /// Base URL of the VM Manager API (e.g., "http://34.100.130.60:8080")
     pub api_base_url: String,
-    /// Host for SSH access to VMs (defaults to host extracted from api_base_url)
-    pub ssh_host: String,
     /// Default VM tier: "nano" (1 vCPU, 512MB) or "micro" (2 vCPU, 1024MB)
     pub default_tier: String,
     /// Anthropic API key to inject into VMs (optional)

@@ -16,6 +16,7 @@ use crate::flows::NodeType;
 use crate::github::client::GithubClient;
 use crate::github::models::RepoConfig;
 use crate::sandbox::provider::SandboxProvider;
+use crate::server::VmMapping;
 use crate::tasks::diff;
 
 pub struct FlowScheduler {
@@ -26,6 +27,7 @@ pub struct FlowScheduler {
     handles: Mutex<HashMap<String, JoinHandle<()>>>,
     seen_prs: Arc<Mutex<HashMap<String, HashMap<u64, String>>>>,
     sandbox_provider: Arc<dyn SandboxProvider>,
+    vm_mappings: Arc<tokio::sync::RwLock<HashMap<String, VmMapping>>>,
 }
 
 impl FlowScheduler {
@@ -35,6 +37,7 @@ impl FlowScheduler {
         github_client: Option<Arc<dyn GithubClient>>,
         events_tx: broadcast::Sender<RunEvent>,
         sandbox_provider: Arc<dyn SandboxProvider>,
+        vm_mappings: Arc<tokio::sync::RwLock<HashMap<String, VmMapping>>>,
     ) -> Self {
         Self {
             store,
@@ -44,6 +47,7 @@ impl FlowScheduler {
             handles: Mutex::new(HashMap::new()),
             seen_prs: Arc::new(Mutex::new(HashMap::new())),
             sandbox_provider,
+            vm_mappings,
         }
     }
 
@@ -95,6 +99,7 @@ impl FlowScheduler {
                 tracing::info!(flow = %flow.name, schedule = %schedule, "Started cron trigger");
 
                 let sandbox_provider = self.sandbox_provider.clone();
+                let vm_mappings = self.vm_mappings.clone();
                 let handle = tokio::spawn(async move {
                     cron_loop(
                         &flow_id,
@@ -105,6 +110,7 @@ impl FlowScheduler {
                         github_client,
                         events_tx,
                         sandbox_provider,
+                        vm_mappings,
                     )
                     .await;
                 });
@@ -125,6 +131,7 @@ impl FlowScheduler {
                 let events_tx = self.events_tx.clone();
 
                 let sandbox_provider = self.sandbox_provider.clone();
+                let vm_mappings = self.vm_mappings.clone();
                 let handle = tokio::spawn(async move {
                     github_pr_loop(
                         &flow_id,
@@ -136,6 +143,7 @@ impl FlowScheduler {
                         seen_prs,
                         events_tx,
                         sandbox_provider,
+                        vm_mappings,
                     )
                     .await;
                 });
@@ -261,6 +269,7 @@ impl FlowScheduler {
             github_client: self.github_client.clone(),
             events_tx: Some(self.events_tx.clone()),
             sandbox_provider: Some(self.sandbox_provider.clone()),
+            vm_mappings: self.vm_mappings.read().await.clone(),
         };
 
         runner
@@ -283,6 +292,7 @@ async fn cron_loop(
     github_client: Option<Arc<dyn GithubClient>>,
     events_tx: broadcast::Sender<RunEvent>,
     sandbox_provider: Arc<dyn SandboxProvider>,
+    vm_mappings: Arc<tokio::sync::RwLock<HashMap<String, VmMapping>>>,
 ) {
     let cron = match Cron::new(schedule).parse() {
         Ok(c) => c,
@@ -338,6 +348,7 @@ async fn cron_loop(
             github_client: github_client.clone(),
             events_tx: Some(events_tx.clone()),
             sandbox_provider: Some(sandbox_provider.clone()),
+            vm_mappings: vm_mappings.read().await.clone(),
         };
 
         if let Err(e) = runner.execute(&flow, &*store, None).await {
@@ -358,6 +369,7 @@ async fn github_pr_loop(
     seen_prs: Arc<Mutex<HashMap<String, HashMap<u64, String>>>>,
     events_tx: broadcast::Sender<RunEvent>,
     sandbox_provider: Arc<dyn SandboxProvider>,
+    vm_mappings: Arc<tokio::sync::RwLock<HashMap<String, VmMapping>>>,
 ) {
     let poll_interval = trigger_config["poll_interval"].as_u64().unwrap_or(60);
     let skip_drafts = trigger_config["skip_drafts"].as_bool().unwrap_or(true);
@@ -589,6 +601,7 @@ async fn github_pr_loop(
                     github_client: Some(github_client.clone()),
                     events_tx: Some(events_tx.clone()),
                     sandbox_provider: Some(sandbox_provider.clone()),
+                    vm_mappings: vm_mappings.read().await.clone(),
                 };
 
                 match runner

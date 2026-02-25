@@ -48,14 +48,14 @@ pub(crate) async fn sandbox_list(State(state): State<AppState>) -> Result<Json<V
 // sandbox provider is VmManager.
 
 /// Helper to get the VmManagerProvider from AppState.
-/// Returns 404 if the sandbox provider is not VmManager.
+/// Returns 503 Service Unavailable with a descriptive JSON body if VM Manager is not configured.
 fn require_vm_manager(
     state: &AppState,
-) -> Result<&crate::sandbox::backends::vm_manager::VmManagerProvider, StatusCode> {
-    state
-        .vm_manager
-        .as_deref()
-        .ok_or(StatusCode::NOT_FOUND)
+) -> Result<&crate::sandbox::backends::vm_manager::VmManagerProvider, (StatusCode, Json<Value>)> {
+    state.vm_manager.as_deref().ok_or((
+        StatusCode::SERVICE_UNAVAILABLE,
+        Json(json!({ "error": "VM Manager not configured. Set VM_MANAGER_URL in .env" })),
+    ))
 }
 
 #[derive(Deserialize)]
@@ -64,14 +64,14 @@ pub(crate) struct VmCreateBody {
     pub api_key: Option<String>,
 }
 
-/// GET /api/sandbox/vm/{flow_id} — get VM info for a flow.
-pub(crate) async fn get_flow_vm(
+/// GET /api/sandbox/vm/{flow_id}/{node_id} — get VM info for an executor node.
+pub(crate) async fn get_node_vm(
     State(state): State<AppState>,
-    Path(flow_id): Path<String>,
-) -> Result<Json<Value>, StatusCode> {
+    Path((flow_id, node_id)): Path<(String, String)>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let provider = require_vm_manager(&state)?;
 
-    match provider.get_flow_vm(&flow_id).await {
+    match provider.get_node_vm(&flow_id, &node_id).await {
         Some(vm) => Ok(Json(json!({
             "vm_id": vm.vm_id,
             "tier": vm.tier,
@@ -82,21 +82,22 @@ pub(crate) async fn get_flow_vm(
             "web_terminal": vm.web_terminal,
             "pid": vm.pid,
         }))),
-        None => Err(StatusCode::NOT_FOUND),
+        None => Err((StatusCode::NOT_FOUND, Json(json!({ "error": "No VM exists for this node" })))),
     }
 }
 
-/// POST /api/sandbox/vm/{flow_id} — create (or get existing) VM for a flow.
-pub(crate) async fn create_flow_vm(
+/// POST /api/sandbox/vm/{flow_id}/{node_id} — create (or get existing) VM for an executor node.
+pub(crate) async fn create_node_vm(
     State(state): State<AppState>,
-    Path(flow_id): Path<String>,
+    Path((flow_id, node_id)): Path<(String, String)>,
     Json(body): Json<VmCreateBody>,
-) -> Result<Json<Value>, StatusCode> {
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let provider = require_vm_manager(&state)?;
 
     match provider
         .get_or_create_vm(
             &flow_id,
+            &node_id,
             body.tier.as_deref(),
             body.api_key.as_deref(),
         )
@@ -113,28 +114,28 @@ pub(crate) async fn create_flow_vm(
             "pid": vm.pid,
         }))),
         Err(e) => {
-            tracing::error!(flow_id = %flow_id, error = %e, "failed to create VM");
-            Err(StatusCode::INTERNAL_SERVER_ERROR)
+            tracing::error!(flow_id = %flow_id, node_id = %node_id, error = %e, "failed to create VM");
+            Err((StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() }))))
         }
     }
 }
 
-/// DELETE /api/sandbox/vm/{flow_id} — destroy VM for a flow.
-pub(crate) async fn delete_flow_vm(
+/// DELETE /api/sandbox/vm/{flow_id}/{node_id} — destroy VM for an executor node.
+pub(crate) async fn delete_node_vm(
     State(state): State<AppState>,
-    Path(flow_id): Path<String>,
-) -> Result<Json<Value>, StatusCode> {
+    Path((flow_id, node_id)): Path<(String, String)>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let provider = require_vm_manager(&state)?;
 
-    match provider.destroy_flow_vm(&flow_id).await {
+    match provider.destroy_node_vm(&flow_id, &node_id).await {
         Ok(Some(vm_id)) => {
-            tracing::info!(flow_id = %flow_id, vm_id = vm_id, "VM destroyed");
+            tracing::info!(flow_id = %flow_id, node_id = %node_id, vm_id = vm_id, "VM destroyed");
             Ok(Json(json!({ "status": "deleted", "vm_id": vm_id })))
         }
-        Ok(None) => Err(StatusCode::NOT_FOUND),
+        Ok(None) => Err((StatusCode::NOT_FOUND, Json(json!({ "error": "No VM exists for this node" })))),
         Err(e) => {
-            tracing::error!(flow_id = %flow_id, error = %e, "failed to destroy VM");
-            Err(StatusCode::INTERNAL_SERVER_ERROR)
+            tracing::error!(flow_id = %flow_id, node_id = %node_id, error = %e, "failed to destroy VM");
+            Err((StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() }))))
         }
     }
 }

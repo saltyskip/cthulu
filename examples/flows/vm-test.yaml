@@ -1,0 +1,25 @@
+# ============================================================================
+# vm-test
+# ============================================================================
+# Minimal smoke test for the VM executor infrastructure.
+# Manually triggered, runs a trivial "2+2" prompt inside a Firecracker
+# microVM. No sources, no sinks -- just verifies that VM provisioning,
+# OAuth token injection, ttyd WebSocket execution, and Claude CLI
+# all work end-to-end inside the sandbox.
+#
+# Pipeline: manual --> vm-sandbox
+# ============================================================================
+
+name: vm-test
+description: Test flow for VM executor
+enabled: false
+
+trigger:
+  kind: manual
+
+executors:
+  - kind: vm-sandbox
+    label: "VM Executor Test"
+    config:
+      tier: nano
+      prompt: "What is 2+2? Reply with just the number."

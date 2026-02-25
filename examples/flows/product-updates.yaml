@@ -1,0 +1,43 @@
+# ============================================================================
+# product-updates
+# ============================================================================
+# Weekly product update -- live test with VM executor + Slack.
+# Manually triggered. Pulls the latest 5 articles from TechCrunch AI,
+# runs through a VM sandbox executor that generates a Slack-friendly
+# summary, and posts to Slack via webhook.
+#
+# Pipeline: manual --> 1x RSS --> vm-sandbox --> slack
+# ============================================================================
+
+name: product-updates
+description: Weekly product update -- live test with VM executor + Slack
+enabled: true
+
+trigger:
+  kind: manual
+
+sources:
+  - kind: rss
+    label: "TechCrunch AI"
+    config:
+      url: "https://techcrunch.com/category/artificial-intelligence/feed/"
+      limit: 5
+
+executors:
+  - kind: vm-sandbox
+    label: "VM Product Update Writer"
+    config:
+      tier: nano
+      prompt: >
+        You are a tech news curator. Given the following articles,
+        write a brief Slack-friendly summary of the top AI news this week.
+        Use emoji bullets. Keep it under 200 words. Start with a bold header.
+        Output plain text only, no markdown code blocks.
+      permissions:
+        - "Bash(*)"
+        - "Read(*)"
+
+sinks:
+  - kind: slack
+    config:
+      webhook_url_env: SLACK_WEBHOOK_URL

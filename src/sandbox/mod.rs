@@ -3,6 +3,7 @@ pub mod error;
 pub mod handle;
 pub mod local_host;
 pub mod provider;
+pub mod ttyd;
 pub mod types;
 
 // Internal implementation modules

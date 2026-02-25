@@ -1,0 +1,9 @@
+{
+  "identifier": "default",
+  "description": "Default capabilities for Cthulu Studio",
+  "windows": ["main"],
+  "permissions": [
+    "dialog:default",
+    "dialog:allow-open"
+  ]
+}

@@ -1,0 +1,263 @@
+# ============================================================================
+# Cthulu Flow Definition Schema v1
+# ============================================================================
+#
+# Human-readable YAML format for defining automation workflows.
+# Each flow follows a fixed 5-stage pipeline:
+#
+#   trigger --> sources --> filters --> executors --> sinks
+#
+# - Trigger:    exactly one per flow (what starts execution)
+# - Sources:    zero or more, run in parallel (fetch data)
+# - Filters:    zero or more, applied sequentially (prune data)
+# - Executors:  one or more, run sequentially (AI processing)
+# - Sinks:      zero or more, all receive the final output (deliver results)
+#
+# When multiple executors exist, they run in sequence:
+#   executor 1 output --> executor 2 input --> ... --> final output --> sinks
+#
+# ============================================================================
+#
+# TEMPLATE VARIABLES (available in executor prompts via {{var}})
+#
+#   Standard pipeline:
+#     {{content}}      - Formatted source items (numbered markdown list)
+#     {{item_count}}   - Number of items after filtering
+#     {{timestamp}}    - Current UTC time (YYYY-MM-DD HH:MM UTC)
+#     {{market_data}}  - Market snapshot (fetched only if placeholder present)
+#
+#   GitHub PR trigger (injected automatically):
+#     {{diff}}         - Full PR diff text
+#     {{pr_number}}    - Pull request number
+#     {{pr_title}}     - PR title
+#     {{pr_body}}      - PR description body
+#     {{base_ref}}     - Base branch name
+#     {{head_ref}}     - Head branch name
+#     {{head_sha}}     - Head commit SHA
+#     {{repo}}         - Repository slug (owner/repo)
+#     {{local_path}}   - Local filesystem path to repo checkout
+#     {{review_type}}  - "initial" or "re-review"
+#
+# ============================================================================
+
+# ---- Flow metadata ----
+
+name: my-flow-name                  # required, string
+description: "What this flow does"  # optional, string (default: "")
+enabled: true                       # optional, boolean (default: true)
+
+
+# ============================================================================
+# TRIGGER (exactly one)
+# ============================================================================
+# Determines when/how the flow starts execution.
+# kind: cron | manual | github-pr | webhook
+#
+# Note: Manual runs always work via the Run button, even when enabled: false.
+#       The enabled flag only controls automatic trigger scheduling.
+
+trigger:
+
+  # --------------------------------------------------------------------------
+  # Option A: Cron Schedule
+  # --------------------------------------------------------------------------
+  kind: cron
+  config:
+    schedule: "0 */4 * * *"       # required - 5-field cron expression
+                                  # Examples:
+                                  #   "0 */4 * * *"   = every 4 hours
+                                  #   "0 8 * * 1"     = Monday 8:00 AM
+                                  #   "0 0 * * *"     = daily at midnight
+                                  #   "*/15 * * * *"  = every 15 minutes
+    working_dir: "."              # optional - working directory (default: ".")
+
+  # --------------------------------------------------------------------------
+  # Option B: Manual Trigger
+  # --------------------------------------------------------------------------
+  # kind: manual
+  # config: {}                    # no config needed
+
+  # --------------------------------------------------------------------------
+  # Option C: GitHub PR Trigger
+  # --------------------------------------------------------------------------
+  # kind: github-pr
+  # config:
+  #   repos:                      # required - repositories to watch
+  #     - slug: owner/repo        #   GitHub slug (owner/repo)
+  #       path: "."               #   local checkout path
+  #   poll_interval: 60           # optional - seconds between polls (default: 60)
+  #   skip_drafts: true           # optional - skip draft PRs (default: true)
+  #   review_on_push: false       # optional - re-review on new commits (default: false)
+  #   max_diff_size: 50000        # optional - max diff size in bytes (default: 50000)
+
+  # --------------------------------------------------------------------------
+  # Option D: Webhook Trigger
+  # --------------------------------------------------------------------------
+  # kind: webhook
+  # config:
+  #   path: /hooks/my-endpoint    # required - URL path for the webhook
+
+
+# ============================================================================
+# SOURCES (zero or more)
+# ============================================================================
+# Fetch external data. All sources run in parallel.
+# Results are merged into a flat list of ContentItem records:
+#   { title, url, summary, published?, image_url? }
+#
+# Formatted into the {{content}} template variable as a numbered markdown list.
+
+sources:
+
+  # --------------------------------------------------------------------------
+  # RSS Feed
+  # --------------------------------------------------------------------------
+  - kind: rss
+    label: "My RSS Feed"            # optional display name
+    config:
+      url: "https://example.com/feed"   # required - RSS/Atom feed URL
+      limit: 10                         # optional - max items (default: 10)
+      keywords: []                      # optional - filter by keywords,
+                                        #   case-insensitive, any match (default: [])
+
+  # --------------------------------------------------------------------------
+  # Web Scrape (full page text)
+  # --------------------------------------------------------------------------
+  # - kind: web-scrape
+  #   label: "Page Text Scraper"
+  #   config:
+  #     url: "https://example.com"      # required - page URL
+  #     keywords: [bitcoin, crypto]     # optional - filter keywords (default: [])
+
+  # --------------------------------------------------------------------------
+  # Web Scraper (CSS selectors)
+  # --------------------------------------------------------------------------
+  # - kind: web-scraper
+  #   label: "CSS Scraper"
+  #   config:
+  #     url: "https://example.com/news"       # required - page URL
+  #     items_selector: "div.article"         # required - CSS selector for items
+  #     base_url: "https://example.com"       # optional - resolve relative links
+  #     title_selector: "h3 a"               # optional - title within each item
+  #     url_selector: "h3 a"                 # optional - link within each item
+  #     summary_selector: "p.summary"        # optional - summary text
+  #     date_selector: "time"                # optional - date element
+  #     date_format: "%Y-%m-%d"              # optional - date parsing format
+  #     limit: 10                            # optional - max items (default: 10)
+
+  # --------------------------------------------------------------------------
+  # GitHub Merged PRs
+  # --------------------------------------------------------------------------
+  # - kind: github-merged-prs
+  #   label: "Recent Merged PRs"
+  #   config:
+  #     repos:                                # required - repository slugs
+  #       - owner/repo-a
+  #       - owner/repo-b
+  #     since_days: 7                         # optional - lookback days (default: 7)
+  #                                           # Requires GITHUB_TOKEN env var
+
+  # --------------------------------------------------------------------------
+  # Market Data
+  # --------------------------------------------------------------------------
+  # - kind: market-data
+  #   label: "Market Snapshot"
+  #   # No config needed. Data is injected via {{market_data}} in the prompt.
+  #   # Does NOT produce ContentItem records — handled during prompt rendering.
+
+
+# ============================================================================
+# FILTERS (zero or more)
+# ============================================================================
+# Applied sequentially to the merged ContentItem list from sources.
+# Items that don't match are dropped before reaching executors.
+
+filters:
+
+  # --------------------------------------------------------------------------
+  # Keyword Filter
+  # --------------------------------------------------------------------------
+  - kind: keyword
+    config:
+      keywords:                     # required - keywords to match
+        - bitcoin
+        - btc
+        - ethereum
+      require_all: false            # optional - true = AND, false = OR (default: false)
+      field: title_or_summary       # optional - where to match:
+                                    #   "title" | "summary" | "title_or_summary"
+                                    #   (default: "title_or_summary")
+
+
+# ============================================================================
+# EXECUTORS (one or more)
+# ============================================================================
+# AI processing stage. Multiple executors run sequentially (chained).
+# Output of executor N becomes input to executor N+1.
+# The final executor's output is sent to all sinks.
+
+executors:
+
+  # --------------------------------------------------------------------------
+  # Claude Code (runs on host via Claude CLI)
+  # --------------------------------------------------------------------------
+  - kind: claude-code
+    label: "Executor - E01"           # optional display name
+    config:
+      prompt: examples/prompts/my_prompt.md   # required - file path or inline text
+                                              #   File paths are relative to project root.
+                                              #   If the value looks like a path (contains /
+                                              #   or ends in .md/.txt), it's read as a file.
+                                              #   Otherwise treated as inline prompt text.
+      permissions:                    # optional - Claude CLI tool permissions (default: [])
+        - Bash                        #   Allowed values: Bash, Read, Write, Edit,
+        - Read                        #   Grep, Glob, WebFetch, WebSearch, TodoWrite
+        - Grep                        #   Use Bash(*), Read(*) etc. for wildcard perms
+        - Glob
+      append_system_prompt: null      # optional - extra instructions appended to
+                                      #   Claude's system prompt
+
+  # --------------------------------------------------------------------------
+  # VM Sandbox (runs inside a Firecracker microVM)
+  # --------------------------------------------------------------------------
+  # - kind: vm-sandbox
+  #   label: "VM Agent"
+  #   config:
+  #     tier: nano                    # optional - VM size (default: "nano")
+  #                                   #   "nano"  = 1 vCPU, 512 MB RAM
+  #                                   #   "micro" = 2 vCPU, 1024 MB RAM
+  #     prompt: "Inline prompt..."    # optional - file path or inline text
+  #     permissions: []               # optional - tool permissions (default: [])
+  #     append_system_prompt: null    # optional - additional system prompt
+
+
+# ============================================================================
+# SINKS (zero or more)
+# ============================================================================
+# Deliver the final executor output. All sinks receive the same output text.
+# Sinks that use env vars (e.g. SLACK_WEBHOOK_URL) read them at runtime
+# from the server's .env file or environment.
+
+sinks:
+
+  # --------------------------------------------------------------------------
+  # Slack
+  # --------------------------------------------------------------------------
+  - kind: slack
+    config:
+      # Use ONE of these two approaches:
+      webhook_url_env: SLACK_WEBHOOK_URL  # env var containing webhook URL
+      # -- OR --
+      # bot_token_env: SLACK_BOT_TOKEN    # env var containing bot token
+      # channel: "#my-channel"            # required when using bot_token_env
+
+  # --------------------------------------------------------------------------
+  # Notion
+  # --------------------------------------------------------------------------
+  # - kind: notion
+  #   config:
+  #     token_env: NOTION_TOKEN           # required - env var for Notion API token
+  #     database_id: 30aac5ee-1a2b-3c4d-5e6f-1234567890ab
+  #                                       # required - Notion database UUID
+  #                                       # Find it in the database URL:
+  #                                       #   notion.so/<workspace>/<DATABASE_ID>?v=...

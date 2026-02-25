@@ -137,6 +137,17 @@ export async function getNodeTypes(): Promise<NodeTypeSchema[]> {
   return data.node_types;
 }
 
+export interface PromptFile {
+  path: string;
+  filename: string;
+  title: string;
+}
+
+export async function listPromptFiles(): Promise<PromptFile[]> {
+  const data = await apiFetch<{ files: PromptFile[] }>("/prompt-files");
+  return data.files;
+}
+
 export async function getSession(flowId: string): Promise<SessionInfo> {
   return apiFetch<SessionInfo>(`/flows/${flowId}/session`);
 }
@@ -338,22 +349,26 @@ export interface VmInfo {
   pid: number;
 }
 
-/** Get VM info for a flow (returns null if no VM exists). */
-export async function getFlowVm(flowId: string): Promise<VmInfo | null> {
+/** Get VM info for an executor node (returns null if no VM exists). */
+export async function getNodeVm(
+  flowId: string,
+  nodeId: string
+): Promise<VmInfo | null> {
   try {
-    return await apiFetch<VmInfo>(`/sandbox/vm/${flowId}`);
+    return await apiFetch<VmInfo>(`/sandbox/vm/${flowId}/${nodeId}`);
   } catch {
     return null;
   }
 }
 
-/** Create (or get existing) VM for a flow. */
-export async function createFlowVm(
+/** Create (or get existing) VM for an executor node. */
+export async function createNodeVm(
   flowId: string,
+  nodeId: string,
   tier?: string,
   apiKey?: string
 ): Promise<VmInfo> {
-  return apiFetch<VmInfo>(`/sandbox/vm/${flowId}`, {
+  return apiFetch<VmInfo>(`/sandbox/vm/${flowId}/${nodeId}`, {
     method: "POST",
     body: JSON.stringify({
       tier: tier || undefined,
@@ -362,9 +377,12 @@ export async function createFlowVm(
   });
 }
 
-/** Destroy the VM for a flow. */
-export async function deleteFlowVm(flowId: string): Promise<void> {
-  await apiFetch(`/sandbox/vm/${flowId}`, { method: "DELETE" });
+/** Destroy the VM for an executor node. */
+export async function deleteNodeVm(
+  flowId: string,
+  nodeId: string
+): Promise<void> {
+  await apiFetch(`/sandbox/vm/${flowId}/${nodeId}`, { method: "DELETE" });
 }
 
 // ---------------------------------------------------------------------------

@@ -1,0 +1,44 @@
+# ============================================================================
+# pr-review
+# ============================================================================
+# Automated PR code review via Claude Code -- posts review comments
+# directly to GitHub. Watches for new PRs on the configured repository,
+# fetches the diff, and runs a detailed code review using Claude.
+# The review prompt instructs Claude to post inline comments and a
+# verdict (approve / request-changes) directly via the `gh` CLI.
+#
+# No sink needed -- the executor posts to GitHub directly from its prompt.
+#
+# Pipeline: github-pr --> claude-code --> (posts to GitHub via gh CLI)
+#
+# Template variables injected by the github-pr trigger:
+#   {{diff}}, {{pr_number}}, {{pr_title}}, {{pr_body}},
+#   {{base_ref}}, {{head_ref}}, {{head_sha}}, {{repo}},
+#   {{local_path}}, {{review_type}}
+# ============================================================================
+
+name: pr-review
+description: Automated PR code review via Claude Code -- posts review comments to GitHub
+enabled: false
+
+trigger:
+  kind: github-pr
+  config:
+    repos:
+      - slug: saltyskip/cthulu
+        path: "."
+    poll_interval: 60             # Check every 60 seconds
+    skip_drafts: true             # Don't review draft PRs
+    review_on_push: false         # Don't re-review on new commits
+    max_diff_size: 50000          # Skip PRs with diffs over 50KB
+
+executors:
+  - kind: claude-code
+    label: "Claude: pr_review.md"
+    config:
+      prompt: examples/prompts/pr_review.md
+      permissions:
+        - Bash
+        - Read
+        - Grep
+        - Glob

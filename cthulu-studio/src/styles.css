@@ -241,22 +241,12 @@ button:disabled {
   margin-top: 2px;
 }
 
-/* S.1: Flow status dot in sidebar list */
-.flow-status-dot {
-  display: inline-block;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-
-.flow-status-dot.enabled {
-  background: var(--success);
-}
-
-.flow-status-dot.disabled {
-  background: var(--text-secondary);
-  opacity: 0.5;
+/* S.1: Flow item row layout */
+.flow-item-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
 }
 
 .flow-item-disabled {
@@ -267,44 +257,66 @@ button:disabled {
   color: var(--text-secondary);
 }
 
-/* S.2: Enable/Disable toggle button */
-.flow-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
+/* S.2: iOS-style toggle switch */
+.toggle-switch {
+  position: relative;
+  width: 40px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 11px;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.25s ease;
+  outline: none;
 }
 
-.flow-toggle-dot {
-  display: inline-block;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
+.toggle-switch.toggle-off {
+  background: var(--bg-tertiary);
+  border: 1.5px solid var(--border);
 }
 
-.flow-toggle-dot.enabled {
+.toggle-switch.toggle-on {
   background: var(--success);
+  border: 1.5px solid var(--success);
 }
 
-.flow-toggle-dot.disabled {
-  background: var(--text-secondary);
+.toggle-switch .toggle-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+  transition: transform 0.25s ease;
+  pointer-events: none;
 }
 
-.flow-toggle-enabled {
-  border-color: var(--success) !important;
-  color: var(--success) !important;
+.toggle-switch.toggle-on .toggle-thumb {
+  transform: translateX(18px);
 }
 
-.flow-toggle-enabled:hover {
-  background: rgba(63, 185, 80, 0.1) !important;
+.toggle-switch.toggle-disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
-.flow-toggle-disabled {
-  border-color: var(--text-secondary) !important;
-  color: var(--text-secondary) !important;
+.toggle-switch:hover:not(.toggle-disabled) {
+  filter: brightness(1.1);
 }
 
-.flow-toggle-disabled:hover {
-  background: rgba(139, 148, 158, 0.1) !important;
+/* S.2b: Active badge in TopBar */
+.flow-enabled-badge {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--success);
+  background: rgba(63, 185, 80, 0.15);
+  padding: 2px 8px;
+  border-radius: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
 }
 
 /* S.3: Next run time label in TopBar */
@@ -386,6 +398,39 @@ button:disabled {
   width: 10px;
   height: 10px;
   border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.prompt-file-item {
+  cursor: pointer;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 6px 8px 6px 26px;
+}
+
+.prompt-file-item .palette-dot {
+  position: absolute;
+  left: 8px;
+  top: 10px;
+  width: 8px;
+  height: 8px;
+}
+
+.prompt-file-item {
+  position: relative;
+}
+
+.prompt-file-title {
+  font-size: 12px;
+  color: var(--text);
+  line-height: 1.3;
+}
+
+.prompt-file-path {
+  font-size: 10px;
+  color: var(--text-secondary);
+  opacity: 0.7;
 }
 
 /* Canvas */
@@ -1293,47 +1338,7 @@ button:disabled {
   font-style: italic;
 }
 
-/* ── Prompts Library picker (modal) ── */
-.prompt-library-list {
-  max-height: 320px;
-  overflow-y: auto;
-  margin-bottom: 16px;
-}
 
-.prompt-library-item {
-  padding: 10px 12px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  margin-bottom: 8px;
-  cursor: pointer;
-  transition: background 0.15s, border-color 0.15s;
-}
-
-.prompt-library-item:hover {
-  background: var(--bg-tertiary);
-  border-color: var(--accent);
-}
-
-.prompt-library-title {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text);
-  margin-bottom: 2px;
-}
-
-.prompt-library-meta {
-  font-size: 11px;
-  color: var(--text-secondary);
-  margin-bottom: 4px;
-}
-
-.prompt-library-preview {
-  font-size: 12px;
-  color: var(--text-secondary);
-  line-height: 1.4;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
 
 /* ── Bottom Panel (VS Code-like tabbed terminal) ── */
 .bottom-panel {

@@ -12,7 +12,7 @@ use super::super::AppState;
 use super::super::FlowSessions;
 use super::super::InteractSession;
 use super::super::LiveClaudeProcess;
-use super::super::{node_sessions_key, save_sessions};
+use super::super::node_sessions_key;
 use super::{make_summary, kill_pid, attachments_path, InteractRequest, StopRequest};
 use crate::flows::{Edge, Flow, Node, NodeType};
 
@@ -129,7 +129,7 @@ pub(crate) async fn new_node_session(
 
     let sessions_snapshot = all_sessions.clone();
     drop(all_sessions);
-    save_sessions(&state.sessions_path, &sessions_snapshot);
+    state.save_sessions_with_vms(&sessions_snapshot);
 
     let mut resp = json!({ "session_id": new_id, "created_at": now });
     if let Some(w) = warning {
@@ -177,7 +177,7 @@ pub(crate) async fn delete_node_session(
 
     let sessions_snapshot = all_sessions.clone();
     drop(all_sessions);
-    save_sessions(&state.sessions_path, &sessions_snapshot);
+    state.save_sessions_with_vms(&sessions_snapshot);
 
     Ok(Json(json!({
         "deleted": true,
@@ -562,7 +562,7 @@ pub(crate) async fn interact_node(
 
         let sessions_snapshot = all_sessions.clone();
         drop(all_sessions);
-        save_sessions(&state.sessions_path, &sessions_snapshot);
+        state.save_sessions_with_vms(&sessions_snapshot);
 
         (sid, is_new, wdir)
     };
@@ -620,7 +620,7 @@ pub(crate) async fn interact_node(
             }
             let sessions_snapshot = all_sessions.clone();
             drop(all_sessions);
-            save_sessions(&state.sessions_path, &sessions_snapshot);
+            state.save_sessions_with_vms(&sessions_snapshot);
         }
 
         // 6. Build concise system prompt referencing .skills/ files
@@ -665,6 +665,7 @@ pub(crate) async fn interact_node(
     let session_id_for_stream = target_session_id.clone();
     let sessions_ref = state.interact_sessions.clone();
     let sessions_path = state.sessions_path.clone();
+    let vm_mappings_ref = state.vm_mappings.clone();
     let live_processes = state.live_processes.clone();
 
     let stream = async_stream::stream! {
@@ -970,7 +971,10 @@ pub(crate) async fn interact_node(
             }
             let sessions_snapshot = all_sessions.clone();
             drop(all_sessions);
-            save_sessions(&sessions_path, &sessions_snapshot);
+            let vms = vm_mappings_ref.try_read()
+                .map(|g| g.clone())
+                .unwrap_or_default();
+            crate::server::save_sessions(&sessions_path, &sessions_snapshot, &vms);
         }
 
         yield Ok(Event::default().event("done").data(

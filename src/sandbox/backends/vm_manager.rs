@@ -4,10 +4,11 @@
 //! Firecracker lifecycle: process management, rootfs, networking, web terminal.
 //!
 //! Cthulu acts as a relay — it creates/destroys VMs via HTTP and returns
-//! the web terminal URL for the user to connect in-browser.
+//! the web terminal URL for the user to connect in-browser (ttyd iframe).
 //!
-//! VMs are persistent per flow: one VM per flow, reused across interactions.
-//! The flow_id → vm mapping is stored in memory on the provider.
+//! VMs are persistent per executor node: one VM per (flow_id, node_id) pair.
+//! The node key → vm mapping is stored in memory on the provider.
+//! Users interact with VMs exclusively through the ttyd web terminal.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -23,14 +24,19 @@ use crate::sandbox::vm_manager::{VmCreateRequest, VmManagerClient, VmResponse};
 
 // ── Provider ────────────────────────────────────────────────────────
 
-/// Flow-scoped VM tracking: maps flow_id → VmResponse.
-type FlowVmMap = Arc<RwLock<BTreeMap<String, VmResponse>>>;
+/// Node-scoped VM tracking: maps "flow_id::node_id" → VmResponse.
+type NodeVmMap = Arc<RwLock<BTreeMap<String, VmResponse>>>;
+
+/// Build the key for the node VM map: "flow_id::node_id".
+fn node_vm_key(flow_id: &str, node_id: &str) -> String {
+    format!("{flow_id}::{node_id}")
+}
 
 pub struct VmManagerProvider {
     client: VmManagerClient,
     config: VmManagerConfig,
-    /// Persistent map of flow_id → VM. Survives across multiple provision() calls.
-    flow_vms: FlowVmMap,
+    /// Persistent map of "flow_id::node_id" → VM. One VM per executor node.
+    node_vms: NodeVmMap,
 }
 
 impl VmManagerProvider {
@@ -39,34 +45,41 @@ impl VmManagerProvider {
         Ok(Self {
             client,
             config,
-            flow_vms: Arc::new(RwLock::new(BTreeMap::new())),
+            node_vms: Arc::new(RwLock::new(BTreeMap::new())),
         })
     }
 
-    /// Get or create a VM for a given flow.
+    /// Get or create a VM for a given executor node.
+    ///
+    /// Each executor node gets its own VM, keyed by `flow_id::node_id`.
     pub async fn get_or_create_vm(
         &self,
         flow_id: &str,
+        node_id: &str,
         tier: Option<&str>,
         api_key: Option<&str>,
     ) -> Result<VmResponse, SandboxError> {
-        // Check if VM already exists for this flow
+        let key = node_vm_key(flow_id, node_id);
+
+        // Check if VM already exists for this node
         {
-            let map = self.flow_vms.read().await;
-            if let Some(vm) = map.get(flow_id) {
+            let map = self.node_vms.read().await;
+            if let Some(vm) = map.get(&key) {
                 // Verify it's still alive
                 match self.client.get_vm(vm.vm_id).await {
                     Ok(live_vm) => {
                         tracing::debug!(
                             flow_id = %flow_id,
+                            node_id = %node_id,
                             vm_id = live_vm.vm_id,
-                            "reusing existing VM for flow"
+                            "reusing existing VM for node"
                         );
                         return Ok(live_vm);
                     }
                     Err(SandboxError::NotFound(_)) => {
                         tracing::warn!(
                             flow_id = %flow_id,
+                            node_id = %node_id,
                             vm_id = vm.vm_id,
                             "VM was deleted externally, will create new one"
                         );
@@ -93,32 +106,39 @@ impl VmManagerProvider {
 
         tracing::info!(
             flow_id = %flow_id,
+            node_id = %node_id,
             vm_id = vm.vm_id,
             tier = %vm.tier,
             web_terminal = %vm.web_terminal,
-            "created new VM for flow"
+            "created new VM for node"
         );
 
         // Store the mapping
         {
-            let mut map = self.flow_vms.write().await;
-            map.insert(flow_id.to_string(), vm.clone());
+            let mut map = self.node_vms.write().await;
+            map.insert(key, vm.clone());
         }
 
         Ok(vm)
     }
 
-    /// Get the VM for a flow (if one exists).
-    pub async fn get_flow_vm(&self, flow_id: &str) -> Option<VmResponse> {
-        let map = self.flow_vms.read().await;
-        map.get(flow_id).cloned()
+    /// Get the VM for an executor node (if one exists).
+    pub async fn get_node_vm(&self, flow_id: &str, node_id: &str) -> Option<VmResponse> {
+        let key = node_vm_key(flow_id, node_id);
+        let map = self.node_vms.read().await;
+        map.get(&key).cloned()
     }
 
-    /// Destroy the VM for a flow.
-    pub async fn destroy_flow_vm(&self, flow_id: &str) -> Result<Option<u32>, SandboxError> {
+    /// Destroy the VM for an executor node.
+    pub async fn destroy_node_vm(
+        &self,
+        flow_id: &str,
+        node_id: &str,
+    ) -> Result<Option<u32>, SandboxError> {
+        let key = node_vm_key(flow_id, node_id);
         let vm = {
-            let mut map = self.flow_vms.write().await;
-            map.remove(flow_id)
+            let mut map = self.node_vms.write().await;
+            map.remove(&key)
         };
 
         if let Some(vm) = vm {
@@ -134,6 +154,167 @@ impl VmManagerProvider {
     pub fn client(&self) -> &VmManagerClient {
         &self.client
     }
+
+    /// Create VMs for all executor nodes in a flow.
+    /// Returns `Vec<(node_id, vm_name, VmResponse)>` for each provisioned VM.
+    pub async fn provision_flow_vms(
+        &self,
+        flow: &crate::flows::Flow,
+        oauth_token: Option<&str>,
+    ) -> Result<Vec<(String, String, crate::sandbox::vm_manager::VmResponse)>, SandboxError> {
+        use crate::flows::NodeType;
+
+        let executor_nodes: Vec<&crate::flows::Node> = flow
+            .nodes
+            .iter()
+            .filter(|n| n.node_type == NodeType::Executor)
+            .collect();
+
+        let mut results = Vec::new();
+        for node in executor_nodes {
+            let tier = node.config["tier"].as_str();
+            let vm = self.get_or_create_vm(&flow.id, &node.id, tier, None).await?;
+
+            // Generate VM name: "{label}_{short_uuid}"
+            let short_id = &uuid::Uuid::new_v4().to_string()[..6];
+            let vm_name = format!(
+                "{}_{}",
+                node.label.replace(' ', "-").replace("::", "-"),
+                short_id,
+            );
+
+            tracing::info!(
+                flow = %flow.name,
+                node = %node.label,
+                vm_id = vm.vm_id,
+                vm_name = %vm_name,
+                "provisioned VM for executor node"
+            );
+
+            // Inject OAuth token if available
+            if let Some(token) = oauth_token {
+                if let Err(e) = inject_oauth_token(&vm.web_terminal, token).await {
+                    tracing::warn!(
+                        vm_id = vm.vm_id,
+                        vm_name = %vm_name,
+                        error = %e,
+                        "OAuth token injection failed (user can log in manually via terminal)"
+                    );
+                }
+            }
+
+            results.push((node.id.clone(), vm_name, vm));
+        }
+        Ok(results)
+    }
+
+    /// Destroy all VMs for a flow's executor nodes.
+    pub async fn destroy_flow_vms(
+        &self,
+        flow: &crate::flows::Flow,
+    ) -> Result<(), SandboxError> {
+        use crate::flows::NodeType;
+
+        for node in flow.nodes.iter().filter(|n| n.node_type == NodeType::Executor) {
+            match self.destroy_node_vm(&flow.id, &node.id).await {
+                Ok(Some(vm_id)) => {
+                    tracing::info!(
+                        flow = %flow.name,
+                        node = %node.label,
+                        vm_id = vm_id,
+                        "destroyed VM for executor node"
+                    );
+                }
+                Ok(None) => {} // No VM existed for this node
+                Err(e) => {
+                    tracing::warn!(
+                        flow = %flow.name,
+                        node = %node.label,
+                        error = %e,
+                        "failed to destroy VM (may already be gone)"
+                    );
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Inject a Claude OAuth token into a VM via its ttyd web terminal WebSocket.
+///
+/// Uses `TtydSession` to connect, then:
+/// 1. Sets `CLAUDE_CODE_OAUTH_TOKEN` env var in `~/.bashrc`
+/// 2. Writes `~/.claude/.credentials.json` for Claude CLI
+///
+/// Uses base64 encoding to avoid shell quoting issues with special characters.
+async fn inject_oauth_token(web_terminal_url: &str, token: &str) -> Result<(), SandboxError> {
+    use crate::sandbox::ttyd::TtydSession;
+
+    let mut session = TtydSession::connect(web_terminal_url).await?;
+    let timeout = std::time::Duration::from_secs(10);
+
+    // Step 1: Write CLAUDE_CODE_OAUTH_TOKEN to .bashrc via base64 to avoid quoting issues
+    let bashrc_line = format!("export CLAUDE_CODE_OAUTH_TOKEN='{}'", token);
+    let bashrc_b64 = base64_encode_simple(bashrc_line.as_bytes());
+    let cmd1 = format!(
+        "grep -q 'CLAUDE_CODE_OAUTH_TOKEN' ~/.bashrc 2>/dev/null || echo '{}' | base64 -d >> ~/.bashrc",
+        bashrc_b64
+    );
+    if let Err(e) = session.exec(&cmd1, timeout).await {
+        tracing::warn!(error = %e, "Failed to write token to .bashrc");
+    }
+
+    // Step 2: Create .claude dir and write credentials.json via base64
+    let credentials_json = serde_json::json!({
+        "claudeAiOauth": {
+            "accessToken": token,
+            "scopes": ["user:inference"],
+        }
+    });
+    let creds_str = serde_json::to_string(&credentials_json).unwrap_or_default();
+    let creds_b64 = base64_encode_simple(creds_str.as_bytes());
+    let cmd2 = format!(
+        "mkdir -p ~/.claude && echo '{}' | base64 -d > ~/.claude/.credentials.json && chmod 600 ~/.claude/.credentials.json",
+        creds_b64
+    );
+    if let Err(e) = session.exec(&cmd2, timeout).await {
+        tracing::warn!(error = %e, "Failed to write credentials.json");
+    }
+
+    // Step 3: Source .bashrc so the env var is active for subsequent commands
+    let _ = session.exec("source ~/.bashrc", timeout).await;
+
+    tracing::info!("OAuth token injected successfully via ttyd");
+    session.close().await;
+    Ok(())
+}
+
+/// Simple base64 encoding (same algorithm as vm_executor.rs).
+fn base64_encode_simple(data: &[u8]) -> String {
+    const CHARS: &[u8; 64] =
+        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+    let mut result = String::with_capacity((data.len() + 2) / 3 * 4);
+    for chunk in data.chunks(3) {
+        let b0 = chunk[0] as u32;
+        let b1 = if chunk.len() > 1 { chunk[1] as u32 } else { 0 };
+        let b2 = if chunk.len() > 2 { chunk[2] as u32 } else { 0 };
+        let n = (b0 << 16) | (b1 << 8) | b2;
+
+        result.push(CHARS[((n >> 18) & 63) as usize] as char);
+        result.push(CHARS[((n >> 12) & 63) as usize] as char);
+        if chunk.len() > 1 {
+            result.push(CHARS[((n >> 6) & 63) as usize] as char);
+        } else {
+            result.push('=');
+        }
+        if chunk.len() > 2 {
+            result.push(CHARS[(n & 63) as usize] as char);
+        } else {
+            result.push('=');
+        }
+    }
+    result
 }
 
 #[async_trait]
@@ -152,16 +333,18 @@ impl SandboxProvider for VmManagerProvider {
         &self,
         spec: SandboxSpec,
     ) -> Result<Box<dyn SandboxHandle>, SandboxError> {
+        // workspace_id is used as both flow_id and node_id fallback
         let vm = self
-            .get_or_create_vm(&spec.workspace_id, None, None)
+            .get_or_create_vm(&spec.workspace_id, "default", None, None)
             .await?;
 
+        let key = node_vm_key(&spec.workspace_id, "default");
         Ok(Box::new(VmManagerHandle {
             vm_id: vm.vm_id,
-            flow_id: spec.workspace_id.clone(),
+            node_key: key,
             vm_info: vm,
             client: self.client.clone(),
-            flow_vms: self.flow_vms.clone(),
+            node_vms: self.node_vms.clone(),
             metadata: SandboxMetadata {
                 workspace_id: spec.workspace_id,
                 created_at_unix_ms: chrono::Utc::now().timestamp_millis(),
@@ -180,10 +363,10 @@ impl SandboxProvider for VmManagerProvider {
 
         Ok(Box::new(VmManagerHandle {
             vm_id: vm.vm_id,
-            flow_id: String::new(), // Unknown flow when attaching by raw id
+            node_key: String::new(), // Unknown node when attaching by raw id
             vm_info: vm,
             client: self.client.clone(),
-            flow_vms: self.flow_vms.clone(),
+            node_vms: self.node_vms.clone(),
             metadata: SandboxMetadata {
                 workspace_id: id.to_string(),
                 created_at_unix_ms: chrono::Utc::now().timestamp_millis(),
@@ -194,12 +377,12 @@ impl SandboxProvider for VmManagerProvider {
 
     async fn list(&self) -> Result<Vec<SandboxSummary>, SandboxError> {
         let list = self.client.list_vms().await?;
-        let flow_map = self.flow_vms.read().await;
+        let node_map = self.node_vms.read().await;
 
-        // Build reverse map: vm_id → flow_id
-        let vm_to_flow: BTreeMap<u32, String> = flow_map
+        // Build reverse map: vm_id → node_key
+        let vm_to_node: BTreeMap<u32, String> = node_map
             .iter()
-            .map(|(flow_id, vm)| (vm.vm_id, flow_id.clone()))
+            .map(|(node_key, vm)| (vm.vm_id, node_key.clone()))
             .collect();
 
         Ok(list
@@ -209,7 +392,7 @@ impl SandboxProvider for VmManagerProvider {
                 id: vm.vm_id.to_string(),
                 backend: SandboxBackendKind::VmManager,
                 status: SandboxStatus::Running,
-                workspace_id: vm_to_flow
+                workspace_id: vm_to_node
                     .get(&vm.vm_id)
                     .cloned()
                     .unwrap_or_else(|| format!("vm-{}", vm.vm_id)),
@@ -223,23 +406,21 @@ impl SandboxProvider for VmManagerProvider {
 /// Handle to a VM managed by the VM Manager.
 ///
 /// This is a thin wrapper — the VM is interactive-only (user connects
-/// via web terminal in browser). The handle primarily exists for
+/// via ttyd web terminal in browser). The handle primarily exists for
 /// lifecycle management (destroy) and metadata.
 struct VmManagerHandle {
     vm_id: u32,
-    flow_id: String,
+    node_key: String,
     vm_info: VmResponse,
     client: VmManagerClient,
-    flow_vms: FlowVmMap,
+    node_vms: NodeVmMap,
     metadata: SandboxMetadata,
 }
 
 #[async_trait]
 impl SandboxHandle for VmManagerHandle {
     fn id(&self) -> &str {
-        // Return a static-lifetime-safe ID by leaking — or use a stored String.
-        // Since id() returns &str, we need a field. Use flow_id as the ID.
-        &self.flow_id
+        &self.node_key
     }
 
     fn backend_kind(&self) -> SandboxBackendKind {
@@ -261,11 +442,10 @@ impl SandboxHandle for VmManagerHandle {
         &self.metadata
     }
 
-    // ── Exec (not used — VMs are interactive only) ──────────────
+    // ── Exec (not used — VMs are interactive via ttyd terminal) ─
 
     async fn exec(&self, _req: ExecRequest) -> Result<ExecResult, SandboxError> {
-        // VMs are interactive-only. Users connect via web terminal.
-        // If programmatic exec is ever needed, it would SSH into the VM.
+        // VMs are interactive-only. Users connect via ttyd web terminal (iframe).
         Err(SandboxError::Unsupported(
             "VM Manager VMs are interactive-only — use the web terminal",
         ))
@@ -356,14 +536,14 @@ impl SandboxHandle for VmManagerHandle {
     async fn destroy(&self) -> Result<(), SandboxError> {
         tracing::info!(
             vm_id = self.vm_id,
-            flow_id = %self.flow_id,
+            node_key = %self.node_key,
             "destroying VM Manager VM"
         );
 
-        // Remove from flow map
+        // Remove from node map
         {
-            let mut map = self.flow_vms.write().await;
-            map.remove(&self.flow_id);
+            let mut map = self.node_vms.write().await;
+            map.remove(&self.node_key);
         }
 
         // Delete via API
@@ -381,7 +561,6 @@ mod tests {
     fn provider_info() {
         let config = VmManagerConfig {
             api_base_url: "http://localhost:8080".into(),
-            ssh_host: "localhost".into(),
             default_tier: "nano".into(),
             api_key: None,
         };
@@ -406,9 +585,14 @@ mod tests {
         assert!(caps.public_http);
     }
 
+    #[test]
+    fn node_vm_key_format() {
+        assert_eq!(node_vm_key("flow-1", "node-a"), "flow-1::node-a");
+    }
+
     #[tokio::test]
-    async fn flow_vm_map_operations() {
-        let map: FlowVmMap = Arc::new(RwLock::new(BTreeMap::new()));
+    async fn node_vm_map_operations() {
+        let map: NodeVmMap = Arc::new(RwLock::new(BTreeMap::new()));
 
         // Initially empty
         assert!(map.read().await.is_empty());
@@ -424,16 +608,17 @@ mod tests {
             web_terminal: "http://localhost:7700".into(),
             pid: 100,
         };
-        map.write().await.insert("flow-1".into(), vm);
+        let key = node_vm_key("flow-1", "node-a");
+        map.write().await.insert(key.clone(), vm);
 
         // Retrieve
         let read = map.read().await;
-        assert!(read.contains_key("flow-1"));
-        assert_eq!(read.get("flow-1").unwrap().vm_id, 0);
+        assert!(read.contains_key(&key));
+        assert_eq!(read.get(&key).unwrap().vm_id, 0);
         drop(read);
 
         // Remove
-        let removed = map.write().await.remove("flow-1");
+        let removed = map.write().await.remove(&key);
         assert!(removed.is_some());
         assert!(map.read().await.is_empty());
     }

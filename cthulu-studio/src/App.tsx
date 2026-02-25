@@ -6,8 +6,7 @@ import type { Flow, FlowNode, FlowEdge, FlowSummary, NodeTypeSchema, RunEvent } 
 import { validateFlow } from "./utils/validateNode";
 import TopBar from "./components/TopBar";
 import FlowList from "./components/FlowList";
-import PromptLibrary from "./components/PromptLibrary";
-import PromptEditor from "./components/PromptEditor";
+
 import Sidebar from "./components/Sidebar";
 import Canvas, { type CanvasHandle } from "./components/Canvas";
 import PropertyPanel from "./components/PropertyPanel";
@@ -19,10 +18,11 @@ import ErrorBoundary from "./components/ErrorBoundary";
 export default function App() {
   const [flows, setFlows] = useState<FlowSummary[]>([]);
   const [activeFlowId, setActiveFlowId] = useState<string | null>(null);
-  const [activePromptId, setActivePromptId] = useState<string | null>(null);
+
   const [initialFlow, setInitialFlow] = useState<Flow | null>(null);
   const [nodeTypes, setNodeTypes] = useState<NodeTypeSchema[]>([]);
-  const [sidebarTab, setSidebarTab] = useState<"nodes" | "prompts">("nodes");
+  const [promptFiles, setPromptFiles] = useState<api.PromptFile[]>([]);
+
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [activeBottomTab, setActiveBottomTab] = useState<BottomTab | null>(null);
@@ -156,6 +156,7 @@ export default function App() {
     log("info", `Server URL: ${api.getServerUrl()}`);
     loadFlows();
     loadNodeTypes();
+    loadPromptFiles();
   }, []);
 
   // --- API helpers ---
@@ -167,37 +168,40 @@ export default function App() {
     try { setNodeTypes(await api.getNodeTypes()); } catch { /* logged */ }
   };
 
+  const loadPromptFiles = async () => {
+    try { setPromptFiles(await api.listPromptFiles()); } catch { /* logged */ }
+  };
+
+  // Re-fetch data when server connection is restored
+  const handleReconnect = useCallback(() => {
+    loadFlows();
+    loadNodeTypes();
+    loadPromptFiles();
+  }, []);
+
   const selectFlow = async (id: string) => {
     try {
       const flow = await api.getFlow(id);
       setInitialFlow(flow);
       setActiveFlowId(flow.id);
-      setActivePromptId(null);
       setActiveFlowMeta({ id: flow.id, name: flow.name, description: flow.description, enabled: flow.enabled });
       setSelectedNodeId(null);
-      setSidebarTab("nodes");
     } catch { /* logged */ }
   };
 
-  const selectPrompt = (id: string) => {
-    setActivePromptId(id);
-    setActiveFlowId(null);
-    setInitialFlow(null);
-    setActiveFlowMeta(null);
-    setSelectedNodeId(null);
-    setSidebarTab("prompts");
-  };
-
-  const createPrompt = async () => {
-    try {
-      const { id } = await api.savePrompt({
-        title: "New Prompt",
-        summary: "",
-        source_flow_name: "",
-        tags: [],
-      });
-      selectPrompt(id);
-    } catch { /* logged */ }
+  const handleSelectPromptFile = (file: api.PromptFile) => {
+    if (!selectedNodeId || !canvasRef.current) return;
+    const node = canvasRef.current.getNode(selectedNodeId);
+    if (!node) return;
+    // Only apply to executor nodes
+    if (node.node_type !== "executor") {
+      log("warn", `Cannot assign prompt to ${node.node_type} node — select an executor node`);
+      return;
+    }
+    canvasRef.current.updateNodeData(selectedNodeId, {
+      config: { ...node.config, prompt: file.path },
+    });
+    log("info", `Prompt set: ${file.path} → ${node.label ?? selectedNodeId}`);
   };
 
   const createFlow = async () => {
@@ -275,10 +279,23 @@ export default function App() {
 
   const handleToggleEnabled = async () => {
     if (!activeFlowMeta) return;
-    const updated = { ...activeFlowMeta, enabled: !activeFlowMeta.enabled };
-    setActiveFlowMeta(updated);
+    handleToggleFlowEnabled(activeFlowMeta.id);
+  };
+
+  const handleToggleFlowEnabled = async (flowId: string) => {
+    const flow = flows.find((f) => f.id === flowId);
+    if (!flow) return;
+    const newEnabled = !flow.enabled;
+    // Optimistic update for the sidebar list
+    setFlows((prev) =>
+      prev.map((f) => (f.id === flowId ? { ...f, enabled: newEnabled } : f))
+    );
+    // If this is the active flow, also update activeFlowMeta
+    if (activeFlowMeta && activeFlowMeta.id === flowId) {
+      setActiveFlowMeta((prev) => prev ? { ...prev, enabled: newEnabled } : prev);
+    }
     try {
-      await api.updateFlow(activeFlowMeta.id, { enabled: updated.enabled });
+      await api.updateFlow(flowId, { enabled: newEnabled });
       loadFlows();
     } catch { /* logged */ }
   };
@@ -374,6 +391,7 @@ export default function App() {
         flowHasErrors={flowHasErrors}
         validationErrors={nodeValidationErrors}
         flowNodes={latestSnapshotRef.current?.nodes ?? []}
+        onReconnect={handleReconnect}
       />
       <div className="app-layout">
         <div style={{ display: "flex", flexDirection: "column", overflow: "hidden", width: 260, background: "var(--bg-secondary)", borderRight: "1px solid var(--border)" }}>
@@ -384,42 +402,24 @@ export default function App() {
               activeFlowId={activeFlowId}
               onSelect={selectFlow}
               onCreate={createFlow}
+              onToggleEnabled={handleToggleFlowEnabled}
             />
           </div>
 
           {/* Palette — bottom half */}
           <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", overflow: "hidden", borderTop: "1px solid var(--border)" }}>
-            <div className="sidebar-tab-bar">
-              <button
-                className={`sidebar-tab ${sidebarTab === "nodes" ? "active" : ""}`}
-                onClick={() => setSidebarTab("nodes")}
-              >
-                Nodes
-              </button>
-              <button
-                className={`sidebar-tab ${sidebarTab === "prompts" ? "active" : ""}`}
-                onClick={() => setSidebarTab("prompts")}
-              >
-                Prompts
-              </button>
-            </div>
             <div style={{ flex: 1, overflowY: "auto", minHeight: 0 }}>
-              {sidebarTab === "nodes" ? (
-                <Sidebar nodeTypes={nodeTypes} onGrab={handleGrab} />
-              ) : (
-                <PromptLibrary
-                  activePromptId={activePromptId}
-                  onSelect={selectPrompt}
-                  onCreate={createPrompt}
-                />
-              )}
+              <Sidebar
+                nodeTypes={nodeTypes}
+                onGrab={handleGrab}
+                promptFiles={promptFiles}
+                onSelectPrompt={handleSelectPromptFile}
+              />
             </div>
           </div>
         </div>
 
-        {activePromptId ? (
-          <PromptEditor promptId={activePromptId} />
-        ) : activeFlowId ? (
+        {activeFlowId ? (
           <ErrorBoundary>
             <Canvas
               ref={canvasRef}

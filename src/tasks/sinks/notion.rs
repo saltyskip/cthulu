@@ -28,6 +28,16 @@ impl NotionSink {
 #[async_trait]
 impl Sink for NotionSink {
     async fn deliver(&self, text: &str) -> Result<()> {
+        // Validate database_id looks like a UUID before calling the API
+        let stripped: String = self.database_id.chars().filter(|c| *c != '-').collect();
+        if stripped.len() != 32 || !stripped.chars().all(|c| c.is_ascii_hexdigit()) {
+            anyhow::bail!(
+                "Invalid Notion database_id '{}' — must be a 32-hex-char UUID (with or without dashes). \
+                 Copy it from the Notion database URL: notion.so/<workspace>/<database_id>?v=...",
+                self.database_id
+            );
+        }
+
         let blocks = markdown_to_notion_blocks(text);
         let title = extract_title(text);
 

@@ -1,10 +1,12 @@
 import type { FlowSummary } from "../types/flow";
+import ToggleSwitch from "./ToggleSwitch";
 
 interface FlowListProps {
   flows: FlowSummary[];
   activeFlowId: string | null;
   onSelect: (id: string) => void;
   onCreate: () => void;
+  onToggleEnabled: (flowId: string) => void;
 }
 
 export default function FlowList({
@@ -12,6 +14,7 @@ export default function FlowList({
   activeFlowId,
   onSelect,
   onCreate,
+  onToggleEnabled,
 }: FlowListProps) {
   return (
     <div style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0, overflow: "hidden" }}>
@@ -25,19 +28,20 @@ export default function FlowList({
         {flows.map((flow) => (
           <div
             key={flow.id}
-            className={`flow-item ${flow.id === activeFlowId ? "active" : ""}${!(flow.enabled) ? " flow-item-disabled" : ""}`}
+            className={`flow-item ${flow.id === activeFlowId ? "active" : ""}${!flow.enabled ? " flow-item-disabled" : ""}`}
             onClick={() => onSelect(flow.id)}
           >
-            <div className="flow-item-name">
-              <span
-                className={`flow-status-dot ${flow.enabled ? "enabled" : "disabled"}`}
-                title={flow.enabled ? "Enabled" : "Disabled"}
+            <div className="flow-item-row">
+              <div className="flow-item-name">
+                {flow.name}
+              </div>
+              <ToggleSwitch
+                checked={flow.enabled}
+                onChange={() => onToggleEnabled(flow.id)}
               />
-              {flow.name}
             </div>
             <div className="flow-item-meta">
-              {flow.node_count} nodes &middot;{" "}
-              {flow.enabled ? "Enabled" : "Disabled"}
+              {flow.node_count} nodes
             </div>
           </div>
         ))}

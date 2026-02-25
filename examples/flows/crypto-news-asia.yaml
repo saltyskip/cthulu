@@ -1,0 +1,96 @@
+# ============================================================================
+# crypto-news-asia
+# ============================================================================
+# Asia-Pacific crypto news monitoring -- regulatory + market news from
+# Japan FSA, Hong Kong HKMA, Singapore MAS, CoinTelegraph, and CoinDesk.
+# Runs daily at midnight UTC. Scrapes regulatory agencies for keyword-
+# matched announcements alongside RSS feeds from major crypto outlets.
+# Two Claude executors process the data into a comprehensive Notion report.
+#
+# Pipeline: cron --> 2x RSS + 3x web-scrape --> 2x claude-code --> notion
+# ============================================================================
+
+name: crypto-news-asia
+description: >
+  Asia-Pacific crypto news monitoring -- regulatory + market news
+  from FSA, HKMA, MAS, CoinTelegraph, CoinDesk
+enabled: false
+
+trigger:
+  kind: cron
+  config:
+    schedule: "0 0 * * *"         # Daily at midnight UTC
+    working_dir: "."
+
+sources:
+  # ---- Crypto news RSS feeds ----
+  - kind: rss
+    label: "RSS: cointelegraph.com"
+    config:
+      url: "https://cointelegraph.com/rss"
+      limit: 15
+
+  - kind: rss
+    label: "RSS: www.coindesk.com"
+    config:
+      url: "https://www.coindesk.com/arc/outboundfeeds/rss/"
+      limit: 15
+
+  # ---- Asia-Pacific regulatory agencies (keyword-filtered) ----
+  - kind: web-scrape
+    label: "Scrape: Japan FSA"
+    config:
+      url: "https://www.fsa.go.jp/en/"
+      keywords:
+        - crypto
+        - digital asset
+        - virtual currency
+        - stablecoin
+        - blockchain
+
+  - kind: web-scrape
+    label: "Scrape: Hong Kong HKMA"
+    config:
+      url: "https://www.hkma.gov.hk/eng/news-and-media/press-releases/"
+      keywords:
+        - crypto
+        - digital asset
+        - virtual asset
+        - stablecoin
+
+  - kind: web-scrape
+    label: "Scrape: Singapore MAS"
+    config:
+      url: "https://www.mas.gov.sg/news"
+      keywords:
+        - crypto
+        - digital asset
+        - digital token
+        - stablecoin
+        - blockchain
+
+executors:
+  - kind: claude-code
+    label: "Claude: crypto_breaking_news.md"
+    config:
+      prompt: examples/prompts/crypto_breaking_news.md
+      permissions:
+        - Bash
+        - Read
+        - Grep
+        - Glob
+      append_system_prompt: >
+        You are a legitimate news research assistant. Your task is to analyze
+        publicly available news articles and regulatory announcements, then
+        produce a factual summary report. This is standard journalism work.
+
+  - kind: claude-code
+    label: "Claude: secondary analysis"
+    config:
+      prompt: examples/prompts/crypto_breaking_news.md
+
+sinks:
+  - kind: notion
+    config:
+      token_env: NOTION_TOKEN
+      database_id: "REPLACE_WITH_YOUR_NOTION_DATABASE_UUID"

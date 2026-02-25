@@ -16,11 +16,12 @@ type VmState =
 
 export default function VmTerminal({
   flowId,
+  nodeId,
   nodeLabel,
 }: VmTerminalProps) {
   const [vmState, setVmState] = useState<VmState>({ status: "loading" });
 
-  // On mount, check if a VM already exists for this flow; if not, create one.
+  // On mount, check if a VM already exists for this node; if not, create one.
   useEffect(() => {
     let cancelled = false;
 
@@ -29,7 +30,7 @@ export default function VmTerminal({
         setVmState({ status: "loading" });
 
         // Check for existing VM
-        const existing = await api.getFlowVm(flowId);
+        const existing = await api.getNodeVm(flowId, nodeId);
         if (cancelled) return;
 
         if (existing) {
@@ -39,7 +40,7 @@ export default function VmTerminal({
 
         // No VM exists — create one
         setVmState({ status: "creating" });
-        const vm = await api.createFlowVm(flowId);
+        const vm = await api.createNodeVm(flowId, nodeId);
         if (cancelled) return;
         setVmState({ status: "ready", vm });
       } catch (e) {
@@ -55,11 +56,11 @@ export default function VmTerminal({
     return () => {
       cancelled = true;
     };
-  }, [flowId]);
+  }, [flowId, nodeId]);
 
   const handleDestroy = useCallback(async () => {
     try {
-      await api.deleteFlowVm(flowId);
+      await api.deleteNodeVm(flowId, nodeId);
       setVmState({ status: "destroyed" });
     } catch (e) {
       setVmState({
@@ -67,12 +68,12 @@ export default function VmTerminal({
         message: (e as Error).message || "Failed to destroy VM",
       });
     }
-  }, [flowId]);
+  }, [flowId, nodeId]);
 
   const handleRecreate = useCallback(async () => {
     try {
       setVmState({ status: "creating" });
-      const vm = await api.createFlowVm(flowId);
+      const vm = await api.createNodeVm(flowId, nodeId);
       setVmState({ status: "ready", vm });
     } catch (e) {
       setVmState({
@@ -80,7 +81,7 @@ export default function VmTerminal({
         message: (e as Error).message || "Failed to create VM",
       });
     }
-  }, [flowId]);
+  }, [flowId, nodeId]);
 
   // ── Render ──────────────────────────────────────────────────────
 
@@ -134,9 +135,6 @@ export default function VmTerminal({
         <span className="vm-terminal-dot running" />
         <span className="vm-terminal-info">
           VM #{vm.vm_id} &middot; {vm.tier} &middot; {vm.guest_ip}
-        </span>
-        <span className="vm-terminal-info secondary">
-          SSH: <code>{vm.ssh_command}</code>
         </span>
         <div style={{ flex: 1 }} />
         <button

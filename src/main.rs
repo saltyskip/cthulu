@@ -130,9 +130,41 @@ async fn run_server(start_disabled: bool) -> Result<(), Box<dyn Error>> {
 
     let (events_tx, _) = tokio::sync::broadcast::channel::<RunEvent>(256);
 
-    // Load persisted interact sessions from ~/.cthulu/sessions.yaml (alongside other state)
+    // Load persisted interact sessions + VM mappings from ~/.cthulu/sessions.yaml
     let sessions_path = base_dir.join("sessions.yaml");
-    let persisted_sessions = server::load_sessions(&sessions_path);
+    let loaded = server::load_sessions(&sessions_path);
+    let persisted_sessions = loaded.sessions;
+    let persisted_vms = loaded.vms;
+
+    // Read OAuth token: macOS Keychain first, then CLAUDE_CODE_OAUTH_TOKEN env
+    let oauth_token: Option<String> = {
+        // Try macOS Keychain
+        let keychain_result = std::process::Command::new("security")
+            .args(["find-generic-password", "-s", "Claude Code-credentials", "-w"])
+            .output();
+        match keychain_result {
+            Ok(output) if output.status.success() => {
+                let raw = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                // Parse JSON to extract accessToken
+                if let Ok(v) = serde_json::from_str::<serde_json::Value>(&raw) {
+                    let token = v["claudeAiOauth"]["accessToken"].as_str().map(String::from);
+                    if token.is_some() {
+                        tracing::info!("OAuth token loaded from macOS Keychain");
+                    }
+                    token
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
+        .or_else(|| {
+            std::env::var("CLAUDE_CODE_OAUTH_TOKEN").ok().map(|t| {
+                tracing::info!("OAuth token loaded from CLAUDE_CODE_OAUTH_TOKEN env");
+                t
+            })
+        })
+    };
 
     // Initialize sandbox provider (before scheduler, so scheduler can use it)
     //
@@ -144,30 +176,18 @@ async fn run_server(start_disabled: bool) -> Result<(), Box<dyn Error>> {
     let mut vm_manager_arc: Option<Arc<sandbox::backends::vm_manager::VmManagerProvider>> = None;
     let sandbox_provider: Arc<dyn sandbox::SandboxProvider> =
         if let Ok(vm_manager_url) = std::env::var("VM_MANAGER_URL") {
-            let ssh_host = std::env::var("VM_MANAGER_SSH_HOST").unwrap_or_else(|_| {
-                // Extract host from URL: "http://host:port" → "host"
-                vm_manager_url
-                    .trim_start_matches("http://")
-                    .trim_start_matches("https://")
-                    .split(':')
-                    .next()
-                    .unwrap_or("localhost")
-                    .to_string()
-            });
             let default_tier = std::env::var("VM_MANAGER_TIER")
                 .unwrap_or_else(|_| "nano".into());
             let api_key = std::env::var("VM_MANAGER_API_KEY").ok();
 
             tracing::info!(
                 api_url = %vm_manager_url,
-                ssh_host = %ssh_host,
                 tier = %default_tier,
                 "initializing VmManager sandbox provider"
             );
 
             let vm_config = sandbox::VmManagerConfig {
                 api_base_url: vm_manager_url,
-                ssh_host,
                 default_tier,
                 api_key,
             };
@@ -253,6 +273,9 @@ async fn run_server(start_disabled: bool) -> Result<(), Box<dyn Error>> {
             )
         };
 
+    // Create VM mappings (shared between scheduler, runner, and AppState)
+    let vm_mappings = Arc::new(tokio::sync::RwLock::new(persisted_vms));
+
     // Create and start the flow scheduler
     let scheduler = Arc::new(FlowScheduler::new(
         store.clone(),
@@ -260,6 +283,7 @@ async fn run_server(start_disabled: bool) -> Result<(), Box<dyn Error>> {
         github_client.clone(),
         events_tx.clone(),
         sandbox_provider.clone(),
+        vm_mappings.clone(),
     ));
     if start_disabled {
         tracing::info!("Starting with all flow triggers disabled (--start-disabled)");
@@ -288,6 +312,8 @@ async fn run_server(start_disabled: bool) -> Result<(), Box<dyn Error>> {
         live_processes: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
         sandbox_provider,
         vm_manager: vm_manager_arc,
+        vm_mappings,
+        oauth_token,
     };
 
     let app = server::create_app(app_state)

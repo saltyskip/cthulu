@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, type RefObject } from "react";
+import { open } from "@tauri-apps/plugin-dialog";
 import * as api from "../api/client";
-import type { FlowNode, SavedPrompt } from "../types/flow";
+import type { FlowNode } from "../types/flow";
 import type { CanvasHandle } from "./Canvas";
 
 interface PropertyPanelProps {
@@ -201,10 +202,11 @@ function renderConfigFields(
       );
     }
     case "vm-sandbox": {
+      const promptErr = fieldHasError(errors, "prompt");
       return (
         <>
           <div className="form-group">
-            <label>Tier</label>
+            <label>VM Tier</label>
             <select
               value={(config.tier as string) || "nano"}
               onChange={(e) => onChange("tier", e.target.value)}
@@ -213,19 +215,15 @@ function renderConfigFields(
               <option value="micro">micro (2 vCPU, 1024 MB)</option>
             </select>
           </div>
-          <div className="form-group">
-            <label>Anthropic API Key (optional)</label>
-            <input
-              type="password"
-              placeholder="sk-ant-... (uses server default if empty)"
-              value={(config.api_key as string) || ""}
-              onChange={(e) => onChange("api_key", e.target.value)}
-            />
-          </div>
+          <ClaudeCodeFields
+            config={config}
+            onChange={onChange}
+            promptErr={promptErr}
+          />
           <div className="form-group">
             <label style={{ fontSize: "11px", color: "var(--text-secondary)" }}>
-              VM is created when you click this node. Connect via the embedded
-              web terminal in the bottom panel.
+              This agent runs in a sandboxed Firecracker VM. Enable the flow to
+              provision VMs. Click the node to open an interactive terminal.
             </label>
           </div>
         </>
@@ -435,6 +433,7 @@ function renderConfigFields(
               className={dbErr ? "input-error" : ""}
               value={(config.database_id as string) || ""}
               onChange={(e) => onChange("database_id", e.target.value)}
+              placeholder="30aac5ee-1a2b-3c4d-5e6f-1234567890ab"
             />
             {dbErr && <span className="field-error">{dbErr}</span>}
           </div>
@@ -536,22 +535,23 @@ function ClaudeCodeFields({
   onChange: (key: string, value: unknown) => void;
   promptErr: string | undefined;
 }) {
-  const [showLibrary, setShowLibrary] = useState(false);
-  const [savedPrompts, setSavedPrompts] = useState<SavedPrompt[]>([]);
-  const [loadingPrompts, setLoadingPrompts] = useState(false);
-
-  const handleOpenLibrary = () => {
-    setShowLibrary(true);
-    setLoadingPrompts(true);
-    api.listPrompts()
-      .then(setSavedPrompts)
-      .catch(() => {})
-      .finally(() => setLoadingPrompts(false));
-  };
-
-  const handleImportPrompt = (saved: SavedPrompt) => {
-    onChange("prompt", saved.summary);
-    setShowLibrary(false);
+  const handleImport = async () => {
+    try {
+      const selected = await open({
+        title: "Select Prompt File",
+        multiple: false,
+        filters: [
+          { name: "Markdown", extensions: ["md"] },
+          { name: "Text", extensions: ["txt"] },
+          { name: "All Files", extensions: ["*"] },
+        ],
+      });
+      if (selected) {
+        onChange("prompt", selected);
+      }
+    } catch {
+      // User cancelled or Tauri not available
+    }
   };
 
   return (
@@ -568,7 +568,7 @@ function ClaudeCodeFields({
         <button
           className="ghost"
           style={{ marginTop: 6, fontSize: 11 }}
-          onClick={handleOpenLibrary}
+          onClick={handleImport}
         >
           Import from Library
         </button>
@@ -604,45 +604,6 @@ function ClaudeCodeFields({
           rows={4}
         />
       </div>
-
-      {showLibrary && (
-        <div className="modal-overlay" onClick={() => setShowLibrary(false)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <h2>Prompts Library</h2>
-            {loadingPrompts ? (
-              <p style={{ color: "var(--text-secondary)", fontSize: 13 }}>Loading...</p>
-            ) : savedPrompts.length === 0 ? (
-              <p style={{ color: "var(--text-secondary)", fontSize: 13 }}>
-                No saved prompts yet. Prompts are saved when you delete a flow with interact session history.
-              </p>
-            ) : (
-              <div className="prompt-library-list">
-                {savedPrompts.map((p) => (
-                  <div
-                    key={p.id}
-                    className="prompt-library-item"
-                    onClick={() => handleImportPrompt(p)}
-                  >
-                    <div className="prompt-library-title">{p.title}</div>
-                    <div className="prompt-library-meta">
-                      from {p.source_flow_name}
-                      {p.tags.length > 0 && ` \u00b7 ${p.tags.join(", ")}`}
-                    </div>
-                    <div className="prompt-library-preview">
-                      {p.summary.length > 120 ? p.summary.slice(0, 120) + "..." : p.summary}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-            <div className="modal-actions">
-              <button className="ghost" onClick={() => setShowLibrary(false)}>
-                Close
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </>
   );
 }

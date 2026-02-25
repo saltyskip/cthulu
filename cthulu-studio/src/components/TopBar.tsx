@@ -33,6 +33,7 @@ interface TopBarProps {
   flowHasErrors?: boolean;
   validationErrors?: Record<string, string[]>;
   flowNodes?: FlowNode[];
+  onReconnect?: () => void;
 }
 
 export default function TopBar({
@@ -50,11 +51,15 @@ export default function TopBar({
   flowHasErrors,
   validationErrors,
   flowNodes,
+  onReconnect,
 }: TopBarProps) {
   const [connected, setConnected] = useState(false);
   const [showValidationGate, setShowValidationGate] = useState(false);
   const [nextRun, setNextRun] = useState<string | null>(null);
   const retryRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const connectedRef = useRef(false);
+  const onReconnectRef = useRef(onReconnect);
+  onReconnectRef.current = onReconnect;
   const [editing, setEditing] = useState(false);
   const [editName, setEditName] = useState("");
   const nameInputRef = useRef<HTMLInputElement>(null);
@@ -89,11 +94,13 @@ export default function TopBar({
       if (cancelled) return;
       const ok = await api.checkConnection();
       if (!cancelled) {
-        const wasDisconnected = !connected;
+        const wasDisconnected = !connectedRef.current;
+        connectedRef.current = ok;
         setConnected(ok);
 
         if (ok && wasDisconnected) {
           log("info", `Connected to server at ${api.getServerUrl()}`);
+          onReconnectRef.current?.();
         }
 
         // If still disconnected, retry faster (up to 10s)
@@ -157,13 +164,9 @@ export default function TopBar({
                 {flow.name}
               </span>
             )}
-            <button
-              className={`ghost flow-toggle ${flow.enabled ? "flow-toggle-enabled" : "flow-toggle-disabled"}`}
-              onClick={onToggleEnabled}
-            >
-              <span className={`flow-toggle-dot ${flow.enabled ? "enabled" : "disabled"}`} />
-              {flow.enabled ? "Enabled" : "Disabled"}
-            </button>
+            {flow.enabled && (
+              <span className="flow-enabled-badge">Active</span>
+            )}
             {nextRun && flow.enabled && (
               <span className="next-run-label" title={new Date(nextRun).toLocaleString()}>
                 Next: {formatRelativeTime(nextRun)}

@@ -23,11 +23,13 @@ pub(crate) async fn get_session(
         )
     })?;
 
+    let vm_mappings_snapshot = state.vm_mappings.read().await.clone();
     let runner = crate::flows::runner::FlowRunner {
         http_client: state.http_client.clone(),
         github_client: state.github_client.clone(),
         events_tx: None,
         sandbox_provider: Some(state.sandbox_provider.clone()),
+        vm_mappings: vm_mappings_snapshot,
     };
 
     let session = match runner.prepare_session(&flow).await {
@@ -97,11 +99,13 @@ pub(crate) async fn new_session(
         )
     })?;
 
+    let vm_mappings_snapshot = state.vm_mappings.read().await.clone();
     let runner = crate::flows::runner::FlowRunner {
         http_client: state.http_client.clone(),
         github_client: state.github_client.clone(),
         events_tx: None,
         sandbox_provider: Some(state.sandbox_provider.clone()),
+        vm_mappings: vm_mappings_snapshot,
     };
     let session_info = runner.prepare_session(&flow).await.ok();
     let working_dir = resolve_working_dir(&session_info);
@@ -141,7 +145,7 @@ pub(crate) async fn new_session(
 
     let sessions_snapshot = all_sessions.clone();
     drop(all_sessions);
-    super::super::save_sessions(&state.sessions_path, &sessions_snapshot);
+    state.save_sessions_with_vms(&sessions_snapshot);
 
     let mut resp = json!({ "session_id": new_id, "created_at": now });
     if let Some(w) = warning {
@@ -191,7 +195,7 @@ pub(crate) async fn delete_session(
 
     let sessions_snapshot = all_sessions.clone();
     drop(all_sessions);
-    super::super::save_sessions(&state.sessions_path, &sessions_snapshot);
+    state.save_sessions_with_vms(&sessions_snapshot);
 
     Ok(Json(json!({
         "deleted": true,
@@ -220,11 +224,13 @@ pub(crate) async fn interact_flow(
         ));
     }
 
+    let vm_mappings_snapshot = state.vm_mappings.read().await.clone();
     let runner = crate::flows::runner::FlowRunner {
         http_client: state.http_client.clone(),
         github_client: state.github_client.clone(),
         events_tx: None,
         sandbox_provider: Some(state.sandbox_provider.clone()),
+        vm_mappings: vm_mappings_snapshot,
     };
 
     let session_info = runner.prepare_session(&flow).await.ok();
@@ -300,7 +306,7 @@ pub(crate) async fn interact_flow(
 
         let sessions_snapshot = all_sessions.clone();
         drop(all_sessions);
-        super::super::save_sessions(&state.sessions_path, &sessions_snapshot);
+        state.save_sessions_with_vms(&sessions_snapshot);
 
         (sid, is_new, wdir)
     };
@@ -330,6 +336,7 @@ pub(crate) async fn interact_flow(
     let session_id_for_stream = target_session_id.clone();
     let sessions_ref = state.interact_sessions.clone();
     let sessions_path = state.sessions_path.clone();
+    let vm_mappings_ref = state.vm_mappings.clone();
 
     let stream = async_stream::stream! {
         use std::process::Stdio;
@@ -533,7 +540,10 @@ pub(crate) async fn interact_flow(
             }
             let sessions_snapshot = all_sessions.clone();
             drop(all_sessions);
-            super::super::save_sessions(&sessions_path, &sessions_snapshot);
+            let vms = vm_mappings_ref.try_read()
+                .map(|g| g.clone())
+                .unwrap_or_default();
+            crate::server::save_sessions(&sessions_path, &sessions_snapshot, &vms);
         }
 
         match exit_result {
@@ -571,7 +581,7 @@ pub(crate) async fn reset_interact(
     all_sessions.remove(&id);
     let sessions_snapshot = all_sessions.clone();
     drop(all_sessions);
-    super::super::save_sessions(&state.sessions_path, &sessions_snapshot);
+    state.save_sessions_with_vms(&sessions_snapshot);
     Ok(Json(json!({ "status": "reset" })))
 }
 
