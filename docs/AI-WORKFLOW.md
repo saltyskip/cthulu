@@ -65,6 +65,10 @@ Never mark a task as complete without verifying your work:
 | Site page/section | `npx nx build cthulu-site` |
 | New API endpoint | `cargo check`, restart server, test with `curl` |
 | Flow config / YAML | Start server, load flow in Studio, verify in UI |
+| Sandbox module (Rust) | `cargo test sandbox && cargo check` |
+| VM Manager integration | `cargo test vm_manager && cargo check` |
+| VmTerminal / BottomPanel | `npx nx build cthulu-studio` |
+| Full sandbox (both ends) | `cargo check && cargo test && npx nx build cthulu-studio` |
 
 ### Staff-Engineer Bar
 
@@ -100,6 +104,54 @@ For multi-step work:
 
 ---
 
+## Working with the VM Sandbox Module
+
+The sandbox module (`src/sandbox/`) spans both Rust backend and React frontend. When working on it:
+
+### Key Architecture Points
+
+- **VmManagerProvider** is the primary backend. It proxies to an external VM Manager API that manages Firecracker microVMs with web terminal (ttyd) access.
+- **VMs are interactive-only** — users connect via browser terminal (iframe in BottomPanel). Automated flow runs still use `ClaudeCodeExecutor`.
+- **One VM per flow** — persistent, created on first click, reused across interactions, destroyed explicitly.
+- **Cthulu is a relay** — all VM Manager calls go through Cthulu backend. Frontend calls `/api/sandbox/vm/{flowId}`, Cthulu proxies to VM Manager.
+
+### Files You'll Likely Touch
+
+| Area | Key Files |
+|------|-----------|
+| Backend provider | `src/sandbox/backends/vm_manager.rs`, `src/sandbox/vm_manager/mod.rs` |
+| Backend routes | `src/server/flow_routes/sandbox.rs` |
+| Frontend terminal | `cthulu-studio/src/components/VmTerminal.tsx` |
+| Frontend panel | `cthulu-studio/src/components/BottomPanel.tsx` |
+| Frontend API | `cthulu-studio/src/api/client.ts` |
+| Types | `src/sandbox/types.rs` |
+| Provider init | `src/main.rs` (env var dispatch) |
+| AppState | `src/server/mod.rs` (holds `vm_manager: Option<Arc<VmManagerProvider>>`) |
+
+### Common Pitfalls
+
+- **FlowRunner construction sites**: Adding a field to `FlowRunner` requires updating 7 places (4 in `flow_routes/mod.rs`, 3 in `scheduler.rs`). Grep for `FlowRunner {`.
+- **AppState must derive Clone**: Any new field must be `Arc`-wrapped or inherently `Clone`.
+- **VM Manager-specific methods** (`get_or_create_vm`, `get_flow_vm`, `destroy_flow_vm`) live on `VmManagerProvider` directly, NOT on the `SandboxProvider` trait. This is why `AppState` has a separate `vm_manager` field.
+- **BottomTab.nodeKind**: The `BottomTab` type has a `nodeKind` field that determines whether to render `VmTerminal` or `NodeChat`. Always pass this through when opening tabs.
+- **CSS variables**: VM terminal styles use `var(--bg)`, `var(--border)`, etc. Never hardcode colors.
+- **Shell escape**: Any user input going into shell commands must use `shell_escape()` (single-quote-with-replacement idiom).
+
+### End-to-End Testing
+
+To manually test the VM browser terminal:
+
+1. Set `VM_MANAGER_URL=http://34.100.130.60:8080` in `.env`
+2. Start the server: `cargo run -- serve`
+3. Start Studio: `npx nx dev cthulu-studio`
+4. Create a flow, drag a "VM Sandbox" executor node onto the canvas
+5. Click the node → BottomPanel should show VmTerminal with loading spinner
+6. VM creates (~2-5s) → iframe loads ttyd web terminal
+7. Interact with Claude CLI inside the VM
+8. Click "Destroy VM" to clean up
+
+---
+
 ## Session Start Checklist
 
 At the beginning of each session:
@@ -108,3 +160,4 @@ At the beginning of each session:
 2. Read `CLAUDE.md` for project rules and architecture
 3. For non-trivial tasks, plan before coding
 4. Run `cargo check` to ensure the codebase compiles before making changes
+5. If working on sandbox: review `.claude/skills/sandbox-module.md` for architecture and file map

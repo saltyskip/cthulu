@@ -125,6 +125,16 @@ Postcondition: ExecutionResult with text, cost_usd, num_turns
 Failure mode: 15-min timeout -> fail run; process error -> fail run
 ```
 
+**VM Sandbox** (interactive, not in automated pipeline):
+```
+Precondition: VM Manager reachable, flow_id known, user clicked vm-sandbox node
+Action:       POST /api/sandbox/vm/{flow_id} → VM Manager creates/returns Firecracker microVM
+Postcondition: Web terminal URL available, iframe renders in BottomPanel
+Failure mode: VM Manager unreachable → show error in VmTerminal component
+Note:         This is interactive-only. Automated flow runs still use ClaudeCodeExecutor.
+              The VM is a persistent workspace (one per flow, survives across clicks).
+```
+
 **Sinks** (near `// ── 5. SINKS`):
 ```
 Precondition: ExecutionResult.text is non-empty, sink credentials configured
@@ -179,6 +189,23 @@ Every prompt template should include:
     - Claude analyzes diff, posts gh review
     - Slack sink notifies the team
 ```
+
+### Two Executor Paradigms
+
+Cthulu supports two distinct executor paradigms that serve different use cases:
+
+| Paradigm | Node Kind | Execution | User Interaction |
+|----------|-----------|-----------|-----------------|
+| **Automated** | `claude-code` | Flow runner pipes prompt to Claude CLI, collects output | View results in NodeChat (BottomPanel) |
+| **Interactive VM** | `vm-sandbox` | User gets a persistent Firecracker microVM with web terminal | Full terminal access via iframe in BottomPanel |
+
+**Automated executors** (`ClaudeCodeExecutor`) fit the HTN model — they're primitive actions in the DAG. The flow runner handles observe/orient (sources/filters), the executor handles decide/act.
+
+**Interactive VM executors** (`VmManagerProvider`) break the HTN model intentionally — they give the user a persistent workspace with Claude CLI pre-installed. The user IS the planner, using Claude interactively inside a real VM. This is useful for:
+- Exploratory coding tasks that don't fit a predefined pipeline
+- Debugging and investigation that requires a full Linux environment
+- Tasks where the user wants to guide Claude in real-time
+- Prototyping before automating into a DAG pipeline
 
 ### Decomposition depth
 
@@ -341,6 +368,9 @@ failure information.
 | Bounded retry | Executor timeout | [`src/tasks/executors/claude_code.rs`](../src/tasks/executors/claude_code.rs) (15-min timeout) |
 | Scope isolation | Per-node context | `.skills/` per executor, `live_processes` pool |
 | Definition of Done | Build verification | [`CLAUDE.md`](../CLAUDE.md) rules, prompt template verification steps |
+| Interactive VM sandbox | VM Manager proxy | [`src/sandbox/backends/vm_manager.rs`](../src/sandbox/backends/vm_manager.rs), [`VmTerminal.tsx`](../cthulu-studio/src/components/VmTerminal.tsx) |
+| Sandbox provider factory | Env-var dispatch | [`src/sandbox/mod.rs`](../src/sandbox/mod.rs) (`build_provider()`) |
+| Browser terminal | ttyd iframe embed | [`VmTerminal.tsx`](../cthulu-studio/src/components/VmTerminal.tsx), [`BottomPanel.tsx`](../cthulu-studio/src/components/BottomPanel.tsx) |
 
 ---
 
@@ -364,3 +394,10 @@ failure information.
 5. **Let the pipeline handle gathering** (sources + filters). The executor
    agent should transform and analyze, not fetch. This is OODA's Orient
    phase done systematically.
+
+6. **Choose the right executor paradigm** — automated (`claude-code`) for
+   repeatable pipeline tasks; interactive VM (`vm-sandbox`) for exploratory
+   work, debugging, or tasks requiring user guidance. The VM sandbox gives
+   users a persistent Firecracker microVM with Claude CLI accessible via
+   browser terminal (ttyd iframe in BottomPanel). VMs are one-per-flow
+   and persist until explicitly destroyed.

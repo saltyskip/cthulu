@@ -91,3 +91,53 @@ curl -Lo firecracker https://github.com/firecracker-microvm/firecracker/releases
 chmod +x firecracker
 sudo mv firecracker /usr/local/bin/
 ```
+
+## 11. VM Manager API is the production path — not raw Firecracker
+
+**Problem**: Direct Firecracker control from Cthulu (the `FirecrackerProvider`) requires SSH access to a Linux server, socat for Unix socket proxying, TAP network setup, rootfs management, and a lot of moving parts. It also requires `/dev/kvm` which doesn't work on macOS.
+
+**Solution**: The VM Manager is a separate service running on the Linux server that abstracts all of this. Cthulu just makes HTTP calls (`POST /vms`, `GET /vms/{id}`, `DELETE /vms/{id}`). The VM Manager handles Firecracker lifecycle, networking, web terminal (ttyd) setup, and Claude CLI installation inside the VM.
+
+**Result**: `VmManagerProvider` is ~200 lines of straightforward HTTP client code vs. `FirecrackerProvider` which is ~780 lines of complex transport/provisioning logic.
+
+## 12. Browser terminal iframe — direct URL, not proxied
+
+**Problem**: The web terminal (ttyd) runs on a dynamic port on the VM Manager host. The iframe in BottomPanel needs to load this URL. Initially considered proxying the terminal through Cthulu.
+
+**Solution**: The iframe `src` points directly to the VM Manager's `web_terminal` URL (e.g., `http://34.100.130.60:PORT`). No proxying through Cthulu. This is simpler and avoids WebSocket proxy complexity.
+
+**Implication**: The user's browser must be able to reach the VM Manager host directly. If the VM Manager is behind a firewall or NAT, the dynamic web terminal ports must be accessible. This is a deployment consideration, not a code issue.
+
+## 13. AppState needs both generic trait and specific provider
+
+**Problem**: The VM sandbox endpoints need `VmManagerProvider`-specific methods (`get_or_create_vm`, `get_flow_vm`, `destroy_flow_vm`) that don't belong on the generic `SandboxProvider` trait.
+
+**Solution**: `AppState` stores both:
+- `sandbox_provider: Arc<dyn SandboxProvider>` — for the flow runner (generic dispatch)
+- `vm_manager: Option<Arc<VmManagerProvider>>` — for the VM sandbox endpoints (specific methods)
+
+Both are set from the same provider instance in `main.rs`. The `Option` is `None` when `VM_MANAGER_URL` isn't set.
+
+## 14. BottomTab needs nodeKind to decide which component to render
+
+**Problem**: When a user clicks a node, BottomPanel opens a tab. But `vm-sandbox` nodes need `VmTerminal` (iframe) while `claude-code` nodes need `NodeChat` (chat interface). The tab didn't know which node type it was for.
+
+**Solution**: Extended the `BottomTab` type with a `nodeKind: string` field. BottomPanel checks this field to conditionally render the right component. Passed through from `App.tsx` where the node click is handled.
+
+## 15. shell_escape: single-quote-with-replacement idiom
+
+**Problem**: PR review found 6+ shell injection vulnerabilities where user-supplied strings (sandbox names, file paths) were interpolated into shell commands without escaping.
+
+**Fix**: `shell_escape()` wraps the string in single quotes and replaces any internal `'` with `'\''` (end quote, escaped quote, start quote). This is the standard POSIX shell escaping pattern. Example: `O'Brien` becomes `'O'\''Brien'`.
+
+## 16. default_safe() must return Disabled, not AllowAll
+
+**Problem**: `SandboxCapabilities::default_safe()` was returning `AllowAll` for network, filesystem, and exec capabilities. This meant new sandboxes had no restrictions by default.
+
+**Fix**: Changed to return `Disabled` for all capabilities. Sandboxes now have no capabilities until explicitly granted. Security-first default.
+
+## 17. exec_stream race condition — await stdout/stderr before Exit
+
+**Problem**: In `ProcessExecStream`, the exit monitoring task could detect process exit and send the `Exit` event while stdout/stderr reading tasks still had buffered data. This caused truncated output.
+
+**Fix**: The exit task now `await`s the stdout and stderr `JoinHandle`s before sending the `Exit` event. This guarantees all output is drained before the stream signals completion.

@@ -68,3 +68,51 @@ Record corrections, mistakes, and insights here so future sessions can avoid rep
 - **Context**: Axum requires `Clone` on the state type passed to `Router::with_state()`.
 - **Mistake**: Removed `#[derive(Clone)]` from `AppState` while fixing `LiveClaudeProcess`. All route handlers broke with `the trait Clone is not implemented for AppState`.
 - **Fix**: `AppState` must always derive `Clone`. Since all its fields are `Arc<...>`, `PathBuf`, or `broadcast::Sender` (all Clone), it works even when inner types (like `LiveClaudeProcess`) are not Clone.
+
+## 2026-02-25 - AppState needs both generic trait and specific provider for sandbox
+
+- **Context**: Adding VM Manager sandbox endpoints that need `VmManagerProvider`-specific methods (`get_or_create_vm`, `get_flow_vm`, `destroy_flow_vm`).
+- **Mistake**: Tried to downcast `Arc<dyn SandboxProvider>` to `VmManagerProvider`, which is fragile and error-prone.
+- **Fix**: Store both on `AppState`: `sandbox_provider: Arc<dyn SandboxProvider>` (generic) and `vm_manager: Option<Arc<VmManagerProvider>>` (specific). Both point to the same instance. The `Option` is `None` when `VM_MANAGER_URL` isn't set.
+
+## 2026-02-25 - BottomTab needs nodeKind to dispatch component rendering
+
+- **Context**: BottomPanel needs to render `VmTerminal` for `vm-sandbox` nodes and `NodeChat` for `claude-code` nodes.
+- **Mistake**: Initially tried to detect node kind inside BottomPanel by looking up the node — but the panel doesn't have direct access to the flow's node data.
+- **Fix**: Extended `BottomTab` type with `nodeKind: string` field. Pass it through from `App.tsx` where the node click is handled. BottomPanel checks `tab.nodeKind` to decide which component to render.
+
+## 2026-02-25 - VM browser terminal iframe points directly to VM Manager
+
+- **Context**: Web terminal (ttyd) runs on a dynamic port on the VM Manager host. Needed to embed it in BottomPanel.
+- **Mistake**: Considered proxying the WebSocket through Cthulu backend — this adds complexity and latency.
+- **Fix**: Iframe `src` points directly to the VM Manager's `web_terminal` URL (e.g., `http://host:PORT`). No proxy. Simpler, lower latency. Trade-off: user's browser must be able to reach the VM Manager host directly.
+
+## 2026-02-25 - shell_escape must use single-quote-with-replacement
+
+- **Context**: PR review found shell injection in 6+ locations where user strings were interpolated into shell commands.
+- **Mistake**: Used `format!("'{}'", s)` which breaks if the string contains single quotes.
+- **Fix**: Proper shell escape: wrap in single quotes, replace internal `'` with `'\''`. Example: `O'Brien` → `'O'\''Brien'`. This is the standard POSIX pattern.
+
+## 2026-02-25 - SandboxCapabilities::default_safe() must return Disabled
+
+- **Context**: Creating default sandbox capabilities.
+- **Mistake**: `default_safe()` returned `AllowAll` — no restrictions by default. Security hole.
+- **Fix**: Return `Disabled` for all capabilities (network, filesystem, exec). Must be explicitly granted.
+
+## 2026-02-25 - exec_stream Exit event must wait for stdout/stderr drain
+
+- **Context**: `ProcessExecStream` in the sandbox process supervisor.
+- **Mistake**: Exit monitoring task sent `Exit` event as soon as the process exited, while stdout/stderr tasks still had buffered data.
+- **Fix**: Exit task now `await`s stdout/stderr `JoinHandle`s before sending `Exit`. Guarantees all output is yielded before stream completes.
+
+## 2026-02-25 - Missing npm dependency breaks Studio build
+
+- **Context**: `@uiw/react-md-editor` was used in Studio but not in `package.json`.
+- **Mistake**: Assumed all dependencies were already declared. Build failed on a fresh checkout.
+- **Fix**: `npm install @uiw/react-md-editor`. Always run `npx nx build cthulu-studio` to catch missing deps.
+
+## 2026-02-25 - Nested KVM on Apple Silicon is a dead end
+
+- **Context**: Tried to run Firecracker inside Lima VM on macOS (both vz and qemu backends).
+- **Mistake**: Spent significant time trying to get `/dev/kvm` working.
+- **Fix**: Apple Silicon does not expose ARM virtualization extensions to guest VMs. Neither Lima backend works. Use the VM Manager API on a real Linux server instead. Documented in `NOPE.md`.

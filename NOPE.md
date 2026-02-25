@@ -49,3 +49,35 @@ limactl delete firecracker
 ## 8. Port exposure for Firecracker VMs
 
 **Not yet working**: `expose_port()` / `unexpose_port()` return `Unsupported`. Would need iptables DNAT rules or SSH tunnel forwarding. Not yet implemented.
+
+## 9. Proxying web terminal (ttyd) WebSocket through Cthulu
+
+**Don't try**: Routing the ttyd web terminal connection through the Cthulu backend as a WebSocket proxy.
+
+ttyd uses WebSockets for real-time terminal I/O. Proxying this through Cthulu would require WebSocket upgrade handling in Axum, bidirectional frame forwarding, and proper keepalive management. It adds latency and complexity for no real benefit.
+
+**Instead**: The iframe `src` points directly to the VM Manager's `web_terminal` URL (e.g., `http://host:PORT`). The user's browser connects directly to the ttyd server running on the VM Manager host. This is simpler and lower latency. Trade-off: the user's browser must be able to reach the VM Manager host and its dynamic ports.
+
+## 10. Running Firecracker directly from macOS (any method)
+
+**Don't try**: Any scheme to run Firecracker on macOS — whether natively, inside Docker Desktop, inside Lima, or inside UTM/QEMU.
+
+Firecracker hard-requires Linux `/dev/kvm`. macOS doesn't have KVM. Docker Desktop on Mac uses LinuxKit which doesn't expose nested KVM. Lima VMs on Apple Silicon don't provide working KVM (see #1). UTM/QEMU on Apple Silicon can't nest virtualization.
+
+**Instead**: Use the VM Manager API (`VM_MANAGER_URL=http://server:8080`) which runs on a real Linux server. Cthulu on macOS talks to it over HTTP. The user interacts via browser terminal (ttyd iframe). No KVM needed on the Cthulu host.
+
+## 11. SSH exec from Cthulu to VM Manager VMs
+
+**Don't try**: SSHing from Cthulu into VMs created by the VM Manager to execute commands programmatically.
+
+While the VMs do have SSH enabled (passwordless `ssh -p PORT root@HOST`), executing commands from Cthulu over SSH adds complexity: key management, connection pooling, error handling, output parsing. The VMs are designed for **interactive** use through the web terminal, not for programmatic exec from the Cthulu backend.
+
+**Instead**: VMs are interactive-only. Users interact via the browser terminal (ttyd iframe). Automated flow runs use `ClaudeCodeExecutor` locally. If you need programmatic sandbox exec, use `DangerousHostProvider` or direct `FirecrackerProvider` with `SshGuestAgent`.
+
+## 12. Downcasting `Arc<dyn SandboxProvider>` to specific provider type
+
+**Don't try**: Using `Arc::downcast()` or `Any`-based downcasting to get `VmManagerProvider` from `Arc<dyn SandboxProvider>`.
+
+This is fragile, verbose, and breaks when the underlying type changes. It also requires adding `Any` bounds to the trait.
+
+**Instead**: Store the specific provider separately on `AppState`. We use `vm_manager: Option<Arc<VmManagerProvider>>` alongside the generic `sandbox_provider: Arc<dyn SandboxProvider>`. Both are set from the same instance in `main.rs`.

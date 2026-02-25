@@ -142,24 +142,12 @@ export default function BottomPanel({
         {activeTab.kind === "log" && (
           <RunLog events={runEvents} onClear={onRunEventsClear} onClose={handleClose} />
         )}
-        {activeTab.kind === "executor" && flowId && activeTab.nodeKind === "vm-sandbox" && (
+        {activeTab.kind === "executor" && flowId && (
           <VmTerminal
             key={`vm:${flowId}::${activeTab.nodeId}`}
             flowId={flowId}
             nodeId={activeTab.nodeId}
             nodeLabel={activeTab.label}
-          />
-        )}
-        {activeTab.kind === "executor" && flowId && activeTab.nodeKind !== "vm-sandbox" && (
-          <NodeChat
-            key={`${flowId}::${activeTab.nodeId}`}
-            flowId={flowId}
-            nodeId={activeTab.nodeId}
-            nodeLabel={activeTab.label}
-            initialState={nodeChatStates.get(`${flowId}::${activeTab.nodeId}`) ?? null}
-            onStateChange={(state) =>
-              onNodeChatStateChange(`${flowId}::${activeTab.nodeId}`, state)
-            }
           />
         )}
       </div>
