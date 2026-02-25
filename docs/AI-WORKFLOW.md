@@ -34,7 +34,7 @@ After receiving a correction or discovering a mistake:
 
 1. Fix the immediate issue
 2. Check if the lesson applies elsewhere in the current task
-3. Record the lesson in `.claude/lessons.md` if it's likely to recur
+3. Record the lesson in `.claude/LESSONS.md` if it's likely to recur
 
 **Format for lessons**:
 
@@ -45,7 +45,7 @@ After receiving a correction or discovering a mistake:
 - **Fix**: What the correct approach is
 ```
 
-At the start of each session, review `.claude/lessons.md` for recent entries.
+At the start of each session, review `.claude/LESSONS.md` for recent entries.
 
 ---
 
@@ -104,7 +104,7 @@ For multi-step work:
 
 At the beginning of each session:
 
-1. Review `.claude/lessons.md` for recent lessons
+1. Review `.claude/LESSONS.md` for recent lessons
 2. Read `CLAUDE.md` for project rules and architecture
 3. For non-trivial tasks, plan before coding
 4. Run `cargo check` to ensure the codebase compiles before making changes

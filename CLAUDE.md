@@ -133,7 +133,7 @@ cthulu/
 │   └── CLAUDE.md                   # Symlink -> AGENTS.md
 ├── .claude/
 │   ├── skills/                     # Shared skills (Rust, React Flow, Nx, Claude CLI)
-│   └── lessons.md                  # Lessons learned (self-improvement)
+│   └── LESSONS.md                  # Lessons learned (self-improvement)
 ├── docs/
 │   ├── AI-WORKFLOW.md              # How agents should work
 │   └── TROUBLESHOOTING.md          # Common errors and fixes
@@ -171,7 +171,7 @@ Sessions (sessions.yaml, local state)
 | Troubleshooting | [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) -- common errors and fixes |
 | Agent Rules | [AGENT.md](AGENT.md) -- rules for executor agents running inside workflows |
 | Skills | [.claude/skills/](.claude/skills/) -- Rust/Axum, React Flow, Nx, Claude CLI |
-| Lessons | [.claude/lessons.md](.claude/lessons.md) -- recorded mistakes and insights |
+| Lessons | [.claude/LESSONS.md](.claude/LESSONS.md) -- recorded mistakes and insights |
 
 ---
 
