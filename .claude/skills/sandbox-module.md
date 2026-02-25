@@ -23,7 +23,8 @@ SandboxProvider (factory)     → provisions sandboxes
 | Backend | File | Status | Isolation |
 |---------|------|--------|-----------|
 | `DangerousHostProvider` | `src/sandbox/backends/dangerous.rs` | Complete | Best-effort host (workspace jail, env filtering, process supervisor) |
-| `FirecrackerProvider` | `src/sandbox/backends/firecracker.rs` | Complete (code) | Real VM via Firecracker microVMs |
+| `VmManagerProvider` | `src/sandbox/backends/vm_manager.rs` | **Complete** | Real VM via VM Manager API (Firecracker microVMs, web terminal) |
+| `FirecrackerProvider` | `src/sandbox/backends/firecracker.rs` | Complete (code) | Direct Firecracker control (advanced, needs raw FC access) |
 | `FlySpriteProvider` | `src/sandbox/backends/sprite.rs` | Skipped | Cloud sandbox via Fly Sprite API (not being built) |
 
 ### Dispatch Flow
@@ -77,13 +78,60 @@ FlowRunner.execute_node()
 
 Priority order via env vars:
 
-1. **`FIRECRACKER_SSH_HOST`** → `RemoteSsh` transport (remote Linux server with real `/dev/kvm`)
+1. **`VM_MANAGER_URL`** → `VmManagerProvider` (remote VM Manager API — **recommended**)
+   - Also reads: `VM_MANAGER_SSH_HOST`, `VM_MANAGER_TIER`, `VM_MANAGER_API_KEY`
+2. **`FIRECRACKER_SSH_HOST`** → `FirecrackerProvider` with `RemoteSsh` transport
    - Also reads: `FIRECRACKER_API_URL`, `FIRECRACKER_SSH_PORT`, `FIRECRACKER_SSH_KEY`, `FC_REMOTE_STATE_DIR`, `FC_REMOTE_BIN`
-2. **`FIRECRACKER_API_URL`** → `LimaTcp` transport (Lima VM on macOS, FC API over TCP)
+3. **`FIRECRACKER_API_URL`** → `FirecrackerProvider` with `LimaTcp` transport
    - Also reads: `LIMA_INSTANCE`
-3. **Neither set** → `DangerousHostProvider` (default, no VM)
+4. **None set** → `DangerousHostProvider` (default, no VM)
 
-Common env vars for FC: `FC_KERNEL_IMAGE`, `FC_ROOTFS_IMAGE`, `FC_VCPU`, `FC_MEMORY_MB`.
+## VM Manager Integration
+
+The VM Manager is a separate service running on a Linux server that manages Firecracker microVMs. Cthulu acts as a relay:
+
+```
+User clicks "VM Sandbox" executor node in Studio
+  → Frontend: POST /api/sandbox/vm/{flowId}
+  → Cthulu backend: POST http://VM_MANAGER_URL/vms { tier, api_key }
+  → VM Manager: creates Firecracker microVM, returns web_terminal URL
+  → Frontend: embeds web terminal URL in iframe in BottomPanel
+  → User interacts with Claude inside the VM via browser terminal
+```
+
+### VM Manager API (external service)
+- `POST /vms` { tier, api_key } → create VM
+- `GET /vms` → list all VMs
+- `GET /vms/{id}` → get VM info
+- `DELETE /vms/{id}` → destroy VM
+- `GET /health` → health check
+
+### Cthulu proxy endpoints
+- `GET /api/sandbox/vm/{flow_id}` → get VM info for a flow
+- `POST /api/sandbox/vm/{flow_id}` → create/get VM for a flow (idempotent per flow)
+- `DELETE /api/sandbox/vm/{flow_id}` → destroy VM for a flow
+
+### Frontend: vm-sandbox executor node
+- Node kind: `"vm-sandbox"` (registered in node-types endpoint)
+- Config: `tier` (nano/micro), `api_key` (optional Anthropic key)
+- Click on node → BottomPanel renders `<VmTerminal>` component (iframe of web terminal)
+- VM is persistent per flow (created on first click, reused across subsequent clicks)
+- VMs are interactive-only — flow runs still use `ClaudeCodeExecutor` locally
+
+### Files
+- `src/sandbox/vm_manager/mod.rs` — HTTP client for VM Manager API
+- `src/sandbox/backends/vm_manager.rs` — `VmManagerProvider` + `VmManagerHandle`
+- `src/server/flow_routes/sandbox.rs` — proxy endpoints
+- `cthulu-studio/src/components/VmTerminal.tsx` — embedded web terminal component
+- `cthulu-studio/src/api/client.ts` — `getFlowVm()`, `createFlowVm()`, `deleteFlowVm()`
+
+### Env vars
+```bash
+VM_MANAGER_URL=http://34.100.130.60:8080
+VM_MANAGER_SSH_HOST=34.100.130.60       # optional, extracted from URL
+VM_MANAGER_TIER=nano                     # default tier
+VM_MANAGER_API_KEY=sk-ant-xxx           # Anthropic key to inject into VMs
+```
 
 ## Firecracker Transport Architecture
 

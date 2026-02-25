@@ -44,6 +44,8 @@ pub fn flow_router() -> Router<AppState> {
         // Sandbox
         .route("/sandbox/info", get(sandbox::sandbox_info))
         .route("/sandbox/list", get(sandbox::sandbox_list))
+        // VM Manager
+        .route("/sandbox/vm/{flow_id}", get(sandbox::get_flow_vm).post(sandbox::create_flow_vm).delete(sandbox::delete_flow_vm))
 }
 
 // ---------------------------------------------------------------------------

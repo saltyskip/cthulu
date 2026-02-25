@@ -200,6 +200,37 @@ function renderConfigFields(
         />
       );
     }
+    case "vm-sandbox": {
+      return (
+        <>
+          <div className="form-group">
+            <label>Tier</label>
+            <select
+              value={(config.tier as string) || "nano"}
+              onChange={(e) => onChange("tier", e.target.value)}
+            >
+              <option value="nano">nano (1 vCPU, 512 MB)</option>
+              <option value="micro">micro (2 vCPU, 1024 MB)</option>
+            </select>
+          </div>
+          <div className="form-group">
+            <label>Anthropic API Key (optional)</label>
+            <input
+              type="password"
+              placeholder="sk-ant-... (uses server default if empty)"
+              value={(config.api_key as string) || ""}
+              onChange={(e) => onChange("api_key", e.target.value)}
+            />
+          </div>
+          <div className="form-group">
+            <label style={{ fontSize: "11px", color: "var(--text-secondary)" }}>
+              VM is created when you click this node. Connect via the embedded
+              web terminal in the bottom panel.
+            </label>
+          </div>
+        </>
+      );
+    }
     case "web-scrape": {
       const urlErr = fieldHasError(errors, "page url");
       return (

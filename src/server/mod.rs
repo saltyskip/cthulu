@@ -14,6 +14,7 @@ use crate::flows::events::RunEvent;
 use crate::flows::scheduler::FlowScheduler;
 use crate::flows::store::Store;
 use crate::github::client::GithubClient;
+use crate::sandbox::backends::vm_manager::VmManagerProvider;
 use crate::sandbox::provider::SandboxProvider;
 
 /// Build a composite key for node-scoped sessions: `"flow_id::node_id"`.
@@ -253,6 +254,9 @@ pub struct AppState {
     pub live_processes: Arc<Mutex<HashMap<String, LiveClaudeProcess>>>,
     /// Sandbox provider for isolated executor runs.
     pub sandbox_provider: Arc<dyn SandboxProvider>,
+    /// VM Manager provider (only set when using VmManager backend).
+    /// Stored separately because the VM endpoints need VmManagerProvider-specific methods.
+    pub vm_manager: Option<Arc<VmManagerProvider>>,
 }
 
 pub fn create_app(state: AppState) -> Router {

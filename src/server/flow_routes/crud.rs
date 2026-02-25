@@ -396,6 +396,15 @@ pub(crate) async fn get_node_types() -> Json<Value> {
                 }
             },
             {
+                "kind": "vm-sandbox",
+                "node_type": "executor",
+                "label": "VM Sandbox",
+                "config_schema": {
+                    "tier": { "type": "string", "description": "VM tier: nano (1 vCPU, 512MB) or micro (2 vCPU, 1024MB)", "default": "nano" },
+                    "api_key": { "type": "string", "description": "Anthropic API key to inject into the VM (optional, uses server default if omitted)" }
+                }
+            },
+            {
                 "kind": "slack",
                 "node_type": "sink",
                 "label": "Slack",

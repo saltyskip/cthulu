@@ -7,6 +7,7 @@ pub mod types;
 
 // Internal implementation modules
 pub mod firecracker;
+pub mod vm_manager;
 #[allow(dead_code)]
 mod sprite;
 
@@ -17,6 +18,7 @@ pub use types::*;
 
 use backends::dangerous::DangerousHostProvider;
 use backends::firecracker::FirecrackerProvider;
+use backends::vm_manager::VmManagerProvider;
 
 /// Build a sandbox provider from runtime config.
 pub fn build_provider(
@@ -33,6 +35,14 @@ pub fn build_provider(
                 "initializing Firecracker sandbox provider"
             );
             Ok(Box::new(FirecrackerProvider::new(c)?))
+        }
+        SandboxRuntimeConfig::VmManager(c) => {
+            tracing::info!(
+                api_url = %c.api_base_url,
+                tier = %c.default_tier,
+                "initializing VmManager sandbox provider"
+            );
+            Ok(Box::new(VmManagerProvider::new(c)?))
         }
         SandboxRuntimeConfig::FlySprite(_) => Err(SandboxError::Unsupported(
             "fly sprite backend not yet implemented",

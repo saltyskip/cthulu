@@ -247,6 +247,7 @@ export default function App() {
             kind: "executor",
             nodeId: node.id,
             label: node.label || "Executor",
+            nodeKind: node.kind,
           });
         }
       }

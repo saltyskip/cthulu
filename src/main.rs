@@ -137,11 +137,47 @@ async fn run_server(start_disabled: bool) -> Result<(), Box<dyn Error>> {
     // Initialize sandbox provider (before scheduler, so scheduler can use it)
     //
     // Priority:
-    //   1. FIRECRACKER_SSH_HOST → RemoteSsh (real Linux server with /dev/kvm)
-    //   2. FIRECRACKER_API_URL → LimaTcp (Lima VM on macOS, FC API over TCP)
-    //   3. Default → DangerousHost (best-effort host isolation, no VM)
+    //   1. VM_MANAGER_URL → VmManager (remote VM Manager API)
+    //   2. FIRECRACKER_SSH_HOST → RemoteSsh (real Linux server with /dev/kvm)
+    //   3. FIRECRACKER_API_URL → LimaTcp (Lima VM on macOS, FC API over TCP)
+    //   4. Default → DangerousHost (best-effort host isolation, no VM)
+    let mut vm_manager_arc: Option<Arc<sandbox::backends::vm_manager::VmManagerProvider>> = None;
     let sandbox_provider: Arc<dyn sandbox::SandboxProvider> =
-        if let Ok(ssh_host) = std::env::var("FIRECRACKER_SSH_HOST") {
+        if let Ok(vm_manager_url) = std::env::var("VM_MANAGER_URL") {
+            let ssh_host = std::env::var("VM_MANAGER_SSH_HOST").unwrap_or_else(|_| {
+                // Extract host from URL: "http://host:port" → "host"
+                vm_manager_url
+                    .trim_start_matches("http://")
+                    .trim_start_matches("https://")
+                    .split(':')
+                    .next()
+                    .unwrap_or("localhost")
+                    .to_string()
+            });
+            let default_tier = std::env::var("VM_MANAGER_TIER")
+                .unwrap_or_else(|_| "nano".into());
+            let api_key = std::env::var("VM_MANAGER_API_KEY").ok();
+
+            tracing::info!(
+                api_url = %vm_manager_url,
+                ssh_host = %ssh_host,
+                tier = %default_tier,
+                "initializing VmManager sandbox provider"
+            );
+
+            let vm_config = sandbox::VmManagerConfig {
+                api_base_url: vm_manager_url,
+                ssh_host,
+                default_tier,
+                api_key,
+            };
+            let provider = Arc::new(
+                sandbox::backends::vm_manager::VmManagerProvider::new(vm_config)
+                    .context("failed to initialize VmManager sandbox provider")?,
+            );
+            vm_manager_arc = Some(provider.clone());
+            provider
+        } else if let Ok(ssh_host) = std::env::var("FIRECRACKER_SSH_HOST") {
             let api_url = std::env::var("FIRECRACKER_API_URL")
                 .unwrap_or_else(|_| format!("http://{}:8080", ssh_host.split('@').last().unwrap_or(&ssh_host)));
             let ssh_port: u16 = std::env::var("FIRECRACKER_SSH_PORT")
@@ -251,6 +287,7 @@ async fn run_server(start_disabled: bool) -> Result<(), Box<dyn Error>> {
         data_dir: base_dir,
         live_processes: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
         sandbox_provider,
+        vm_manager: vm_manager_arc,
     };
 
     let app = server::create_app(app_state)

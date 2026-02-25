@@ -583,23 +583,24 @@ impl HostTransport for RemoteSshTransport {
     }
 }
 
-/// Minimal shell escaping — wraps in single quotes.
+/// Shell escaping using the single-quote-with-replacement idiom.
+///
+/// Always wraps in single quotes for any input containing special characters.
+/// Embedded single quotes are replaced with `'\''` (end quote, escaped quote,
+/// restart quote). This is safe against all injection vectors: `$`, backtick,
+/// `\`, `"`, etc. are all literal inside single quotes.
 ///
 /// Used by host transports and guest agent to prevent shell injection
 /// when interpolating user-supplied values into shell command strings.
 pub fn shell_escape(s: &str) -> String {
-    if s.contains('\'') {
-        format!("\"{}\"", s.replace('"', "\\\""))
-    } else if s.contains(' ')
-        || s.contains('"')
-        || s.contains('$')
-        || s.contains('`')
-        || s.contains('\\')
-    {
-        format!("'{s}'")
-    } else {
-        s.to_string()
+    if s.is_empty() {
+        return "''".to_string();
     }
+    // If only safe characters, return as-is for readability
+    if s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-' || b == b'.' || b == b'/') {
+        return s.to_string();
+    }
+    format!("'{}'", s.replace('\'', "'\\''"))
 }
 
 // ── Factory ─────────────────────────────────────────────────────────
@@ -667,8 +668,26 @@ mod tests {
     fn shell_escape_basic() {
         assert_eq!(shell_escape("hello"), "hello");
         assert_eq!(shell_escape("hello world"), "'hello world'");
-        assert_eq!(shell_escape("it's"), "\"it's\"");
         assert_eq!(shell_escape("$HOME"), "'$HOME'");
+        assert_eq!(shell_escape(""), "''");
+        assert_eq!(shell_escape("/usr/bin/test"), "/usr/bin/test");
+        assert_eq!(shell_escape("file_name.txt"), "file_name.txt");
+    }
+
+    #[test]
+    fn shell_escape_single_quotes() {
+        // Single quotes use the '\'' replacement idiom
+        assert_eq!(shell_escape("it's"), "'it'\\''s'");
+        assert_eq!(shell_escape("it's $HOME"), "'it'\\''s $HOME'");
+    }
+
+    #[test]
+    fn shell_escape_injection_safe() {
+        // These must NOT expand $HOME or execute commands
+        assert_eq!(shell_escape("$(rm -rf /)"), "'$(rm -rf /)'");
+        assert_eq!(shell_escape("`whoami`"), "'`whoami`'");
+        assert_eq!(shell_escape("foo;bar"), "'foo;bar'");
+        assert_eq!(shell_escape("a\"b"), "'a\"b'");
     }
 
     #[test]

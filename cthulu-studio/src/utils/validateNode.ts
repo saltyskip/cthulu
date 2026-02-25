@@ -50,6 +50,9 @@ export function validateNode(node: FlowNode): string[] {
         errors.push("Prompt is required");
       }
       break;
+    case "vm-sandbox":
+      // No required fields — tier has a default, api_key is optional
+      break;
     case "slack":
       if (
         (!cfg.webhook_url_env || !(cfg.webhook_url_env as string).trim()) &&

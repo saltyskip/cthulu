@@ -13,6 +13,7 @@ pub type CheckpointId = String;
 pub enum SandboxBackendKind {
     DangerousHost,
     Firecracker,
+    VmManager,
     FlySprite,
 }
 
@@ -124,7 +125,7 @@ pub enum NetworkMode {
 impl NetworkPolicy {
     pub fn default_safe() -> Self {
         Self {
-            mode: NetworkMode::AllowAll,
+            mode: NetworkMode::Disabled,
             allowed_hosts: vec![],
             blocked_hosts: vec![],
             allow_loopback: true,
@@ -394,12 +395,28 @@ pub enum SpriteFileSyncMode {
     PersistentWorkspace,
 }
 
+// ── VM Manager config ───────────────────────────────────────────────
+
+#[derive(Debug, Clone)]
+pub struct VmManagerConfig {
+    /// Base URL of the VM Manager API (e.g., "http://34.100.130.60:8080")
+    pub api_base_url: String,
+    /// Host for SSH access to VMs (defaults to host extracted from api_base_url)
+    pub ssh_host: String,
+    /// Default VM tier: "nano" (1 vCPU, 512MB) or "micro" (2 vCPU, 1024MB)
+    pub default_tier: String,
+    /// Anthropic API key to inject into VMs (optional)
+    pub api_key: Option<String>,
+    // TODO: auth_token for VM Manager itself (currently no auth)
+}
+
 // ── Runtime config selector ─────────────────────────────────────────
 
 #[derive(Debug, Clone)]
 pub enum SandboxRuntimeConfig {
     Dangerous(DangerousConfig),
     Firecracker(FirecrackerConfig),
+    VmManager(VmManagerConfig),
     FlySprite(FlySpriteConfig),
 }
 
@@ -438,7 +455,7 @@ mod tests {
     #[test]
     fn network_policy_default_safe() {
         let np = NetworkPolicy::default_safe();
-        assert_eq!(np.mode, NetworkMode::AllowAll);
+        assert_eq!(np.mode, NetworkMode::Disabled);
         assert!(np.allowed_hosts.is_empty());
         assert!(np.blocked_hosts.is_empty());
         assert!(np.allow_loopback);
