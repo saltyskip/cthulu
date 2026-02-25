@@ -256,7 +256,7 @@ impl FlowScheduler {
         };
 
         runner
-            .execute_with_context(&flow, &*self.store, context)
+            .execute(&flow, &*self.store, Some(context))
             .await?;
 
         diff::cleanup(&diff_ctx);
@@ -331,7 +331,7 @@ async fn cron_loop(
             sandbox_provider: None,
         };
 
-        if let Err(e) = runner.execute(&flow, &*store).await {
+        if let Err(e) = runner.execute(&flow, &*store, None).await {
             tracing::error!(flow = %flow_name, error = %e, "Cron flow execution failed");
         }
     }
@@ -582,7 +582,7 @@ async fn github_pr_loop(
                 };
 
                 match runner
-                    .execute_with_context(&flow, &*store, context)
+                    .execute(&flow, &*store, Some(context))
                     .await
                 {
                     Ok(run) => {

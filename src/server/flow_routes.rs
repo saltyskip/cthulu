@@ -265,7 +265,7 @@ async fn trigger_flow(
     let flow_name = flow.name.clone();
 
     tokio::spawn(async move {
-        match runner.execute(&flow, &*store).await {
+        match runner.execute(&flow, &*store, None).await {
             Ok(run) => {
                 tracing::info!(
                     flow = %flow_name,

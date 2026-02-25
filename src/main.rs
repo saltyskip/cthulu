@@ -152,10 +152,8 @@ async fn run_server(start_disabled: bool) -> Result<(), Box<dyn Error>> {
         scheduler.start_all().await;
     }
 
-    // Load persisted interact sessions from sessions.yaml in the current directory
-    let sessions_path = std::env::current_dir()
-        .unwrap_or_else(|_| std::path::PathBuf::from("."))
-        .join("sessions.yaml");
+    // Load persisted interact sessions from ~/.cthulu/sessions.yaml (alongside other state)
+    let sessions_path = base_dir.join("sessions.yaml");
     let persisted_sessions = server::load_sessions(&sessions_path);
 
     // Initialize sandbox provider
