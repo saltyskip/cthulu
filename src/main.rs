@@ -162,8 +162,11 @@ async fn run_server(start_disabled: bool) -> Result<(), Box<dyn Error>> {
             let remote_fc_bin = std::env::var("FC_REMOTE_BIN")
                 .unwrap_or_else(|_| "/usr/local/bin/firecracker".into());
 
-            let fc_config = sandbox::FirecrackerConfig {
-                host: sandbox::FirecrackerHostTransportConfig::RemoteSsh {
+            let kernel_default = std::path::PathBuf::from(format!("{remote_state_dir}/vmlinux"));
+            let rootfs_default = std::path::PathBuf::from(format!("{remote_state_dir}/rootfs.ext4"));
+
+            let fc_config = build_fc_config(
+                sandbox::FirecrackerHostTransportConfig::RemoteSsh {
                     ssh_target: ssh_host,
                     ssh_port,
                     ssh_key_path: ssh_key,
@@ -171,30 +174,10 @@ async fn run_server(start_disabled: bool) -> Result<(), Box<dyn Error>> {
                     remote_firecracker_bin: remote_fc_bin,
                     remote_state_dir: remote_state_dir.clone(),
                 },
-                state_dir: base_dir.join("firecracker"),
-                kernel_image: std::env::var("FC_KERNEL_IMAGE")
-                    .map(std::path::PathBuf::from)
-                    .unwrap_or_else(|_| std::path::PathBuf::from(format!("{remote_state_dir}/vmlinux"))),
-                rootfs_base_image: std::env::var("FC_ROOTFS_IMAGE")
-                    .map(std::path::PathBuf::from)
-                    .unwrap_or_else(|_| std::path::PathBuf::from(format!("{remote_state_dir}/rootfs.ext4"))),
-                default_vcpu: std::env::var("FC_VCPU")
-                    .ok()
-                    .and_then(|v| v.parse().ok())
-                    .unwrap_or(1),
-                default_memory_mb: std::env::var("FC_MEMORY_MB")
-                    .ok()
-                    .and_then(|v| v.parse().ok())
-                    .unwrap_or(256),
-                network: sandbox::FirecrackerNetworkConfig {
-                    enable_internet: true,
-                    allowed_egress: vec![],
-                    host_port_range_start: 8100,
-                    host_port_range_end: 8200,
-                },
-                use_jailer: false,
-                guest_agent: sandbox::GuestAgentTransport::Ssh,
-            };
+                &base_dir,
+                kernel_default,
+                rootfs_default,
+            );
             Arc::new(
                 sandbox::backends::firecracker::FirecrackerProvider::new(fc_config)
                     .context("failed to initialize Firecracker sandbox provider")?,
@@ -204,36 +187,20 @@ async fn run_server(start_disabled: bool) -> Result<(), Box<dyn Error>> {
                 api_url = %fc_api_url,
                 "initializing Firecracker sandbox provider (LimaTcp)"
             );
-            let fc_config = sandbox::FirecrackerConfig {
-                host: sandbox::FirecrackerHostTransportConfig::LimaTcp {
+
+            let kernel_default = base_dir.join("firecracker/vmlinux");
+            let rootfs_default = base_dir.join("firecracker/rootfs.ext4");
+
+            let fc_config = build_fc_config(
+                sandbox::FirecrackerHostTransportConfig::LimaTcp {
                     lima_instance: std::env::var("LIMA_INSTANCE").unwrap_or_else(|_| "default".into()),
                     api_base_url: fc_api_url,
                     guest_ssh_via_lima: true,
                 },
-                state_dir: base_dir.join("firecracker"),
-                kernel_image: std::env::var("FC_KERNEL_IMAGE")
-                    .map(std::path::PathBuf::from)
-                    .unwrap_or_else(|_| base_dir.join("firecracker/vmlinux")),
-                rootfs_base_image: std::env::var("FC_ROOTFS_IMAGE")
-                    .map(std::path::PathBuf::from)
-                    .unwrap_or_else(|_| base_dir.join("firecracker/rootfs.ext4")),
-                default_vcpu: std::env::var("FC_VCPU")
-                    .ok()
-                    .and_then(|v| v.parse().ok())
-                    .unwrap_or(1),
-                default_memory_mb: std::env::var("FC_MEMORY_MB")
-                    .ok()
-                    .and_then(|v| v.parse().ok())
-                    .unwrap_or(256),
-                network: sandbox::FirecrackerNetworkConfig {
-                    enable_internet: true,
-                    allowed_egress: vec![],
-                    host_port_range_start: 8100,
-                    host_port_range_end: 8200,
-                },
-                use_jailer: false,
-                guest_agent: sandbox::GuestAgentTransport::Ssh,
-            };
+                &base_dir,
+                kernel_default,
+                rootfs_default,
+            );
             Arc::new(
                 sandbox::backends::firecracker::FirecrackerProvider::new(fc_config)
                     .context("failed to initialize Firecracker sandbox provider")?,
@@ -297,4 +264,43 @@ async fn run_server(start_disabled: bool) -> Result<(), Box<dyn Error>> {
     axum::serve(listener, app).await?;
 
     Ok(())
+}
+
+/// Build a `FirecrackerConfig` with the transport-specific `host` variant and
+/// shared defaults for vcpu, memory, network, jailer, and guest agent.
+///
+/// `kernel_default` / `rootfs_default` are the fallback paths when the
+/// corresponding env vars (`FC_KERNEL_IMAGE`, `FC_ROOTFS_IMAGE`) are not set.
+fn build_fc_config(
+    host: sandbox::FirecrackerHostTransportConfig,
+    base_dir: &std::path::Path,
+    kernel_default: std::path::PathBuf,
+    rootfs_default: std::path::PathBuf,
+) -> sandbox::FirecrackerConfig {
+    sandbox::FirecrackerConfig {
+        host,
+        state_dir: base_dir.join("firecracker"),
+        kernel_image: std::env::var("FC_KERNEL_IMAGE")
+            .map(std::path::PathBuf::from)
+            .unwrap_or(kernel_default),
+        rootfs_base_image: std::env::var("FC_ROOTFS_IMAGE")
+            .map(std::path::PathBuf::from)
+            .unwrap_or(rootfs_default),
+        default_vcpu: std::env::var("FC_VCPU")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(1),
+        default_memory_mb: std::env::var("FC_MEMORY_MB")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(256),
+        network: sandbox::FirecrackerNetworkConfig {
+            enable_internet: true,
+            allowed_egress: vec![],
+            host_port_range_start: 8100,
+            host_port_range_end: 8200,
+        },
+        use_jailer: false,
+        guest_agent: sandbox::GuestAgentTransport::Ssh,
+    }
 }

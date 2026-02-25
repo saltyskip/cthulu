@@ -184,7 +184,8 @@ impl GuestAgent for SshGuestAgent {
             }
         }
 
-        // Wait with timeout
+        // Wait with timeout — capture PID before wait_with_output consumes child
+        let child_pid = child.id();
         let timeout = req.timeout.unwrap_or(Duration::from_secs(15 * 60));
         let timed_out;
         let output = match tokio::time::timeout(timeout, child.wait_with_output()).await {
@@ -194,12 +195,13 @@ impl GuestAgent for SshGuestAgent {
             }
             Ok(Err(e)) => return Err(SandboxError::Exec(format!("ssh process error: {e}"))),
             Err(_) => {
-                // Timeout — the child was consumed by wait_with_output's Future
-                // which was dropped. Spawn a new ssh kill command.
-                let _ = tokio::process::Command::new("pkill")
-                    .args(["-f", &format!("ssh.*{}.*{}", self.guest_ip, self.ssh_user)])
-                    .output()
-                    .await;
+                // Timeout — kill by PID (not pkill -f which could hit unrelated SSH sessions)
+                if let Some(pid) = child_pid {
+                    let _ = tokio::process::Command::new("kill")
+                        .args(["-9", &pid.to_string()])
+                        .output()
+                        .await;
+                }
                 timed_out = true;
                 std::process::Output {
                     status: std::process::ExitStatus::default(),

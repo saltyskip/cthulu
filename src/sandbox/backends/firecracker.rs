@@ -116,19 +116,21 @@ impl SandboxProvider for FirecrackerProvider {
             SandboxError::Provision(format!("failed to create VM state dir: {e}"))
         })?;
 
-        // 2. Copy rootfs for this VM
+        // 2. Copy rootfs for this VM (async — rootfs images can be 100s of MB)
         let vm_rootfs = vm_state_dir.join("rootfs.ext4");
         tracing::debug!(
             src = %self.config.rootfs_base_image.display(),
             dst = %vm_rootfs.display(),
             "copying rootfs"
         );
-        std::fs::copy(&self.config.rootfs_base_image, &vm_rootfs).map_err(|e| {
-            SandboxError::Provision(format!(
-                "failed to copy rootfs from {}: {e}",
-                self.config.rootfs_base_image.display()
-            ))
-        })?;
+        tokio::fs::copy(&self.config.rootfs_base_image, &vm_rootfs)
+            .await
+            .map_err(|e| {
+                SandboxError::Provision(format!(
+                    "failed to copy rootfs from {}: {e}",
+                    self.config.rootfs_base_image.display()
+                ))
+            })?;
 
         // 3. Allocate network
         let network = self.net_allocator.allocate(&vm_id);
