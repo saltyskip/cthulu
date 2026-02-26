@@ -1,184 +1,71 @@
 {
-  "id": "0848a05a-fc10-4052-a8f0-1c9733cabdb0",
-  "name": "orangerock-market-brief",
-  "description": "Crypto market brief from top RSS sources — every 4 hours",
+  "_comment": "This file is auto-generated at runtime. The content below is a minimal blank template showing the schema. The Cthulu backend replaces it with the live flow definition when a user opens an executor node.",
+  "id": "00000000-0000-0000-0000-000000000000",
+  "name": "example-flow",
+  "description": "A minimal example flow showing the schema. Replace with real content at runtime.",
   "enabled": true,
   "nodes": [
     {
-      "id": "ee522498-abf0-4baf-af98-5d911e2e9eb6",
+      "id": "00000000-0000-0000-0000-000000000001",
       "node_type": "trigger",
       "kind": "cron",
       "config": {
-        "schedule": "0 */4 * * *",
+        "schedule": "0 9 * * 1-5",
         "working_dir": "."
       },
-      "position": {
-        "x": 100.0,
-        "y": 400.0
-      },
-      "label": "Every 4h"
+      "position": { "x": 100.0, "y": 300.0 },
+      "label": "Weekdays at 9am"
     },
     {
-      "id": "14c831ef-fe76-4d69-98f9-42bdd3031ab9",
+      "id": "00000000-0000-0000-0000-000000000002",
       "node_type": "source",
       "kind": "rss",
       "config": {
-        "limit": 10,
-        "url": "https://thedefiant.io/feed"
+        "url": "https://example.com/feed",
+        "limit": 10
       },
-      "position": {
-        "x": 350.0,
-        "y": 150.0
-      },
-      "label": "RSS: thedefiant.io"
+      "position": { "x": 350.0, "y": 200.0 },
+      "label": "RSS: example.com"
     },
     {
-      "id": "a2b62e56-3ab3-450f-8039-105892932b70",
-      "node_type": "source",
-      "kind": "rss",
-      "config": {
-        "limit": 10,
-        "url": "https://blockworks.co/feed"
-      },
-      "position": {
-        "x": 350.0,
-        "y": 280.0
-      },
-      "label": "RSS: blockworks.co"
-    },
-    {
-      "id": "be5b4368-9723-4254-bdf3-2ec038a486bf",
-      "node_type": "source",
-      "kind": "rss",
-      "config": {
-        "limit": 10,
-        "url": "https://www.dlnews.com/feed/"
-      },
-      "position": {
-        "x": 350.0,
-        "y": 400.0
-      },
-      "label": "RSS: www.dlnews.com"
-    },
-    {
-      "id": "d814bb11-42a8-4f96-9b04-e3e59791334f",
-      "node_type": "source",
-      "kind": "rss",
-      "config": {
-        "limit": 10,
-        "url": "https://www.theblock.co/rss"
-      },
-      "position": {
-        "x": 350.0,
-        "y": 530.0
-      },
-      "label": "RSS: www.theblock.co"
-    },
-    {
-      "id": "f646b383-78f8-4911-8d03-af40daca93ab",
-      "node_type": "source",
-      "kind": "rss",
-      "config": {
-        "limit": 10,
-        "url": "https://unchainedcrypto.com/feed/"
-      },
-      "position": {
-        "x": 350.0,
-        "y": 660.0
-      },
-      "label": "RSS: unchainedcrypto.com"
-    },
-    {
-      "id": "a88116fc-3e2e-4a0c-ade8-b96a08068f8a",
+      "id": "00000000-0000-0000-0000-000000000003",
       "node_type": "executor",
       "kind": "claude-code",
       "config": {
-        "permissions": [
-          "Bash",
-          "Read",
-          "Grep",
-          "Glob"
-        ],
-        "prompt": "prompts/orangerock_brief.md"
+        "permissions": ["Bash", "Read", "Grep", "Glob"],
+        "prompt": "prompts/my_prompt.md"
       },
-      "position": {
-        "x": 650.0,
-        "y": 400.0
-      },
-      "label": "Claude: prompts/orangerock_brief.md"
+      "position": { "x": 600.0, "y": 300.0 },
+      "label": "Claude: my_prompt.md"
     },
     {
-      "id": "b120612e-7ce2-42a2-b0cf-03c3d065ace9",
+      "id": "00000000-0000-0000-0000-000000000004",
       "node_type": "sink",
-      "kind": "notion",
+      "kind": "slack",
       "config": {
-        "database_id": "30aac5ee-0000-0000-0000-000000000000",
-        "token_env": "NOTION_TOKEN"
+        "webhook_url_env": "SLACK_WEBHOOK_URL"
       },
-      "position": {
-        "x": 950.0,
-        "y": 400.0
-      },
-      "label": "Notion: 30aac5ee..."
+      "position": { "x": 850.0, "y": 300.0 },
+      "label": "Slack: #general"
     }
   ],
   "edges": [
     {
-      "id": "324fdd01-ac13-4188-8cb7-ec132771c6f8",
-      "source": "ee522498-abf0-4baf-af98-5d911e2e9eb6",
-      "target": "14c831ef-fe76-4d69-98f9-42bdd3031ab9"
+      "id": "e1",
+      "source": "00000000-0000-0000-0000-000000000001",
+      "target": "00000000-0000-0000-0000-000000000002"
     },
     {
-      "id": "3e2e50bc-fafc-4641-b52f-76d7078223ee",
-      "source": "14c831ef-fe76-4d69-98f9-42bdd3031ab9",
-      "target": "a88116fc-3e2e-4a0c-ade8-b96a08068f8a"
+      "id": "e2",
+      "source": "00000000-0000-0000-0000-000000000002",
+      "target": "00000000-0000-0000-0000-000000000003"
     },
     {
-      "id": "dd53f77a-21ec-49c7-b5d1-558e1e6c0b68",
-      "source": "ee522498-abf0-4baf-af98-5d911e2e9eb6",
-      "target": "a2b62e56-3ab3-450f-8039-105892932b70"
-    },
-    {
-      "id": "9b92890f-bb9a-4b60-b49f-18ebc663de22",
-      "source": "a2b62e56-3ab3-450f-8039-105892932b70",
-      "target": "a88116fc-3e2e-4a0c-ade8-b96a08068f8a"
-    },
-    {
-      "id": "cec5ac11-c9d8-4a5a-9685-15e7b7eff88a",
-      "source": "ee522498-abf0-4baf-af98-5d911e2e9eb6",
-      "target": "be5b4368-9723-4254-bdf3-2ec038a486bf"
-    },
-    {
-      "id": "516c661f-e788-47b0-8351-4a9c82d8756e",
-      "source": "be5b4368-9723-4254-bdf3-2ec038a486bf",
-      "target": "a88116fc-3e2e-4a0c-ade8-b96a08068f8a"
-    },
-    {
-      "id": "fc0d788f-6a69-4829-bcfe-d460e032b7a3",
-      "source": "ee522498-abf0-4baf-af98-5d911e2e9eb6",
-      "target": "d814bb11-42a8-4f96-9b04-e3e59791334f"
-    },
-    {
-      "id": "f770455c-fe4a-4ff5-9dfb-90e04769aea5",
-      "source": "d814bb11-42a8-4f96-9b04-e3e59791334f",
-      "target": "a88116fc-3e2e-4a0c-ade8-b96a08068f8a"
-    },
-    {
-      "id": "bd434b8f-4669-4c57-9620-b6e9eef3dbeb",
-      "source": "ee522498-abf0-4baf-af98-5d911e2e9eb6",
-      "target": "f646b383-78f8-4911-8d03-af40daca93ab"
-    },
-    {
-      "id": "dd100573-8fcc-40c5-b559-4e26377d4323",
-      "source": "f646b383-78f8-4911-8d03-af40daca93ab",
-      "target": "a88116fc-3e2e-4a0c-ade8-b96a08068f8a"
-    },
-    {
-      "id": "1adca02a-b1bd-4cd5-a3fb-84ba6d87c870",
-      "source": "a88116fc-3e2e-4a0c-ade8-b96a08068f8a",
-      "target": "b120612e-7ce2-42a2-b0cf-03c3d065ace9"
+      "id": "e3",
+      "source": "00000000-0000-0000-0000-000000000003",
+      "target": "00000000-0000-0000-0000-000000000004"
     }
   ],
-  "created_at": "2026-02-21T07:53:30.820Z",
-  "updated_at": "2026-02-24T23:31:59.679293Z"
+  "created_at": "2026-01-01T00:00:00.000Z",
+  "updated_at": "2026-01-01T00:00:00.000Z"
 }

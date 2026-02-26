@@ -97,6 +97,7 @@ that get filled with live data:
 | `web-scraper` | Structured items via CSS selectors | `url`, `items_selector`, `title_selector`, `url_selector` |
 | `github-merged-prs` | Recently merged PRs via GitHub Search API | `repos`, `since_days` |
 | `market-data` | BTC/ETH prices, Fear & Greed, S&P 500 | (no config needed) |
+| `google-sheets` | Rows from a Google Spreadsheet | `spreadsheet_id`, `range`, `service_account_key_env`, `limit` |
 
 ## Sink Types Reference
 

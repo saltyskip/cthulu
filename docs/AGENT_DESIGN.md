@@ -9,6 +9,8 @@ runtime behavior in the codebase.
 ---
 
 > **Note on code references**: This document references specific components in the Cthulu codebase. For maintainability, it uses structural location markers (like `// ── 1. SOURCES`) rather than hardcoded line numbers where possible, as line numbers frequently go stale.
+>
+> **Note on flow_routes**: The original `src/server/flow_routes.rs` has been refactored into a module directory at `src/server/flow_routes/` (sub-modules: `mod.rs`, `crud.rs`, `sandbox.rs`, `interact.rs`, `node_chat.rs`). All references in this document use the module path.
 
 ## The 5 Pillars
 
@@ -128,11 +130,16 @@ Failure mode: 15-min timeout -> fail run; process error -> fail run
 **VM Sandbox** (interactive, not in automated pipeline):
 ```
 Precondition: VM Manager reachable, flow_id known, user clicked vm-sandbox node
-Action:       POST /api/sandbox/vm/{flow_id} → VM Manager creates/returns Firecracker microVM
+Action:       POST /api/sandbox/vm/{flow_id} → get_or_create_vm_with_persisted()
+              → checks in-memory node_vms map first
+              → falls back to vm_mappings (sessions.yaml) on miss
+              → calls restore_node_vm(vm_id) to verify VM still alive on VM Manager
+              → only provisions a new VM if restore returns 404
 Postcondition: Web terminal URL available, iframe renders in BottomPanel
 Failure mode: VM Manager unreachable → show error in VmTerminal component
 Note:         This is interactive-only. Automated flow runs still use ClaudeCodeExecutor.
-              The VM is a persistent workspace (one per flow, survives across clicks).
+              The VM is persistent: one per flow, survives server restarts via sessions.yaml
+              fallback, destroyed only on explicit DELETE /api/sandbox/vm/{flow_id}.
 ```
 
 **Sinks** (near `// ── 5. SINKS`):
@@ -357,10 +364,10 @@ failure information.
 
 | Concept | Implementation | File(s) |
 |---------|---------------|---------|
-| Context layers | `.skills/` generation | [`src/server/flow_routes/node_chat.rs`](../src/server/flow_routes/node_chat.rs) (around `build_workflow_context_md`) |
+| Context layers | `.skills/` generation | [`src/server/flow_routes/node_chat.rs`](../src/server/flow_routes/node_chat.rs) (`build_workflow_context_md`) |
 | Instructional context | Agent rules | [`AGENT.md`](../AGENT.md) |
-| Knowledge context | Pipeline position | [`node_chat.rs`](../src/server/flow_routes/node_chat.rs) (`build_workflow_context_md()`) |
-| Tool context | Template variables | [`src/flows/runner.rs`](../src/flows/runner.rs) (around `// ── 3. PROMPT RENDERING`) |
+| Knowledge context | Pipeline position | [`src/server/flow_routes/node_chat.rs`](../src/server/flow_routes/node_chat.rs) (`build_workflow_context_md()`) |
+| Tool context | Template variables | [`src/flows/runner.rs`](../src/flows/runner.rs) (`// ── 3. PROMPT RENDERING`) |
 | Pre/postconditions | Stage validation | [`src/flows/runner.rs`](../src/flows/runner.rs) (`execute_inner()`) |
 | HTN decomposition | DAG structure | Flow JSON (nodes + edges) |
 | OODA/ReAct loop | 5-stage pipeline | [`src/flows/runner.rs`](../src/flows/runner.rs) (`execute_inner()`) |
@@ -369,8 +376,11 @@ failure information.
 | Scope isolation | Per-node context | `.skills/` per executor, `live_processes` pool |
 | Definition of Done | Build verification | [`CLAUDE.md`](../CLAUDE.md) rules, prompt template verification steps |
 | Interactive VM sandbox | VM Manager proxy | [`src/sandbox/backends/vm_manager.rs`](../src/sandbox/backends/vm_manager.rs), [`VmTerminal.tsx`](../cthulu-studio/src/components/VmTerminal.tsx) |
+| VM session persistence | sessions.yaml fallback | [`src/sandbox/backends/vm_manager.rs`](../src/sandbox/backends/vm_manager.rs) (`get_or_create_vm_with_persisted`, `restore_node_vm`) |
 | Sandbox provider factory | Env-var dispatch | [`src/sandbox/mod.rs`](../src/sandbox/mod.rs) (`build_provider()`) |
 | Browser terminal | ttyd iframe embed | [`VmTerminal.tsx`](../cthulu-studio/src/components/VmTerminal.tsx), [`BottomPanel.tsx`](../cthulu-studio/src/components/BottomPanel.tsx) |
+| OAuth token refresh | Full credentials injection | [`src/server/auth_routes.rs`](../src/server/auth_routes.rs) (`refresh_token`, `read_full_credentials`) |
+| Template gallery | YAML templates on disk | [`src/templates.rs`](../src/templates.rs), [`src/server/template_routes.rs`](../src/server/template_routes.rs), [`TemplateGallery.tsx`](../cthulu-studio/src/components/TemplateGallery.tsx) |
 
 ---
 

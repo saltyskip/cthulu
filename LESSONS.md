@@ -141,3 +141,43 @@ Both are set from the same provider instance in `main.rs`. The `Option` is `None
 **Problem**: In `ProcessExecStream`, the exit monitoring task could detect process exit and send the `Exit` event while stdout/stderr reading tasks still had buffered data. This caused truncated output.
 
 **Fix**: The exit task now `await`s the stdout and stderr `JoinHandle`s before sending the `Exit` event. This guarantees all output is drained before the stream signals completion.
+
+## 18. VmManagerProvider node_vms is in-memory only — use sessions.yaml as fallback
+
+**Problem**: `VmManagerProvider.node_vms` is a `HashMap` in memory keyed by `flow_id::node_id`. After a server restart it's empty. Clicking a vm-sandbox node would spin up a brand-new VM even though the user's previous VM was still alive on the VM Manager host, wasting resources and losing the persistent workspace.
+
+**Fix**: `get_node_vm()` now falls back to `vm_mappings` (persisted in `sessions.yaml`) when the in-memory map misses. It then calls `restore_node_vm(vm_id)` to verify the VM is still alive on the VM Manager, re-seeds the in-memory map, and returns the existing VM. Only if the VM is gone (404 from VM Manager) does it provision a new one.
+
+**File**: `src/sandbox/backends/vm_manager.rs` (`get_node_vm`, `restore_node_vm`, `get_or_create_vm_with_persisted`)
+
+## 19. inject_oauth_token wrote a minimal credentials.json — Claude CLI forced re-login
+
+**Problem**: `inject_oauth_token` was writing `~/.claude/.credentials.json` with only `accessToken` and `tokenType`. Claude CLI treated this as an incomplete/invalid session and displayed the login prompt every time a new VM connected, blocking automated use.
+
+**Fix**: `inject_oauth_token` now writes the complete credentials blob: `accessToken`, `refreshToken`, `expiresAt`, `scopes`, `subscriptionType`, `rateLimitTier`. The server reads all of these from the Keychain via `read_full_credentials()` and passes them through `POST /api/auth/refresh-token` → `inject_oauth_token`. Claude CLI now recognizes the session as fully authenticated.
+
+**File**: `src/sandbox/backends/vm_manager.rs` (`inject_oauth_token`), `src/server/auth_routes.rs` (`read_full_credentials`)
+
+## 20. .bashrc CLAUDE_API_KEY sed was skip-if-present — stale token never updated
+
+**Problem**: `inject_oauth_token` had logic to skip writing `CLAUDE_API_KEY` to `.bashrc` if the line already existed (`if ! grep -q CLAUDE_API_KEY ~/.bashrc`). On token refresh, the old (expired) value was never replaced, so the VM's shell environment kept the stale token.
+
+**Fix**: Changed to always replace: use `sed -i` to delete any existing `CLAUDE_API_KEY` export line, then append the new value. This is idempotent and always correct.
+
+**File**: `src/sandbox/backends/vm_manager.rs` (`inject_oauth_token`)
+
+## 21. isAuthError false positives on bare "401" substring
+
+**Problem**: `isAuthError()` in `NodeChat.tsx` matched any message containing the string `"401"` — including PR numbers, issue IDs, port numbers, and hash strings. This caused false positives that killed the Claude session mid-task for unrelated reasons.
+
+**Fix**: Tightened the check to only match explicit auth error patterns: HTTP 401 status messages (`"401 Unauthorized"`, `"HTTP 401"`), Claude auth error strings (`"Authentication required"`, `"Invalid API key"`, `"not authenticated"`), and the Claude CLI login prompt (`"claude login"`). Bare numeric matches were removed.
+
+**File**: `cthulu-studio/src/components/NodeChat.tsx` (`isAuthError`)
+
+## 22. flow_routes.rs was split into a module directory
+
+**Problem**: `src/server/flow_routes.rs` grew too large and was refactored into `src/server/flow_routes/` with sub-modules (`mod.rs`, `crud.rs`, `sandbox.rs`, `interact.rs`, `node_chat.rs`). Some documentation and skill files still referenced the old single-file path.
+
+**Impact**: Any grep for `flow_routes.rs` to find route registration or handler code returns no results. Use `src/server/flow_routes/` instead.
+
+**Files affected**: `docs/AGENT_DESIGN.md` code references, `CLAUDE.md` architecture map.

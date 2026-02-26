@@ -1,49 +1,44 @@
 # Workflow Context
 
-## Flow: orangerock-market-brief
+<!-- This file is auto-generated at runtime by the Cthulu backend when a user
+     opens an executor node for the first time. The content below is replaced
+     with live pipeline data for the specific flow and executor node.
 
-Crypto market brief from top RSS sources — every 4 hours
+     Team members: use this file as a reference for what gets injected.
+     Do not hardcode flow-specific content here. -->
+
+## Flow: [flow-name]
+
+[Flow description]
 
 ## Your Position in the Pipeline
 
 ```
-  Trigger: Every 4h (cron) -- schedule: 0 */4 * * *
-    -> Source: RSS: thedefiant.io (rss) -- url: https://thedefiant.io/feed, limit: 10
-    -> Source: RSS: blockworks.co (rss) -- url: https://blockworks.co/feed, limit: 10
-    -> Source: RSS: www.dlnews.com (rss) -- url: https://www.dlnews.com/feed/, limit: 10
-    -> Source: RSS: www.theblock.co (rss) -- url: https://www.theblock.co/rss, limit: 10
-    -> Source: RSS: unchainedcrypto.com (rss) -- url: https://unchainedcrypto.com/feed/, limit: 10
-    -> **YOU: Claude: prompts/orangerock_brief.md (claude-code)**
-    -> Sink: Notion: 30aac5ee... (notion) -- database: 30aac5ee-0000-0000-0000-000000000000
+  Trigger: [trigger kind] -- [schedule or event]
+    -> Source: [source label] ([source kind]) -- [key config]
+    -> Source: [source label] ([source kind]) -- [key config]
+    -> **YOU: [executor label] ([executor kind])**
+    -> Sink: [sink label] ([sink kind]) -- [key config]
 ```
 
 ## Upstream Nodes (feeding data into you)
 
 | Node | Kind | Config |
 |------|------|--------|
-| RSS: thedefiant.io | rss | url: https://thedefiant.io/feed, limit: 10 |
-| RSS: blockworks.co | rss | url: https://blockworks.co/feed, limit: 10 |
-| RSS: www.dlnews.com | rss | url: https://www.dlnews.com/feed/, limit: 10 |
-| RSS: www.theblock.co | rss | url: https://www.theblock.co/rss, limit: 10 |
-| RSS: unchainedcrypto.com | rss | url: https://unchainedcrypto.com/feed/, limit: 10 |
-| Every 4h | cron | schedule: 0 */4 * * * |
-| Every 4h | cron | schedule: 0 */4 * * * |
-| Every 4h | cron | schedule: 0 */4 * * * |
-| Every 4h | cron | schedule: 0 */4 * * * |
-| Every 4h | cron | schedule: 0 */4 * * * |
+| [source label] | [kind] | [key: value, key: value] |
 
 ## Downstream Nodes (receiving your output)
 
 | Node | Kind | Config |
 |------|------|--------|
-| Notion: 30aac5ee... | notion | database: 30aac5ee-0000-0000-0000-000000000000 |
+| [sink label] | [kind] | [key: value] |
 
 ## All Executors in This Flow
 
-- **E01: Claude: prompts/orangerock_brief.md (this node)** -- prompt: prompts/orangerock_brief.md
+- **E01: [executor label] (this node)** -- prompt: [prompt path or inline]
 
 ## Your Configuration
 
-- **Label**: Claude: prompts/orangerock_brief.md
-- **Prompt path**: prompts/orangerock_brief.md
-- **Node ID**: a88116fc-3e2e-4a0c-ade8-b96a08068f8a
+- **Label**: [executor label]
+- **Prompt path**: [prompt file path, or "inline"]
+- **Node ID**: [uuid]
