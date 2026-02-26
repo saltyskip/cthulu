@@ -3,6 +3,10 @@ name = "cthulu"
 version = "0.1.0"
 edition = "2024"
 
+[[bin]]
+name = "cthulu"
+path = "cthulu-backend/main.rs"
+
 [profile.release]
 opt-level = 3
 debug-assertions = false

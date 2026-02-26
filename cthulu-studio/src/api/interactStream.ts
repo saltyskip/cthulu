@@ -7,111 +7,31 @@ export interface InteractSSEEvent {
 }
 
 /**
- * Start an interactive Claude session for a flow.
- * Uses fetch() + ReadableStream because EventSource only supports GET.
+ * Start an agent chat session via SSE.
+ * Hits POST /api/agents/{agentId}/chat.
  * Returns an AbortController to cancel the stream.
  */
-export function startInteract(
-  flowId: string,
+export function startAgentChat(
+  agentId: string,
   prompt: string,
   sessionId: string | null,
   onEvent: (event: InteractSSEEvent) => void,
   onDone: () => void,
-  onError: (err: string) => void
+  onError: (err: string) => void,
+  flowContext?: { flow_id: string; node_id: string }
 ): AbortController {
   const controller = new AbortController();
-  const url = `${getServerUrl()}/api/flows/${flowId}/interact`;
+  const url = `${getServerUrl()}/api/agents/${agentId}/chat`;
 
-  log("http", `POST /flows/${flowId}/interact (stream, session=${sessionId ?? "active"})`);
+  log("http", `POST /agents/${agentId}/chat (stream, session=${sessionId ?? "active"})`);
 
-  const body: Record<string, string> = { prompt };
+  const body: Record<string, string | undefined> = { prompt };
   if (sessionId) {
     body.session_id = sessionId;
   }
-
-  fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-    signal: controller.signal,
-  })
-    .then(async (response) => {
-      if (!response.ok) {
-        const text = await response.text();
-        onError(`HTTP ${response.status}: ${text}`);
-        return;
-      }
-
-      const reader = response.body?.getReader();
-      if (!reader) {
-        onError("No response body");
-        return;
-      }
-
-      const decoder = new TextDecoder();
-      let buffer = "";
-      let currentEventType = "message";
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-
-        // Parse SSE lines
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || ""; // Keep incomplete line in buffer
-
-        for (const line of lines) {
-          if (line.startsWith("event: ")) {
-            currentEventType = line.slice(7).trim();
-          } else if (line.startsWith("data: ")) {
-            const data = line.slice(6);
-            onEvent({ type: currentEventType, data });
-            currentEventType = "message"; // Reset for next event
-          } else if (line.startsWith(": ")) {
-            // SSE comment (keep-alive), ignore
-          } else if (line === "") {
-            // Empty line = end of event block, already handled
-          }
-        }
-      }
-
-      onDone();
-    })
-    .catch((err) => {
-      if (err.name === "AbortError") {
-        log("info", "Interact stream aborted");
-        onDone();
-      } else {
-        onError(err.message || "Stream error");
-      }
-    });
-
-  return controller;
-}
-
-/**
- * Start an interactive Claude session for a specific node (node-level chat).
- * Same SSE protocol as startInteract, but hits the node-scoped endpoint.
- */
-export function startNodeInteract(
-  flowId: string,
-  nodeId: string,
-  prompt: string,
-  sessionId: string | null,
-  onEvent: (event: InteractSSEEvent) => void,
-  onDone: () => void,
-  onError: (err: string) => void
-): AbortController {
-  const controller = new AbortController();
-  const url = `${getServerUrl()}/api/flows/${flowId}/nodes/${nodeId}/interact`;
-
-  log("http", `POST /flows/${flowId}/nodes/${nodeId}/interact (stream, session=${sessionId ?? "active"})`);
-
-  const body: Record<string, string> = { prompt };
-  if (sessionId) {
-    body.session_id = sessionId;
+  if (flowContext) {
+    body.flow_id = flowContext.flow_id;
+    body.node_id = flowContext.node_id;
   }
 
   fetch(url, {
@@ -163,7 +83,7 @@ export function startNodeInteract(
     })
     .catch((err) => {
       if (err.name === "AbortError") {
-        log("info", "Node interact stream aborted");
+        log("info", "Agent chat stream aborted");
         onDone();
       } else {
         onError(err.message || "Stream error");

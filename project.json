@@ -1,7 +1,7 @@
 {
   "name": "cthulu",
   "root": ".",
-  "sourceRoot": "src",
+  "sourceRoot": "cthulu-backend",
   "projectType": "application",
   "tags": ["scope:backend", "lang:rust"],
   "targets": {

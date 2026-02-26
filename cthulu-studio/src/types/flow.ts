@@ -119,6 +119,31 @@ export interface SavedPrompt {
 }
 
 // ---------------------------------------------------------------------------
+// Agents
+// ---------------------------------------------------------------------------
+
+export interface Agent {
+  id: string;
+  name: string;
+  description: string;
+  prompt: string;
+  permissions: string[];
+  append_system_prompt: string | null;
+  working_dir: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AgentSummary {
+  id: string;
+  name: string;
+  description: string;
+  permissions: string[];
+  created_at: string;
+  updated_at: string;
+}
+
+// ---------------------------------------------------------------------------
 // Template Gallery
 // ---------------------------------------------------------------------------
 

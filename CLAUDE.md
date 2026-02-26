@@ -31,7 +31,7 @@ This guide is the entry point for AI assistants working in this monorepo. It pro
 5. **`tokio::sync::Mutex`** for async contexts: Use `tokio::sync::Mutex` (not `std::sync::Mutex`) when the lock is held across `.await` points.
 6. **Never derive Clone on process handles**: `ChildStdin`, `Child`, `mpsc::UnboundedReceiver` are not Clone. Wrap in `Arc<Mutex<...>>` for shared access. `AppState` must always derive Clone (all its fields are `Arc<...>` or inherently Clone).
 7. **SSE streams use `async_stream::stream!`**: All streaming logic lives inside the block. Nothing after the closing `};` can reference variables from inside. Delete orphaned code between `};` and the return statement.
-8. **Session keys**: Sessions are keyed by `flow_id::node_id` for node-level, `flow_id` for flow-level.
+8. **Session keys**: Sessions are keyed by `agent::{agent_id}`. Each agent owns its chat sessions independently of flows.
 9. **Atomic YAML persistence**: Always write sessions via temp file + rename (`path.with_extension("yaml.tmp")` then `std::fs::rename`).
 10. **Claude CLI stream-json**: Correct message format is `{"type":"user","message":{"role":"user","content":"..."}}`. Must use `--verbose` with `--output-format stream-json`.
 11. **Manual Run always works**: The run button must work even when a flow is disabled (manual override policy).
@@ -85,9 +85,10 @@ Trigger (cron / github-pr / manual / webhook)
 
 ```
 cthulu/
-├── src/                            # Rust backend
+├── cthulu-backend/                 # Rust backend
 │   ├── main.rs                     # CLI entry point (clap)
 │   ├── config.rs                   # Env-based configuration
+│   ├── agents/                     # Agent domain (Agent struct, AgentFileStore)
 │   ├── flows/
 │   │   ├── runner.rs               # Flow execution engine
 │   │   ├── scheduler.rs            # Cron scheduling (croner)
@@ -95,12 +96,32 @@ cthulu/
 │   │   ├── history.rs              # Run history tracking
 │   │   ├── events.rs               # Flow event types
 │   │   └── store.rs                # Store trait
-│   ├── server/
-│   │   ├── mod.rs                  # AppState, LiveClaudeProcess, sessions
-│   │   ├── flow_routes.rs          # Flow CRUD, interact, scheduler endpoints
-│   │   ├── prompt_routes.rs        # Prompt management endpoints
-│   │   ├── routes.rs               # Route registration
-│   │   └── middleware.rs           # HTTP middleware
+│   ├── api/                        # HTTP API layer (vertical slices)
+│   │   ├── mod.rs                  # AppState, LiveClaudeProcess, session types + persistence
+│   │   ├── routes.rs               # Router composition (merges all slice routers)
+│   │   ├── middleware.rs           # HTTP middleware
+│   │   ├── flows/                  # Flow CRUD, trigger, runs, node-types, prompt-files
+│   │   │   ├── mod.rs              # pub fn router()
+│   │   │   └── routes.rs           # Handler functions
+│   │   ├── agents/                 # Agent CRUD + chat (SSE) + sessions
+│   │   │   ├── mod.rs              # pub fn router()
+│   │   │   ├── routes.rs           # Agent CRUD handlers
+│   │   │   └── chat.rs             # Agent chat SSE, session management, .skills/ generation
+│   │   ├── prompts/                # Prompt CRUD + summarize
+│   │   │   ├── mod.rs
+│   │   │   └── routes.rs
+│   │   ├── templates/              # Template gallery, import from YAML/GitHub
+│   │   │   ├── mod.rs
+│   │   │   └── routes.rs
+│   │   ├── scheduler/              # Schedule info, scheduler status, cron validation
+│   │   │   ├── mod.rs
+│   │   │   └── routes.rs
+│   │   ├── sandbox/                # Sandbox info, VM management
+│   │   │   ├── mod.rs
+│   │   │   └── routes.rs
+│   │   └── auth/                   # Token status, refresh
+│   │       ├── mod.rs
+│   │       └── routes.rs
 │   ├── tasks/
 │   │   ├── pipeline.rs             # Pipeline orchestration
 │   │   ├── context.rs              # Execution context
@@ -116,7 +137,7 @@ cthulu/
 │   │   ├── components/
 │   │   │   ├── Canvas.tsx          # React Flow canvas
 │   │   │   ├── BottomPanel.tsx     # VS Code-like tabbed panel
-│   │   │   ├── NodeChat.tsx        # Per-node agent chat
+│   │   │   ├── NodeTerminal.tsx    # Agent chat terminal (xterm.js)
 │   │   │   ├── PropertyPanel.tsx   # Node property editor
 │   │   │   ├── FlowList.tsx        # Flow list sidebar
 │   │   │   ├── TopBar.tsx          # Top navigation
@@ -155,8 +176,8 @@ Flows (JSON on disk, ~/.cthulu/flows/)
       -> Sinks (Slack webhook/bot, Notion API)
 
 Sessions (sessions.yaml, local state)
-  -> LiveClaudeProcess pool (in-memory, keyed by flow_id::node_id)
-    -> SSE bridge to browser
+  -> LiveClaudeProcess pool (in-memory, keyed by agent::{agent_id})
+    -> SSE bridge to browser via /api/agents/{id}/chat
 ```
 
 ---
@@ -179,32 +200,33 @@ Sessions (sessions.yaml, local state)
 
 ### Adding a New Source Type
 
-1. Create file in `src/tasks/sources/` (e.g., `my_source.rs`)
+1. Create file in `cthulu-backend/tasks/sources/` (e.g., `my_source.rs`)
 2. Implement the source function that returns `Vec<String>` content
-3. Register in `src/tasks/sources/mod.rs`
-4. Add to pipeline dispatch in `src/tasks/pipeline.rs`
+3. Register in `cthulu-backend/tasks/sources/mod.rs`
+4. Add to pipeline dispatch in `cthulu-backend/tasks/pipeline.rs`
 5. Add node config UI in `cthulu-studio/src/components/PropertyPanel.tsx`
 6. Add source type to node validation in `cthulu-studio/src/utils/validateNode.ts`
 7. **Verify**: `cargo check` passes, `npx nx build cthulu-studio` passes
 
 ### Adding a New Sink Type
 
-1. Create file in `src/tasks/sinks/` (e.g., `my_sink.rs`)
+1. Create file in `cthulu-backend/tasks/sinks/` (e.g., `my_sink.rs`)
 2. Implement the sink function that receives executor output
-3. Register in `src/tasks/sinks/mod.rs`
-4. Add to pipeline dispatch in `src/tasks/pipeline.rs`
+3. Register in `cthulu-backend/tasks/sinks/mod.rs`
+4. Add to pipeline dispatch in `cthulu-backend/tasks/pipeline.rs`
 5. Add node config UI in PropertyPanel
 6. Add env vars to `.env.example` if needed
 7. **Verify**: `cargo check` passes
 
 ### Adding an API Endpoint
 
-1. Add handler function in `src/server/flow_routes.rs`
-2. Register route in `flow_router()` function
-3. Use `{param}` for path parameters
-4. Extract `State(state): State<AppState>` as first parameter
-5. Add corresponding client function in `cthulu-studio/src/api/client.ts`
-6. **Verify**: `cargo check` passes, restart server, test with `curl`
+1. Find the appropriate vertical slice in `cthulu-backend/api/` (e.g., `flows/`, `agents/`, `prompts/`)
+2. Add handler function in that slice's `routes.rs`
+3. Register the route in that slice's `mod.rs` router function
+4. Use `{param}` for path parameters
+5. Extract `State(state): State<AppState>` as first parameter
+6. Add corresponding client function in `cthulu-studio/src/api/client.ts`
+7. **Verify**: `cargo check` passes, restart server, test with `curl`
 
 ### Adding a Studio Component
 
@@ -222,7 +244,7 @@ Sessions (sessions.yaml, local state)
 3. Add to `addNodeAtScreen()` with appropriate defaults
 4. Add config fields in `PropertyPanel.tsx`
 5. Add validation rules in `validateNode.ts`
-6. Add backend handling in `src/tasks/pipeline.rs`
+6. Add backend handling in `cthulu-backend/tasks/pipeline.rs`
 7. **Verify**: both `cargo check` and Studio build pass
 
 ---
@@ -243,3 +265,17 @@ When a user sends their first message to an executor node, the backend auto-gene
 - `.skills/workflow.json` -- Full flow definition
 
 Agents are scoped to `.skills/` and their working directory only (NOPE.md-style boundaries).
+
+---
+
+## Backend API Conventions
+
+The API layer lives in `cthulu-backend/api/` using a **vertical slice architecture**:
+
+- Each domain (flows, agents, prompts, templates, scheduler, sandbox, auth) has its own directory
+- Each slice has: `mod.rs` (router function), `routes.rs` (handler functions), and optionally `chat.rs` for streaming
+- Each `mod.rs` exports `pub fn router() -> Router<AppState>` which is merged in `api/routes.rs`
+- Shared types (AppState, InteractSession, FlowSessions, LiveClaudeProcess) live in `api/mod.rs`
+- Domain types (Flow, Node, Agent) live in their domain modules (`flows/`, `agents/`), not in API models
+- **Slices should not import from other slices** — cross-slice data needs go through AppState
+- Sessions are **agent-scoped**, keyed by `agent::{agent_id}` — no flow-level chat exists

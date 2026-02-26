@@ -6,13 +6,14 @@ import type { Flow, FlowNode, FlowEdge, FlowSummary, NodeTypeSchema, RunEvent } 
 import { validateFlow } from "./utils/validateNode";
 import TopBar from "./components/TopBar";
 import FlowList from "./components/FlowList";
+import AgentList from "./components/AgentList";
 
 import Sidebar from "./components/Sidebar";
 import Canvas, { type CanvasHandle } from "./components/Canvas";
 import PropertyPanel from "./components/PropertyPanel";
+import AgentEditor from "./components/AgentEditor";
 import RunHistory from "./components/RunHistory";
 import BottomPanel, { type BottomTab } from "./components/BottomPanel";
-import type { NodeChatState } from "./components/NodeChat";
 import ErrorBoundary from "./components/ErrorBoundary";
 
 export default function App() {
@@ -24,13 +25,14 @@ export default function App() {
   const [promptFiles, setPromptFiles] = useState<api.PromptFile[]>([]);
 
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
+  const [agentListKey, setAgentListKey] = useState(0);
   const [showSettings, setShowSettings] = useState(false);
   const [activeBottomTab, setActiveBottomTab] = useState<BottomTab | null>(null);
   const [bottomPanelHeight, setBottomPanelHeight] = useState(280);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleteSaving, setDeleteSaving] = useState(false);
   const [errorCount, setErrorCount] = useState(0);
-  const nodeChatStatesRef = useRef<Map<string, NodeChatState>>(new Map());
   const [serverUrl, setServerUrlState] = useState(api.getServerUrl());
   const [runEvents, setRunEvents] = useState<RunEvent[]>([]);
   const [nodeRunStatus, setNodeRunStatus] = useState<Record<string, "running" | "completed" | "failed">>({});
@@ -250,6 +252,7 @@ export default function App() {
 
   const handleSelectionChange = useCallback((nodeId: string | null) => {
     setSelectedNodeId(nodeId);
+    setSelectedAgentId(null);
     // If an executor node was clicked, open its bottom tab
     if (nodeId) {
       const snap = latestSnapshotRef.current;
@@ -309,11 +312,6 @@ export default function App() {
     } catch { /* logged */ }
   };
 
-  const handleNodeChatStateChange = useCallback((key: string, state: NodeChatState) => {
-    nodeChatStatesRef.current.set(key, state);
-  }, []);
-
-
   const handleDeleteFlow = async () => {
     if (!activeFlowId) return;
     setShowDeleteConfirm(true);
@@ -323,12 +321,6 @@ export default function App() {
     if (!activeFlowId) return;
     try {
       await api.deleteFlow(activeFlowId);
-      // Clean up node chat states for this flow
-      for (const key of nodeChatStatesRef.current.keys()) {
-        if (key.startsWith(activeFlowId + "::")) {
-          nodeChatStatesRef.current.delete(key);
-        }
-      }
       setActiveBottomTab(null);
       setShowDeleteConfirm(false);
       setActiveFlowId(null);
@@ -342,28 +334,8 @@ export default function App() {
   const handleSaveAndDelete = async () => {
     if (!activeFlowId || !activeFlowMeta) return;
     setDeleteSaving(true);
-    try {
-      // Gather transcript from all node chat states for this flow
-      const allLines: { type: string; text: string }[] = [];
-      for (const [key, state] of nodeChatStatesRef.current.entries()) {
-        if (key.startsWith(activeFlowId + "::") && state.outputLines.length > 0) {
-          allLines.push(...state.outputLines);
-        }
-      }
-      if (allLines.length > 0) {
-        const transcript = allLines.map((l) => `[${l.type}] ${l.text}`).join("\n");
-        const result = await api.summarizeSession(transcript, activeFlowMeta.name, activeFlowMeta.description);
-        await api.savePrompt({
-          title: result.title,
-          summary: result.summary,
-          source_flow_name: activeFlowMeta.name,
-          tags: result.tags,
-        });
-        log("info", `Saved session summary as prompt: ${result.title}`);
-      }
-    } catch (err) {
-      log("error", `Failed to save session summary: ${(err as Error).message}`);
-    }
+    // Terminal transcripts are now managed by NodeTerminal component.
+    // Prompt saving from terminal sessions can be added as a future feature.
     setDeleteSaving(false);
     await doDeleteFlow();
   };
@@ -416,7 +388,19 @@ export default function App() {
             />
           </div>
 
-          {/* Palette — bottom half */}
+          {/* Agents */}
+          <div style={{ minHeight: 80, maxHeight: 200, display: "flex", flexDirection: "column", overflow: "hidden", borderTop: "1px solid var(--border)" }}>
+            <AgentList
+              key={agentListKey}
+              selectedAgentId={selectedAgentId}
+              onSelectAgent={(id) => {
+                setSelectedAgentId(id);
+                setSelectedNodeId(null);
+              }}
+            />
+          </div>
+
+          {/* Palette — bottom */}
           <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", overflow: "hidden", borderTop: "1px solid var(--border)" }}>
             <div style={{ flex: 1, overflowY: "auto", minHeight: 0 }}>
               <Sidebar
@@ -450,11 +434,23 @@ export default function App() {
         )}
 
         <div style={{ display: "flex", flexDirection: "column" }}>
-          <PropertyPanel
-            canvasRef={canvasRef}
-            selectedNodeId={selectedNodeId}
-            nodeValidationErrors={nodeValidationErrors}
-          />
+          {selectedAgentId ? (
+            <AgentEditor
+              key={selectedAgentId}
+              agentId={selectedAgentId}
+              onClose={() => setSelectedAgentId(null)}
+              onDeleted={() => {
+                setSelectedAgentId(null);
+                setAgentListKey((k) => k + 1);
+              }}
+            />
+          ) : (
+            <PropertyPanel
+              canvasRef={canvasRef}
+              selectedNodeId={selectedNodeId}
+              nodeValidationErrors={nodeValidationErrors}
+            />
+          )}
           <RunHistory flowId={activeFlowId} />
           {activeFlowId && (
             <div style={{ padding: 16 }}>
@@ -475,8 +471,6 @@ export default function App() {
         executorNodes={executorNodes}
         runEvents={runEvents}
         onRunEventsClear={() => setRunEvents([])}
-        nodeChatStates={nodeChatStatesRef.current}
-        onNodeChatStateChange={handleNodeChatStateChange}
         errorCount={errorCount}
       />
 
