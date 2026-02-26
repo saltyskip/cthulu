@@ -7,7 +7,6 @@ mod sandbox;
 mod api;
 mod tasks;
 mod templates;
-mod tui;
 
 use anyhow::{Context, Result};
 use axum::body::Body;
@@ -43,15 +42,6 @@ enum Cli {
         #[arg(long)]
         start_disabled: bool,
     },
-    /// Open interactive TUI session
-    Tui {
-        /// Jump directly to a flow by ID
-        #[arg(long)]
-        flow: Option<String>,
-        /// Server URL to connect to
-        #[arg(long, default_value = "http://localhost:8081")]
-        server: String,
-    },
 }
 
 #[tokio::main]
@@ -70,10 +60,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     match cli {
         Cli::Serve { start_disabled } => run_server(start_disabled).await,
-        Cli::Tui { flow, server } => {
-            tui::run(server, flow).await?;
-            Ok(())
-        }
     }
 }
 
