@@ -6,10 +6,10 @@ import type {
   FlowSummary,
   FlowRun,
   NodeTypeSchema,
-  SessionInfo,
   SavedPrompt,
-  FlowSessionsInfo,
   TemplateMetadata,
+  Agent,
+  AgentSummary,
 } from "../types/flow";
 
 const DEFAULT_BASE_URL = "http://localhost:8081";
@@ -149,8 +149,54 @@ export async function listPromptFiles(): Promise<PromptFile[]> {
   return data.files;
 }
 
-export async function getSession(flowId: string): Promise<SessionInfo> {
-  return apiFetch<SessionInfo>(`/flows/${flowId}/session`);
+// ---------------------------------------------------------------------------
+// Agent Chat / Sessions API
+// ---------------------------------------------------------------------------
+
+export interface AgentSessionsInfo {
+  agent_id: string;
+  active_session: string;
+  sessions: InteractSessionInfo[];
+}
+
+interface InteractSessionInfo {
+  session_id: string;
+  summary: string;
+  message_count: number;
+  total_cost: number;
+  created_at: string;
+  busy: boolean;
+}
+
+export async function listAgentSessions(
+  agentId: string
+): Promise<AgentSessionsInfo> {
+  return apiFetch<AgentSessionsInfo>(`/agents/${agentId}/sessions`);
+}
+
+export async function newAgentSession(
+  agentId: string
+): Promise<{ session_id: string; created_at: string; warning?: string }> {
+  return apiFetch(`/agents/${agentId}/sessions`, { method: "POST" });
+}
+
+export async function deleteAgentSession(
+  agentId: string,
+  sessionId: string
+): Promise<{ deleted: boolean; active_session: string }> {
+  return apiFetch(`/agents/${agentId}/sessions/${sessionId}`, {
+    method: "DELETE",
+  });
+}
+
+export async function stopAgentChat(
+  agentId: string,
+  sessionId?: string
+): Promise<void> {
+  await apiFetch(`/agents/${agentId}/chat/stop`, {
+    method: "POST",
+    body: sessionId ? JSON.stringify({ session_id: sessionId }) : undefined,
+  });
 }
 
 export async function listPrompts(): Promise<SavedPrompt[]> {
@@ -199,91 +245,6 @@ export async function summarizeSession(
   });
 }
 
-export async function listInteractSessions(
-  flowId: string
-): Promise<FlowSessionsInfo> {
-  return apiFetch<FlowSessionsInfo>(`/flows/${flowId}/interact/sessions`);
-}
-
-export async function newInteractSession(
-  flowId: string
-): Promise<{ session_id: string; created_at: string; warning?: string }> {
-  return apiFetch(`/flows/${flowId}/interact/new`, { method: "POST" });
-}
-
-export async function deleteInteractSession(
-  flowId: string,
-  sessionId: string
-): Promise<{ deleted: boolean; active_session: string }> {
-  return apiFetch(`/flows/${flowId}/interact/sessions/${sessionId}`, {
-    method: "DELETE",
-  });
-}
-
-export async function resetInteract(flowId: string): Promise<void> {
-  await apiFetch(`/flows/${flowId}/interact/reset`, { method: "POST" });
-}
-
-export async function stopInteract(
-  flowId: string,
-  sessionId?: string
-): Promise<void> {
-  await apiFetch(`/flows/${flowId}/interact/stop`, {
-    method: "POST",
-    body: sessionId ? JSON.stringify({ session_id: sessionId }) : undefined,
-  });
-}
-
-// ---------------------------------------------------------------------------
-// Node-level chat API
-// ---------------------------------------------------------------------------
-
-export async function getNodeSession(
-  flowId: string,
-  nodeId: string
-): Promise<SessionInfo> {
-  return apiFetch<SessionInfo>(`/flows/${flowId}/nodes/${nodeId}/session`);
-}
-
-export async function listNodeInteractSessions(
-  flowId: string,
-  nodeId: string
-): Promise<FlowSessionsInfo> {
-  return apiFetch<FlowSessionsInfo>(
-    `/flows/${flowId}/nodes/${nodeId}/interact/sessions`
-  );
-}
-
-export async function newNodeInteractSession(
-  flowId: string,
-  nodeId: string
-): Promise<{ session_id: string; created_at: string; warning?: string }> {
-  return apiFetch(`/flows/${flowId}/nodes/${nodeId}/interact/new`, {
-    method: "POST",
-  });
-}
-
-export async function deleteNodeInteractSession(
-  flowId: string,
-  nodeId: string,
-  sessionId: string
-): Promise<{ deleted: boolean; active_session: string }> {
-  return apiFetch(
-    `/flows/${flowId}/nodes/${nodeId}/interact/sessions/${sessionId}`,
-    { method: "DELETE" }
-  );
-}
-
-export async function stopNodeInteract(
-  flowId: string,
-  nodeId: string,
-  sessionId?: string
-): Promise<void> {
-  await apiFetch(`/flows/${flowId}/nodes/${nodeId}/interact/stop`, {
-    method: "POST",
-    body: sessionId ? JSON.stringify({ session_id: sessionId }) : undefined,
-  });
-}
 
 // ---------------------------------------------------------------------------
 // Scheduler / Cron API
@@ -456,6 +417,54 @@ export async function importFromGithub(
     method: "POST",
     body: JSON.stringify({ repo_url: repoUrl, path, branch }),
   });
+}
+
+// ---------------------------------------------------------------------------
+// Agent CRUD
+// ---------------------------------------------------------------------------
+
+export async function listAgents(): Promise<AgentSummary[]> {
+  const data = await apiFetch<{ agents: AgentSummary[] }>("/agents");
+  return data.agents;
+}
+
+export async function getAgent(id: string): Promise<Agent> {
+  return apiFetch<Agent>(`/agents/${id}`);
+}
+
+export async function createAgent(data: {
+  name: string;
+  description?: string;
+  prompt?: string;
+  permissions?: string[];
+  append_system_prompt?: string | null;
+  working_dir?: string | null;
+}): Promise<{ id: string }> {
+  return apiFetch<{ id: string }>("/agents", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function updateAgent(
+  id: string,
+  updates: {
+    name?: string;
+    description?: string;
+    prompt?: string;
+    permissions?: string[];
+    append_system_prompt?: string | null;
+    working_dir?: string | null;
+  }
+): Promise<Agent> {
+  return apiFetch<Agent>(`/agents/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(updates),
+  });
+}
+
+export async function deleteAgent(id: string): Promise<void> {
+  await apiFetch(`/agents/${id}`, { method: "DELETE" });
 }
 
 // ---------------------------------------------------------------------------

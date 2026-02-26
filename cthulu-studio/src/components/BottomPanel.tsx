@@ -2,13 +2,12 @@ import { useMemo, useCallback, useRef } from "react";
 import type { FlowNode, RunEvent } from "../types/flow";
 import Console from "./Console";
 import RunLog from "./RunLog";
-import NodeChat, { type NodeChatState } from "./NodeChat";
-import VmTerminal from "./VmTerminal";
+import NodeTerminal from "./NodeTerminal";
 
 export type BottomTab =
   | { kind: "console" }
   | { kind: "log" }
-  | { kind: "executor"; nodeId: string; label: string; nodeKind: string };
+  | { kind: "executor"; nodeId: string; label: string; nodeKind: string; agentId?: string };
 
 interface BottomPanelProps {
   activeTab: BottomTab | null;
@@ -20,9 +19,6 @@ interface BottomPanelProps {
   // RunLog
   runEvents: RunEvent[];
   onRunEventsClear: () => void;
-  // Node chat state
-  nodeChatStates: Map<string, NodeChatState>;
-  onNodeChatStateChange: (key: string, state: NodeChatState) => void;
   errorCount: number;
 }
 
@@ -48,8 +44,6 @@ export default function BottomPanel({
   executorNodes,
   runEvents,
   onRunEventsClear,
-  nodeChatStates,
-  onNodeChatStateChange,
   errorCount,
 }: BottomPanelProps) {
   const dragRef = useRef<{ startY: number; startH: number } | null>(null);
@@ -95,6 +89,7 @@ export default function BottomPanel({
         nodeId: node.id,
         label: node.label || `Executor ${i + 1}`,
         nodeKind: node.kind,
+        agentId: (node.config?.agent_id as string) || undefined,
       });
     });
     return list;
@@ -142,13 +137,20 @@ export default function BottomPanel({
         {activeTab.kind === "log" && (
           <RunLog events={runEvents} onClear={onRunEventsClear} onClose={handleClose} />
         )}
-        {activeTab.kind === "executor" && flowId && (
-          <VmTerminal
-            key={`vm:${flowId}::${activeTab.nodeId}`}
-            flowId={flowId}
+        {activeTab.kind === "executor" && activeTab.agentId && (
+          <NodeTerminal
+            key={`term:${activeTab.agentId}`}
+            agentId={activeTab.agentId}
+            flowId={flowId || undefined}
             nodeId={activeTab.nodeId}
             nodeLabel={activeTab.label}
+            runtime={activeTab.nodeKind === "vm-sandbox" ? "vm-sandbox" : activeTab.nodeKind === "sandbox" ? "sandbox" : "local"}
           />
+        )}
+        {activeTab.kind === "executor" && !activeTab.agentId && (
+          <div style={{ padding: 16, color: "var(--text-secondary)", fontSize: 13 }}>
+            No agent assigned to this executor. Select an agent in the property panel.
+          </div>
         )}
       </div>
     </div>

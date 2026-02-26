@@ -1,7 +1,8 @@
-import { useState, useEffect, useRef, type RefObject } from "react";
+import { useState, useEffect, useRef, useCallback, type RefObject } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import * as api from "../api/client";
 import type { FlowNode } from "../types/flow";
+import type { AgentSummary } from "../types/flow";
 import type { CanvasHandle } from "./Canvas";
 
 interface PropertyPanelProps {
@@ -194,17 +195,21 @@ function renderConfigFields(
     case "claude-code": {
       const promptErr = fieldHasError(errors, "prompt");
       return (
-        <ClaudeCodeFields
-          config={config}
-          onChange={onChange}
-          promptErr={promptErr}
-        />
+        <>
+          <AgentSelector config={config} onChange={onChange} />
+          <ClaudeCodeFields
+            config={config}
+            onChange={onChange}
+            promptErr={promptErr}
+          />
+        </>
       );
     }
     case "vm-sandbox": {
       const promptErr = fieldHasError(errors, "prompt");
       return (
         <>
+          <AgentSelector config={config} onChange={onChange} />
           <div className="form-group">
             <label>VM Tier</label>
             <select
@@ -566,6 +571,73 @@ function renderConfigFields(
         </div>
       );
   }
+}
+
+function AgentSelector({
+  config,
+  onChange,
+}: {
+  config: Record<string, unknown>;
+  onChange: (key: string, value: unknown) => void;
+}) {
+  const [agents, setAgents] = useState<AgentSummary[]>([]);
+
+  const refresh = useCallback(async () => {
+    try {
+      const list = await api.listAgents();
+      setAgents(list);
+    } catch {
+      // Server may not be ready
+    }
+  }, []);
+
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+
+  const selectedAgentId = (config.agent_id as string) || "";
+
+  return (
+    <>
+      <div className="form-group">
+        <label>Agent</label>
+        <select
+          value={selectedAgentId}
+          onChange={(e) => onChange("agent_id", e.target.value || null)}
+        >
+          <option value="">Inline config (no agent)</option>
+          {agents.map((a) => (
+            <option key={a.id} value={a.id}>
+              {a.name}
+            </option>
+          ))}
+        </select>
+        {selectedAgentId && (
+          <span
+            style={{
+              fontSize: 10,
+              color: "var(--text-secondary)",
+              marginTop: 2,
+              display: "block",
+            }}
+          >
+            Agent config overrides prompt/permissions below
+          </span>
+        )}
+      </div>
+      <div className="form-group">
+        <label>Runtime</label>
+        <select
+          value={(config.runtime as string) || "local"}
+          onChange={(e) => onChange("runtime", e.target.value)}
+        >
+          <option value="local">Local</option>
+          <option value="sandbox">Sandbox</option>
+          <option value="vm-sandbox">VM Sandbox</option>
+        </select>
+      </div>
+    </>
+  );
 }
 
 function ClaudeCodeFields({
