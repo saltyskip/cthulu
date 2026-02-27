@@ -7,7 +7,7 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 use tokio::time::timeout;
 
-use super::{ExecutionResult, Executor};
+use super::{ExecutionResult, Executor, LineSink};
 
 const PROCESS_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 
@@ -49,6 +49,15 @@ impl ClaudeCodeExecutor {
 #[async_trait]
 impl Executor for ClaudeCodeExecutor {
     async fn execute(&self, prompt: &str, working_dir: &Path) -> Result<ExecutionResult> {
+        self.execute_streaming(prompt, working_dir, None).await
+    }
+
+    async fn execute_streaming(
+        &self,
+        prompt: &str,
+        working_dir: &Path,
+        line_sink: Option<LineSink>,
+    ) -> Result<ExecutionResult> {
         let args = self.build_args();
 
         let mut child = Command::new("claude")
@@ -97,6 +106,12 @@ impl Executor for ClaudeCodeExecutor {
                 if line.is_empty() {
                     continue;
                 }
+
+                // Forward line to sink if provided
+                if let Some(ref sink) = line_sink {
+                    sink(line.clone());
+                }
+
                 if let Ok(event) = serde_json::from_str::<serde_json::Value>(&line) {
                     let event_type = event
                         .get("type")

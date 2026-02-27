@@ -301,6 +301,12 @@ async fn run_server(start_disabled: bool) -> Result<(), Box<dyn Error>> {
     // Create VM mappings (shared between scheduler, runner, and AppState)
     let vm_mappings = Arc::new(tokio::sync::RwLock::new(persisted_vms));
 
+    // Session streams for flow-run session broadcasting
+    let session_streams = Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new()));
+
+    // Interact sessions (shared between scheduler and AppState)
+    let interact_sessions = Arc::new(tokio::sync::RwLock::new(persisted_sessions));
+
     // Create and start the flow scheduler
     let scheduler = Arc::new(FlowScheduler::new(
         flow_repo.clone(),
@@ -310,6 +316,10 @@ async fn run_server(start_disabled: bool) -> Result<(), Box<dyn Error>> {
         sandbox_provider.clone(),
         vm_mappings.clone(),
         agent_repo.clone(),
+        interact_sessions.clone(),
+        sessions_path.clone(),
+        base_dir.clone(),
+        session_streams.clone(),
     ));
     if start_disabled {
         tracing::info!("Starting with all flow triggers disabled (--start-disabled)");
@@ -357,7 +367,7 @@ async fn run_server(start_disabled: bool) -> Result<(), Box<dyn Error>> {
         scheduler,
         events_tx,
         changes_tx: changes_tx.clone(),
-        interact_sessions: Arc::new(tokio::sync::RwLock::new(persisted_sessions)),
+        interact_sessions,
         sessions_path,
         data_dir: base_dir.clone(),
         static_dir,
@@ -367,6 +377,7 @@ async fn run_server(start_disabled: bool) -> Result<(), Box<dyn Error>> {
         vm_manager: vm_manager_arc,
         vm_mappings,
         oauth_token: Arc::new(tokio::sync::RwLock::new(oauth_token)),
+        session_streams,
     };
 
     // Start file change watcher (keeps caches in sync with external edits)

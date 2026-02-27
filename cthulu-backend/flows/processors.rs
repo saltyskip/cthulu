@@ -6,14 +6,15 @@ use anyhow::{Context, Result, bail};
 use chrono::Utc;
 
 use crate::agents::repository::AgentRepository;
-use crate::api::VmMapping;
+use crate::api::{FlowSessions, InteractSession, VmMapping};
 use crate::config::{SinkConfig, SourceConfig};
 use crate::flows::graph::NodeOutput;
+use crate::flows::session_bridge::{FlowRunMeta, SessionBridge};
 use crate::flows::{Node, NodeType};
 use crate::github::client::GithubClient;
 use crate::sandbox::provider::SandboxProvider;
 use crate::tasks::context::render_prompt;
-use crate::tasks::executors::Executor;
+use crate::tasks::executors::{Executor, LineSink};
 use crate::tasks::executors::claude_code::ClaudeCodeExecutor;
 use crate::tasks::executors::sandbox::SandboxExecutor;
 use crate::tasks::executors::vm_executor::VmExecutor;
@@ -30,6 +31,12 @@ pub struct NodeDeps {
     pub vm_mappings: HashMap<String, VmMapping>,
     pub agent_repo: Option<Arc<dyn AgentRepository>>,
     pub flow_id: String,
+    /// Session bridge for creating flow-run sessions in agent workspaces.
+    pub session_bridge: Option<SessionBridge>,
+    /// Current run ID (for flow-run session metadata).
+    pub run_id: Option<String>,
+    /// Flow name (for flow-run session metadata).
+    pub flow_name: Option<String>,
 }
 
 /// Process a single node, dispatching by type.
@@ -84,7 +91,7 @@ async fn process_executor(
     let rendered = render_executor_prompt(node, &input, deps).await?;
 
     // Resolve agent config
-    let (permissions, append_system_prompt) = resolve_agent_config(node, deps).await;
+    let (permissions, append_system_prompt) = resolve_agent_config(node, deps).await?;
 
     // Resolve working dir
     let working_dir = node.config["working_dir"]
@@ -147,10 +154,38 @@ async fn process_executor(
         "Executing",
     );
 
+    // Set up session bridge for streaming into agent workspace
+    let agent_id = node.config["agent_id"]
+        .as_str()
+        .filter(|s| !s.is_empty())
+        .map(String::from);
+    let line_sink = setup_flow_run_session(
+        &deps.session_bridge,
+        &agent_id,
+        &deps.flow_id,
+        deps.flow_name.as_deref().unwrap_or("Unknown"),
+        deps.run_id.as_deref().unwrap_or(""),
+        &node.id,
+        &node.label,
+        &working_dir,
+    )
+    .await;
+
     let exec_result = executor
-        .execute(&rendered, &working_dir)
+        .execute_streaming(&rendered, &working_dir, line_sink.clone())
         .await
-        .with_context(|| format!("executor '{}' failed", node.label))?;
+        .with_context(|| format!("executor '{}' failed", node.label));
+
+    // Finalize session regardless of success/failure
+    finalize_flow_run_session(
+        &deps.session_bridge,
+        &agent_id,
+        &line_sink,
+        exec_result.as_ref().ok(),
+    )
+    .await;
+
+    let exec_result = exec_result?;
 
     tracing::info!(
         turns = exec_result.num_turns,
@@ -229,42 +264,28 @@ async fn render_executor_prompt(
     Ok(rendered)
 }
 
-/// Resolve permissions and system prompt from agent config or inline node config.
+/// Resolve permissions and system prompt from the agent referenced by `agent_id`.
+/// Returns an error if `agent_id` is missing or the agent cannot be found.
 async fn resolve_agent_config(
     node: &Node,
     deps: &NodeDeps,
-) -> (Vec<String>, Option<String>) {
-    if let Some(agent_id) = node.config["agent_id"].as_str() {
-        let agent = if let Some(agent_repo) = &deps.agent_repo {
-            agent_repo.get(agent_id).await
-        } else {
-            None
-        };
-        match agent {
-            Some(agent) => return (agent.permissions.clone(), agent.append_system_prompt.clone()),
-            None => {
-                tracing::warn!(
-                    agent_id = agent_id,
-                    node = %node.label,
-                    "agent_id set but agent not found, falling back to inline config"
-                );
-            }
-        }
-    }
+) -> Result<(Vec<String>, Option<String>)> {
+    let agent_id = node.config["agent_id"]
+        .as_str()
+        .filter(|s| !s.is_empty())
+        .with_context(|| format!("executor node '{}' has no agent_id configured", node.label))?;
 
-    (
-        node.config["permissions"]
-            .as_array()
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(|v| v.as_str().map(String::from))
-                    .collect()
-            })
-            .unwrap_or_default(),
-        node.config["append_system_prompt"]
-            .as_str()
-            .map(String::from),
-    )
+    let agent_repo = deps
+        .agent_repo
+        .as_ref()
+        .context("agent repository not available")?;
+
+    let agent = agent_repo
+        .get(agent_id)
+        .await
+        .with_context(|| format!("agent '{}' not found (referenced by node '{}')", agent_id, node.label))?;
+
+    Ok((agent.permissions.clone(), agent.append_system_prompt.clone()))
 }
 
 // ── Sink Processing ────────────────────────────────────────────────────
@@ -287,6 +308,160 @@ async fn process_sink(node: &Node, input: NodeOutput, deps: &NodeDeps) -> Result
 
     tracing::info!(node = %node.label, "Sink delivered");
     Ok(NodeOutput::Empty)
+}
+
+// ── Flow-run session helpers ──────────────────────────────────────────
+
+/// Create a flow-run session in the agent's session pool and return a LineSink
+/// that writes each line to a JSONL file and broadcasts it.
+#[allow(clippy::too_many_arguments)]
+async fn setup_flow_run_session(
+    bridge: &Option<SessionBridge>,
+    agent_id: &Option<String>,
+    flow_id: &str,
+    flow_name: &str,
+    run_id: &str,
+    node_id: &str,
+    node_label: &str,
+    working_dir: &std::path::Path,
+) -> Option<LineSink> {
+    let bridge = bridge.as_ref()?;
+    let agent_id = agent_id.as_ref()?;
+
+    let session_id = uuid::Uuid::new_v4().to_string();
+    let key = format!("agent::{agent_id}");
+    let meta = FlowRunMeta {
+        flow_id: flow_id.to_string(),
+        flow_name: flow_name.to_string(),
+        run_id: run_id.to_string(),
+        node_id: node_id.to_string(),
+        node_label: node_label.to_string(),
+    };
+
+    // Create the session
+    let session = InteractSession {
+        session_id: session_id.clone(),
+        summary: format!("Flow: {} — {}", flow_name, node_label),
+        node_id: None,
+        working_dir: working_dir.to_string_lossy().to_string(),
+        active_pid: None,
+        busy: true,
+        message_count: 0,
+        total_cost: 0.0,
+        created_at: chrono::Utc::now().to_rfc3339(),
+        skills_dir: None,
+        kind: "flow_run".to_string(),
+        flow_run: Some(meta),
+    };
+
+    // Insert into session pool
+    {
+        let mut sessions = bridge.sessions.write().await;
+        let flow_sessions = sessions
+            .entry(key.clone())
+            .or_insert_with(|| FlowSessions {
+                flow_name: agent_id.clone(),
+                active_session: String::new(),
+                sessions: Vec::new(),
+            });
+        flow_sessions.sessions.push(session);
+        // Don't change active_session — leave whatever interactive session is active
+        let snapshot = sessions.clone();
+        drop(sessions);
+        let vms = bridge.vm_mappings.try_read()
+            .map(|g| g.clone())
+            .unwrap_or_default();
+        crate::api::save_sessions(&bridge.sessions_path, &snapshot, &vms);
+    }
+
+    // Create broadcast channel
+    let (tx, _) = tokio::sync::broadcast::channel::<String>(1024);
+    {
+        let mut streams = bridge.session_streams.lock().await;
+        streams.insert(session_id.clone(), tx.clone());
+    }
+
+    // Ensure session_logs directory exists
+    let logs_dir = bridge.data_dir.join("session_logs");
+    let _ = std::fs::create_dir_all(&logs_dir);
+    let log_path = logs_dir.join(format!("{session_id}.jsonl"));
+
+    // Build the LineSink
+    let log_path_clone = log_path.clone();
+    let sink: LineSink = Arc::new(move |line: String| {
+        // Append to JSONL file
+        use std::io::Write;
+        if let Ok(mut f) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&log_path_clone)
+        {
+            let _ = writeln!(f, "{}", line);
+        }
+        // Broadcast (ignore errors — no subscribers is ok)
+        let _ = tx.send(line);
+    });
+
+    tracing::info!(
+        agent_id = %agent_id,
+        session_id = %session_id,
+        "Created flow-run session for executor"
+    );
+
+    Some(sink)
+}
+
+/// Finalize a flow-run session: mark as not busy, update cost/turns, remove broadcast.
+async fn finalize_flow_run_session(
+    bridge: &Option<SessionBridge>,
+    agent_id: &Option<String>,
+    line_sink: &Option<LineSink>,
+    exec_result: Option<&crate::tasks::executors::ExecutionResult>,
+) {
+    let bridge = match bridge.as_ref() {
+        Some(b) => b,
+        None => return,
+    };
+    let agent_id = match agent_id.as_ref() {
+        Some(id) => id,
+        None => return,
+    };
+    if line_sink.is_none() {
+        return;
+    }
+
+    let key = format!("agent::{agent_id}");
+
+    // Find the flow_run session that's busy and update it
+    {
+        let mut sessions = bridge.sessions.write().await;
+        if let Some(flow_sessions) = sessions.get_mut(&key) {
+            // Find the most recently added busy flow_run session
+            if let Some(session) = flow_sessions
+                .sessions
+                .iter_mut()
+                .rev()
+                .find(|s| s.kind == "flow_run" && s.busy)
+            {
+                session.busy = false;
+                session.message_count = 1;
+                if let Some(er) = exec_result {
+                    session.total_cost = er.cost_usd;
+                }
+
+                // Remove broadcast sender
+                let sid = session.session_id.clone();
+                let mut streams = bridge.session_streams.lock().await;
+                streams.remove(&sid);
+            }
+        }
+        let snapshot = sessions.clone();
+        drop(sessions);
+        let vms = bridge.vm_mappings.try_read()
+            .map(|g| g.clone())
+            .unwrap_or_default();
+        crate::api::save_sessions(&bridge.sessions_path, &snapshot, &vms);
+    }
 }
 
 // ── Config Parsing Helpers (moved from runner.rs) ──────────────────────

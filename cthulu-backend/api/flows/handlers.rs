@@ -320,6 +320,13 @@ pub(crate) async fn trigger_flow(
 
     // Default: one-shot flow execution
     let vm_mappings_snapshot = state.vm_mappings.read().await.clone();
+    let session_bridge = crate::flows::session_bridge::SessionBridge {
+        sessions: state.interact_sessions.clone(),
+        sessions_path: state.sessions_path.clone(),
+        vm_mappings: state.vm_mappings.clone(),
+        data_dir: state.data_dir.clone(),
+        session_streams: state.session_streams.clone(),
+    };
     let runner = crate::flows::runner::FlowRunner {
         http_client: state.http_client.clone(),
         github_client: state.github_client.clone(),
@@ -327,6 +334,7 @@ pub(crate) async fn trigger_flow(
         sandbox_provider: Some(state.sandbox_provider.clone()),
         vm_mappings: vm_mappings_snapshot,
         agent_repo: Some(state.agent_repo.clone()),
+        session_bridge: Some(session_bridge),
     };
 
     let flow_repo = state.flow_repo.clone();
@@ -483,9 +491,9 @@ pub(crate) async fn get_node_types() -> Json<Value> {
                 "node_type": "executor",
                 "label": "Claude Code",
                 "config_schema": {
+                    "agent_id": { "type": "string", "description": "ID of the agent to use", "required": true },
                     "prompt": { "type": "string", "description": "Prompt file path or inline prompt", "required": true },
-                    "permissions": { "type": "array", "description": "Tool permissions (e.g. Bash, Read)", "default": [] },
-                    "append_system_prompt": { "type": "string", "description": "Additional system prompt appended to Claude's instructions" }
+                    "working_dir": { "type": "string", "description": "Working directory", "default": "." }
                 }
             },
             {
@@ -493,10 +501,10 @@ pub(crate) async fn get_node_types() -> Json<Value> {
                 "node_type": "executor",
                 "label": "VM Sandbox",
                 "config_schema": {
+                    "agent_id": { "type": "string", "description": "ID of the agent to use", "required": true },
                     "tier": { "type": "string", "description": "VM tier: nano (1 vCPU, 512MB) or micro (2 vCPU, 1024MB)", "default": "nano" },
                     "prompt": { "type": "string", "description": "Prompt template (inline or file path)" },
-                    "permissions": { "type": "array", "description": "Tool permissions (e.g. Bash, Read)", "default": [] },
-                    "append_system_prompt": { "type": "string", "description": "Additional system prompt appended to Claude's instructions" }
+                    "working_dir": { "type": "string", "description": "Working directory", "default": "." }
                 }
             },
             {

@@ -10,14 +10,15 @@ use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
 
 use crate::agents::repository::AgentRepository;
+use crate::api::{FlowSessions, VmMapping};
 use crate::flows::events::RunEvent;
 use crate::flows::repository::FlowRepository;
 use crate::flows::runner::FlowRunner;
+use crate::flows::session_bridge::SessionBridge;
 use crate::flows::NodeType;
 use crate::github::client::GithubClient;
 use crate::github::models::RepoConfig;
 use crate::sandbox::provider::SandboxProvider;
-use crate::api::VmMapping;
 use crate::tasks::diff;
 
 pub struct FlowScheduler {
@@ -30,6 +31,11 @@ pub struct FlowScheduler {
     sandbox_provider: Arc<dyn SandboxProvider>,
     vm_mappings: Arc<tokio::sync::RwLock<HashMap<String, VmMapping>>>,
     agent_repo: Arc<dyn AgentRepository>,
+    /// Fields needed to construct SessionBridge for flow runs.
+    interact_sessions: Arc<tokio::sync::RwLock<HashMap<String, FlowSessions>>>,
+    sessions_path: std::path::PathBuf,
+    data_dir: std::path::PathBuf,
+    session_streams: Arc<Mutex<HashMap<String, broadcast::Sender<String>>>>,
 }
 
 impl FlowScheduler {
@@ -41,6 +47,10 @@ impl FlowScheduler {
         sandbox_provider: Arc<dyn SandboxProvider>,
         vm_mappings: Arc<tokio::sync::RwLock<HashMap<String, VmMapping>>>,
         agent_repo: Arc<dyn AgentRepository>,
+        interact_sessions: Arc<tokio::sync::RwLock<HashMap<String, FlowSessions>>>,
+        sessions_path: std::path::PathBuf,
+        data_dir: std::path::PathBuf,
+        session_streams: Arc<Mutex<HashMap<String, broadcast::Sender<String>>>>,
     ) -> Self {
         Self {
             flow_repo,
@@ -52,6 +62,20 @@ impl FlowScheduler {
             sandbox_provider,
             vm_mappings,
             agent_repo,
+            interact_sessions,
+            sessions_path,
+            data_dir,
+            session_streams,
+        }
+    }
+
+    fn build_session_bridge(&self) -> SessionBridge {
+        SessionBridge {
+            sessions: self.interact_sessions.clone(),
+            sessions_path: self.sessions_path.clone(),
+            vm_mappings: self.vm_mappings.clone(),
+            data_dir: self.data_dir.clone(),
+            session_streams: self.session_streams.clone(),
         }
     }
 
@@ -105,6 +129,7 @@ impl FlowScheduler {
                 let sandbox_provider = self.sandbox_provider.clone();
                 let vm_mappings = self.vm_mappings.clone();
                 let agent_repo = self.agent_repo.clone();
+                let session_bridge = self.build_session_bridge();
                 let handle = tokio::spawn(async move {
                     cron_loop(
                         &flow_id,
@@ -117,6 +142,7 @@ impl FlowScheduler {
                         sandbox_provider,
                         vm_mappings,
                         agent_repo,
+                        session_bridge,
                     )
                     .await;
                 });
@@ -139,6 +165,7 @@ impl FlowScheduler {
                 let sandbox_provider = self.sandbox_provider.clone();
                 let vm_mappings = self.vm_mappings.clone();
                 let agent_repo = self.agent_repo.clone();
+                let session_bridge = self.build_session_bridge();
                 let handle = tokio::spawn(async move {
                     github_pr_loop(
                         &flow_id,
@@ -152,6 +179,7 @@ impl FlowScheduler {
                         sandbox_provider,
                         vm_mappings,
                         agent_repo,
+                        session_bridge,
                     )
                     .await;
                 });
@@ -279,6 +307,7 @@ impl FlowScheduler {
             sandbox_provider: Some(self.sandbox_provider.clone()),
             vm_mappings: self.vm_mappings.read().await.clone(),
             agent_repo: Some(self.agent_repo.clone()),
+            session_bridge: Some(self.build_session_bridge()),
         };
 
         runner
@@ -303,6 +332,7 @@ async fn cron_loop(
     sandbox_provider: Arc<dyn SandboxProvider>,
     vm_mappings: Arc<tokio::sync::RwLock<HashMap<String, VmMapping>>>,
     agent_repo: Arc<dyn AgentRepository>,
+    session_bridge: SessionBridge,
 ) {
     let cron = match Cron::new(schedule).parse() {
         Ok(c) => c,
@@ -360,6 +390,7 @@ async fn cron_loop(
             sandbox_provider: Some(sandbox_provider.clone()),
             vm_mappings: vm_mappings.read().await.clone(),
             agent_repo: Some(agent_repo.clone()),
+            session_bridge: Some(session_bridge.clone()),
         };
 
         if let Err(e) = runner.execute(&flow, &*flow_repo, None).await {
@@ -382,6 +413,7 @@ async fn github_pr_loop(
     sandbox_provider: Arc<dyn SandboxProvider>,
     vm_mappings: Arc<tokio::sync::RwLock<HashMap<String, VmMapping>>>,
     agent_repo: Arc<dyn AgentRepository>,
+    session_bridge: SessionBridge,
 ) {
     let poll_interval = trigger_config["poll_interval"].as_u64().unwrap_or(60);
     let skip_drafts = trigger_config["skip_drafts"].as_bool().unwrap_or(true);
@@ -615,6 +647,7 @@ async fn github_pr_loop(
                     sandbox_provider: Some(sandbox_provider.clone()),
                     vm_mappings: vm_mappings.read().await.clone(),
                     agent_repo: Some(agent_repo.clone()),
+                    session_bridge: Some(session_bridge.clone()),
                 };
 
                 match runner

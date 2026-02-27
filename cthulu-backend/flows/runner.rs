@@ -15,6 +15,7 @@ use crate::flows::graph::{self, NodeOutput};
 use crate::flows::history::{FlowRun, NodeRun, RunStatus};
 use crate::flows::processors::{self, NodeDeps};
 use crate::flows::repository::FlowRepository;
+use crate::flows::session_bridge::SessionBridge;
 use crate::flows::{Flow, NodeType};
 use crate::github::client::GithubClient;
 use crate::sandbox::provider::SandboxProvider;
@@ -47,6 +48,8 @@ pub struct FlowRunner {
     pub vm_mappings: HashMap<String, VmMapping>,
     /// Agent repository for resolving `agent_id` on executor nodes.
     pub agent_repo: Option<Arc<dyn AgentRepository>>,
+    /// Session bridge for routing executor output to agent workspaces.
+    pub session_bridge: Option<SessionBridge>,
 }
 
 impl FlowRunner {
@@ -169,24 +172,28 @@ impl FlowRunner {
             rendered
         };
 
-        // Extract executor config
-        let permissions: Vec<String> = executor_node.config["permissions"]
-            .as_array()
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(|v| v.as_str().map(String::from))
-                    .collect()
-            })
-            .unwrap_or_default();
+        // Resolve permissions and system prompt from the referenced agent
+        let (permissions, append_system_prompt) = if let Some(agent_id) =
+            executor_node.config["agent_id"].as_str().filter(|s| !s.is_empty())
+        {
+            if let Some(repo) = &self.agent_repo {
+                if let Some(agent) = repo.get(agent_id).await {
+                    (agent.permissions.clone(), agent.append_system_prompt.clone())
+                } else {
+                    tracing::warn!(agent_id, node = %executor_node.label, "agent not found, using empty config");
+                    (vec![], None)
+                }
+            } else {
+                (vec![], None)
+            }
+        } else {
+            (vec![], None)
+        };
 
         let working_dir = executor_node.config["working_dir"]
             .as_str()
             .map(PathBuf::from)
             .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
-
-        let append_system_prompt = executor_node.config["append_system_prompt"]
-            .as_str()
-            .map(String::from);
 
         Ok(SessionInfo {
             flow_id: flow.id.clone(),
@@ -203,30 +210,40 @@ impl FlowRunner {
     /// Prepare a session for a specific executor node (node-level chat).
     /// Does NOT run sources — just resolves the node's own config
     /// (prompt, permissions, working_dir, system_prompt).
-    pub fn prepare_node_session(flow: &Flow, node_id: &str) -> Result<SessionInfo> {
+    /// Permissions and system prompt are resolved from the referenced agent.
+    pub async fn prepare_node_session(
+        flow: &Flow,
+        node_id: &str,
+        agent_repo: Option<&Arc<dyn AgentRepository>>,
+    ) -> Result<SessionInfo> {
         let executor_node = flow
             .nodes
             .iter()
             .find(|n| n.id == node_id && n.node_type == NodeType::Executor)
             .with_context(|| format!("executor node '{}' not found in flow", node_id))?;
 
-        let permissions: Vec<String> = executor_node.config["permissions"]
-            .as_array()
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(|v| v.as_str().map(String::from))
-                    .collect()
-            })
-            .unwrap_or_default();
+        // Resolve permissions and system prompt from the referenced agent
+        let (permissions, append_system_prompt) = if let Some(agent_id) =
+            executor_node.config["agent_id"].as_str().filter(|s| !s.is_empty())
+        {
+            if let Some(repo) = agent_repo {
+                if let Some(agent) = repo.get(agent_id).await {
+                    (agent.permissions.clone(), agent.append_system_prompt.clone())
+                } else {
+                    tracing::warn!(agent_id, node = %executor_node.label, "agent not found, using empty config");
+                    (vec![], None)
+                }
+            } else {
+                (vec![], None)
+            }
+        } else {
+            (vec![], None)
+        };
 
         let working_dir = executor_node.config["working_dir"]
             .as_str()
             .map(PathBuf::from)
             .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
-
-        let append_system_prompt = executor_node.config["append_system_prompt"]
-            .as_str()
-            .map(String::from);
 
         // For node-level chat the prompt is informational only — the user types
         // their own messages. We still resolve it so the UI can show it.
@@ -362,6 +379,9 @@ impl FlowRunner {
             vm_mappings: self.vm_mappings.clone(),
             agent_repo: self.agent_repo.clone(),
             flow_id: flow.id.clone(),
+            session_bridge: self.session_bridge.clone(),
+            run_id: Some(run_id.to_string()),
+            flow_name: Some(flow.name.clone()),
         };
 
         let mut any_failed = false;

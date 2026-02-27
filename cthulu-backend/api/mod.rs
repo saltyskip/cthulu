@@ -21,6 +21,7 @@ use crate::api::changes::ResourceChangeEvent;
 use crate::flows::events::RunEvent;
 use crate::flows::repository::FlowRepository;
 use crate::flows::scheduler::FlowScheduler;
+use crate::flows::session_bridge::FlowRunMeta;
 use crate::github::client::GithubClient;
 use crate::prompts::repository::PromptRepository;
 use crate::sandbox::backends::vm_manager::VmManagerProvider;
@@ -56,6 +57,16 @@ pub struct InteractSession {
     /// Path to the .skills/ directory for this session.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub skills_dir: Option<String>,
+    /// Session kind: "interactive" (default) or "flow_run".
+    #[serde(default = "default_interactive")]
+    pub kind: String,
+    /// Flow run metadata — only present for flow_run sessions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub flow_run: Option<FlowRunMeta>,
+}
+
+fn default_interactive() -> String {
+    "interactive".to_string()
 }
 
 /// All sessions for a single workflow.
@@ -182,6 +193,8 @@ pub fn load_sessions(path: &Path) -> LoadedSessions {
                     total_cost: old.total_cost,
                     created_at: chrono::Utc::now().to_rfc3339(),
                     skills_dir: None,
+                    kind: default_interactive(),
+                    flow_run: None,
                 };
                 let flow_sessions = FlowSessions {
                     flow_name: if old.flow_name.is_empty() {
@@ -232,6 +245,8 @@ pub fn save_sessions(
                         total_cost: s.total_cost,
                         created_at: s.created_at.clone(),
                         skills_dir: s.skills_dir.clone(),
+                        kind: s.kind.clone(),
+                        flow_run: s.flow_run.clone(),
                     })
                     .collect();
                 (
@@ -340,6 +355,9 @@ pub struct AppState {
     /// Claude OAuth access token (read from macOS Keychain or CLAUDE_CODE_OAUTH_TOKEN env).
     /// Wrapped in Arc<RwLock> so it can be refreshed at runtime without a restart.
     pub oauth_token: Arc<RwLock<Option<String>>>,
+    /// Live broadcast channels for flow-run session streaming.
+    /// Key: session_id, Value: sender that broadcasts JSONL lines.
+    pub session_streams: Arc<Mutex<HashMap<String, broadcast::Sender<String>>>>,
 }
 
 impl AppState {

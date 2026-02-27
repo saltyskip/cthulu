@@ -1,5 +1,5 @@
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::response::IntoResponse;
 use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 use serde::Deserialize;
@@ -8,9 +8,18 @@ use tokio::sync::broadcast;
 
 use crate::api::{AppState, PtyProcess};
 
-/// The session key for an agent — just `"agent::{id}"`.
-fn agent_key(agent_id: &str) -> String {
-    format!("agent::{agent_id}")
+/// Build the PTY pool key. If a session_id is provided, scope to that session;
+/// otherwise fall back to agent-level key for backward compat.
+pub(crate) fn pty_key(agent_id: &str, session_id: Option<&str>) -> String {
+    match session_id {
+        Some(sid) => format!("agent::{agent_id}::session::{sid}"),
+        None => format!("agent::{agent_id}"),
+    }
+}
+
+#[derive(Deserialize)]
+pub(crate) struct TerminalQuery {
+    pub session_id: Option<String>,
 }
 
 /// JSON message sent from the frontend for resize events.
@@ -114,16 +123,15 @@ fn spawn_pty_claude(
 pub(crate) async fn terminal_ws(
     State(state): State<AppState>,
     Path(id): Path<String>,
+    Query(query): Query<TerminalQuery>,
     ws: WebSocketUpgrade,
 ) -> impl IntoResponse {
-    ws.on_upgrade(move |socket| handle_terminal(socket, state, id))
+    ws.on_upgrade(move |socket| handle_terminal(socket, state, id, query.session_id))
 }
 
 /// Bidirectional bridge: PTY <-> WebSocket.
-async fn handle_terminal(socket: WebSocket, state: AppState, agent_id: String) {
+async fn handle_terminal(socket: WebSocket, state: AppState, agent_id: String, query_session_id: Option<String>) {
     use futures_util::{SinkExt, StreamExt};
-
-    let key = agent_key(&agent_id);
 
     // Look up the agent
     let agent = match state.agent_repo.get(&agent_id).await {
@@ -134,11 +142,14 @@ async fn handle_terminal(socket: WebSocket, state: AppState, agent_id: String) {
         }
     };
 
+    // Agent-level key for session storage (always agent::{id})
+    let agent_session_key = format!("agent::{agent_id}");
+
     // Resolve or create session (reuse existing active session)
     let (session_id, is_new) = {
         let mut all_sessions = state.interact_sessions.write().await;
         let flow_sessions = all_sessions
-            .entry(key.clone())
+            .entry(agent_session_key.clone())
             .or_insert_with(|| {
                 let sid = uuid::Uuid::new_v4().to_string();
                 crate::api::FlowSessions {
@@ -155,16 +166,24 @@ async fn handle_terminal(socket: WebSocket, state: AppState, agent_id: String) {
                         total_cost: 0.0,
                         created_at: chrono::Utc::now().to_rfc3339(),
                         skills_dir: None,
+                        kind: "interactive".to_string(),
+                        flow_run: None,
                     }],
                 }
             });
 
-        let active_sid = flow_sessions.active_session.clone();
-        let session = flow_sessions.get_session(&active_sid);
+        // If a specific session_id was requested via query param, use it;
+        // otherwise fall back to the active session.
+        let target_sid = query_session_id
+            .unwrap_or_else(|| flow_sessions.active_session.clone());
+        let session = flow_sessions.get_session(&target_sid);
         let is_new = session.map(|s| s.message_count == 0).unwrap_or(true);
 
-        (active_sid, is_new)
+        (target_sid, is_new)
     };
+
+    // Build session-scoped PTY pool key
+    let key = pty_key(&agent_id, Some(&session_id));
 
     // Get or spawn PTY process
     let needs_spawn = {

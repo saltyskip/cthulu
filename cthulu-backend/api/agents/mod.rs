@@ -26,6 +26,14 @@ pub fn router() -> Router<AppState> {
             "/agents/{id}/sessions/{session_id}",
             delete(chat::delete_session),
         )
+        .route(
+            "/agents/{id}/sessions/{session_id}/stream",
+            get(chat::stream_session_log),
+        )
+        .route(
+            "/agents/{id}/sessions/{session_id}/log",
+            get(chat::get_session_log),
+        )
         .route("/agents/{id}/chat", post(chat::chat))
         .route("/agents/{id}/chat/stop", post(chat::stop_chat))
         // PTY terminal WebSocket
