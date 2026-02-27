@@ -2187,12 +2187,10 @@ button:disabled {
 
 .flow-run-chat {
   flex: 1;
-  overflow-y: auto;
-  background: var(--bg);
-  padding: 12px 16px;
-  font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
-  font-size: 13px;
-  color: var(--text);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-height: 0;
 }
 
 .flow-run-header {
@@ -2200,11 +2198,12 @@ button:disabled {
   align-items: center;
   justify-content: space-between;
   padding: 6px 10px;
-  margin-bottom: 12px;
   background: var(--bg-secondary);
   border: 1px solid var(--border);
   border-radius: 4px;
   font-size: 11px;
+  margin: 8px 8px 0;
+  flex-shrink: 0;
 }
 
 .flow-run-header-label {
@@ -2216,113 +2215,10 @@ button:disabled {
   color: var(--text-secondary);
 }
 
-.flow-run-messages {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.flow-run-message {
-  line-height: 1.5;
-  word-wrap: break-word;
-}
-
-.flow-run-message h1,
-.flow-run-message h2,
-.flow-run-message h3 {
-  margin: 8px 0 4px;
-  color: var(--text);
-}
-
-.flow-run-message p {
-  margin: 4px 0;
-}
-
-.flow-run-message code {
-  background: var(--bg-tertiary);
-  padding: 1px 4px;
-  border-radius: 3px;
-  font-size: 12px;
-}
-
-.flow-run-message pre {
-  background: var(--bg-tertiary);
-  padding: 8px 10px;
-  border-radius: 4px;
-  overflow-x: auto;
-  margin: 4px 0;
-  font-size: 12px;
-}
-
-.flow-run-message pre code {
-  background: none;
-  padding: 0;
-}
-
-.flow-run-message a {
-  color: var(--accent);
-  text-decoration: none;
-}
-
-.flow-run-message a:hover {
-  text-decoration: underline;
-}
-
-.flow-run-message ul,
-.flow-run-message ol {
-  padding-left: 20px;
-  margin: 4px 0;
-}
-
-.flow-run-tool {
-  border: 1px solid var(--border);
-  border-left: 3px solid var(--executor-color);
-  border-radius: 4px;
-  overflow: hidden;
-}
-
-.flow-run-tool-error {
-  border-left-color: var(--danger);
-}
-
-.flow-run-tool-header {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 8px;
-  background: var(--bg-secondary);
-  cursor: pointer;
-  user-select: none;
-  font-size: 12px;
-}
-
-.flow-run-tool-header:hover {
-  background: var(--bg-tertiary);
-}
-
-.flow-run-tool-icon {
-  font-size: 10px;
-  color: var(--text-secondary);
-  width: 12px;
-}
-
-.flow-run-tool-name {
-  color: var(--executor-color);
-  font-weight: 600;
-}
-
-.flow-run-tool-body {
-  padding: 6px 10px;
-  max-height: 300px;
-  overflow-y: auto;
-}
-
-.flow-run-tool-body pre {
-  font-size: 11px;
-  white-space: pre-wrap;
-  word-break: break-all;
-  margin: 0;
-  color: var(--text-secondary);
+/* Let the Thread component fill available space */
+.flow-run-chat .aui-root {
+  flex: 1;
+  min-height: 0;
 }
 
 .flow-run-result {

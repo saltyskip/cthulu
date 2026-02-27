@@ -2,14 +2,17 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import {
   AssistantRuntimeProvider,
   useExternalStoreRuntime,
-  ThreadPrimitive,
-  MessagePrimitive,
   type ThreadMessageLike,
 } from "@assistant-ui/react";
-import { MarkdownTextPrimitive } from "@assistant-ui/react-markdown";
-import type { ToolCallMessagePartProps } from "@assistant-ui/react";
+import { Thread, makeMarkdownText } from "@assistant-ui/react-ui";
 import { getSessionLog, streamSessionLog } from "../api/client";
 import type { FlowRunMeta } from "../api/client";
+
+import "@assistant-ui/react-ui/styles/index.css";
+import "@assistant-ui/react-ui/styles/markdown.css";
+import "@assistant-ui/react-ui/styles/themes/default.css";
+
+const MarkdownText = makeMarkdownText();
 
 interface FlowRunChatViewProps {
   agentId: string;
@@ -33,12 +36,6 @@ function parseRawLine(raw: string): RawLine {
   }
 }
 
-/**
- * Convert an array of stream-json lines into assistant-ui ThreadMessageLike[].
- *
- * Claude stream-json has event types: system, assistant, result, content_block_start, etc.
- * We group these into assistant messages with text + tool-call content parts.
- */
 function linesToMessages(lines: RawLine[]): ThreadMessageLike[] {
   const messages: ThreadMessageLike[] = [];
 
@@ -125,7 +122,6 @@ function linesToMessages(lines: RawLine[]): ThreadMessageLike[] {
       continue;
     }
 
-    // content_block_start with tool_use (streaming event)
     if (
       eventType === "content_block_start" &&
       (parsed.content_block as Record<string, unknown>)?.type === "tool_use"
@@ -148,74 +144,7 @@ function linesToMessages(lines: RawLine[]): ThreadMessageLike[] {
   return messages;
 }
 
-// ── Thread content components ───────────────────────────────────────
-
-function AssistantMessage() {
-  return (
-    <MessagePrimitive.Root className="flow-run-message">
-      <MessagePrimitive.Content
-        components={{
-          Text: MarkdownText,
-          tools: {
-            Fallback: ToolCallFallback,
-          },
-        }}
-      />
-    </MessagePrimitive.Root>
-  );
-}
-
-function UserMessage() {
-  return (
-    <MessagePrimitive.Root className="flow-run-message flow-run-user">
-      <MessagePrimitive.Content
-        components={{
-          Text: MarkdownText,
-        }}
-      />
-    </MessagePrimitive.Root>
-  );
-}
-
-function MarkdownText() {
-  return (
-    <div className="flow-run-markdown">
-      <MarkdownTextPrimitive />
-    </div>
-  );
-}
-
-function ToolCallFallback(props: ToolCallMessagePartProps) {
-  const [expanded, setExpanded] = useState(false);
-
-  return (
-    <div className="flow-run-tool">
-      <div
-        className="flow-run-tool-header"
-        onClick={() => setExpanded((v) => !v)}
-      >
-        <span className="flow-run-tool-icon">{expanded ? "▼" : "▶"}</span>
-        <span className="flow-run-tool-name">{props.toolName || "Tool Call"}</span>
-      </div>
-      {expanded && (
-        <div className="flow-run-tool-body">
-          <pre>{JSON.stringify(props.args, null, 2)}</pre>
-          {props.result !== undefined && (
-            <div className="flow-run-tool-result">
-              <pre>
-                {typeof props.result === "string"
-                  ? props.result
-                  : JSON.stringify(props.result, null, 2)}
-              </pre>
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ── Main FlowRunChatView with assistant-ui ──────────────────────────
+// ── Main FlowRunChatView ────────────────────────────────────────────
 
 function FlowRunThread({
   messages,
@@ -239,7 +168,7 @@ function FlowRunThread({
 
   return (
     <AssistantRuntimeProvider runtime={runtime}>
-      <div className="flow-run-chat">
+      <div className="flow-run-chat dark">
         {flowRun && (
           <div className="flow-run-header">
             <span className="flow-run-header-label">
@@ -251,16 +180,9 @@ function FlowRunThread({
           </div>
         )}
 
-        <ThreadPrimitive.Root className="flow-run-thread">
-          <ThreadPrimitive.Viewport className="flow-run-viewport">
-            <ThreadPrimitive.Messages
-              components={{
-                UserMessage,
-                AssistantMessage,
-              }}
-            />
-          </ThreadPrimitive.Viewport>
-        </ThreadPrimitive.Root>
+        <Thread
+          assistantMessage={{ components: { Text: MarkdownText } }}
+        />
 
         {isRunning && (
           <div className="flow-run-busy">
@@ -321,7 +243,6 @@ export default function FlowRunChatView({
 
   const messages = useMemo(() => linesToMessages(rawLines), [rawLines]);
 
-  // Extract result metadata from the last result event
   const resultMeta = useMemo(() => {
     for (let i = rawLines.length - 1; i >= 0; i--) {
       const p = rawLines[i].parsed;
