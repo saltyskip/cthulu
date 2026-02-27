@@ -35,7 +35,6 @@ pub struct TemplateMetadata {
 pub struct PipelineShape {
     pub trigger: String,
     pub sources: Vec<String>,
-    pub filters: Vec<String>,
     pub executors: Vec<String>,
     pub sinks: Vec<String>,
 }
@@ -59,8 +58,6 @@ struct TemplateYaml {
     trigger: Option<TriggerYaml>,
     #[serde(default)]
     sources: Vec<NodeYaml>,
-    #[serde(default)]
-    filters: Vec<NodeYaml>,
     #[serde(default)]
     executors: Vec<NodeYaml>,
     #[serde(default)]
@@ -227,7 +224,6 @@ pub fn load_template_file(path: &Path, category: &str, slug: &str) -> Result<Tem
             .map(|t| t.kind.clone())
             .unwrap_or_else(|| "manual".to_string()),
         sources: doc.sources.iter().map(|s| s.kind.clone()).collect(),
-        filters: doc.filters.iter().map(|f| f.kind.clone()).collect(),
         executors: doc.executors.iter().map(|e| e.kind.clone()).collect(),
         sinks: doc.sinks.iter().map(|s| s.kind.clone()).collect(),
     };
@@ -314,32 +310,6 @@ pub fn parse_template_yaml(yaml: &str) -> Result<Flow> {
         x_cursor += X_STEP;
     }
 
-    // ---- Filters ----
-    let filter_ids: Vec<String> = doc
-        .filters
-        .iter()
-        .enumerate()
-        .map(|(i, f)| {
-            let id = format!("filter-{}-{}", i + 1, short_id());
-            nodes.push(Node {
-                id: id.clone(),
-                node_type: NodeType::Filter,
-                kind: f.kind.clone(),
-                config: f.config.clone(),
-                position: Position {
-                    x: x_cursor,
-                    y: Y_CENTER,
-                },
-                label: f.label.clone().unwrap_or_else(|| "Keyword Filter".into()),
-            });
-            id
-        })
-        .collect();
-
-    if !filter_ids.is_empty() {
-        x_cursor += X_STEP;
-    }
-
     // ---- Executors ----
     let executor_ids: Vec<String> = doc
         .executors
@@ -411,29 +381,17 @@ pub fn parse_template_yaml(yaml: &str) -> Result<Flow> {
     for src_id in &source_ids {
         edges.push(make_edge(&trigger_id, src_id));
     }
-    // if no sources, trigger → first filter or first executor
+    // if no sources, trigger → first executor
     if source_ids.is_empty() {
-        if let Some(first_filter) = filter_ids.first() {
-            edges.push(make_edge(&trigger_id, first_filter));
-        } else if let Some(first_exec) = executor_ids.first() {
+        if let Some(first_exec) = executor_ids.first() {
             edges.push(make_edge(&trigger_id, first_exec));
         }
     }
 
-    // sources → first filter (fan-in) or first executor
-    let sources_target = filter_ids.first().or_else(|| executor_ids.first()).cloned();
-    if let Some(ref tgt) = sources_target {
+    // sources → first executor (fan-in)
+    if let Some(first_exec) = executor_ids.first() {
         for src_id in &source_ids {
-            edges.push(make_edge(src_id, tgt));
-        }
-    }
-
-    // filters → next filter or first executor (chain)
-    for (i, fid) in filter_ids.iter().enumerate() {
-        if let Some(next_filter) = filter_ids.get(i + 1) {
-            edges.push(make_edge(fid, next_filter));
-        } else if let Some(first_exec) = executor_ids.first() {
-            edges.push(make_edge(fid, first_exec));
+            edges.push(make_edge(src_id, first_exec));
         }
     }
 

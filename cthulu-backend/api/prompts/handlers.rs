@@ -10,6 +10,7 @@ use tokio::process::Command;
 use uuid::Uuid;
 
 use crate::api::AppState;
+use crate::api::changes::{ChangeType, ResourceChangeEvent, ResourceType};
 use crate::prompts::SavedPrompt;
 
 pub(crate) async fn list_prompts(State(state): State<AppState>) -> Json<Value> {
@@ -61,6 +62,13 @@ pub(crate) async fn create_prompt(
         );
     }
 
+    let _ = state.changes_tx.send(ResourceChangeEvent {
+        resource_type: ResourceType::Prompt,
+        change_type: ChangeType::Created,
+        resource_id: id.clone(),
+        timestamp: Utc::now(),
+    });
+
     (StatusCode::CREATED, Json(json!({ "id": id })))
 }
 
@@ -81,6 +89,13 @@ pub(crate) async fn delete_prompt(
             Json(json!({ "error": "prompt not found" })),
         ));
     }
+
+    let _ = state.changes_tx.send(ResourceChangeEvent {
+        resource_type: ResourceType::Prompt,
+        change_type: ChangeType::Deleted,
+        resource_id: id,
+        timestamp: Utc::now(),
+    });
 
     Ok(Json(json!({ "deleted": true })))
 }
@@ -121,6 +136,13 @@ pub(crate) async fn update_prompt(
             Json(json!({ "error": format!("failed to update prompt: {e}") })),
         )
     })?;
+
+    let _ = state.changes_tx.send(ResourceChangeEvent {
+        resource_type: ResourceType::Prompt,
+        change_type: ChangeType::Updated,
+        resource_id: id,
+        timestamp: Utc::now(),
+    });
 
     Ok(Json(serde_json::to_value(&prompt).unwrap()))
 }

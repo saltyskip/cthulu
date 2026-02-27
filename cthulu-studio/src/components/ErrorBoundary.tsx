@@ -1,5 +1,6 @@
 import { Component, type ReactNode } from "react";
 import { log } from "../api/logger";
+import { Button } from "@/components/ui/button";
 
 interface Props {
   children: ReactNode;
@@ -31,12 +32,13 @@ export default class ErrorBoundary extends Component<Props, State> {
               <p style={{ fontSize: 12, color: "var(--text-secondary)", maxWidth: 400, textAlign: "center" }}>
                 {this.state.error.message}
               </p>
-              <button
-                className="ghost"
+              <Button
+                variant="ghost"
+                size="sm"
                 onClick={() => this.setState({ error: null })}
               >
                 Try Again
-              </button>
+              </Button>
             </div>
           </div>
         )

@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import * as api from "../api/client";
 import { log } from "../api/logger";
-import type { FlowNode } from "../types/flow";
+import { Button } from "@/components/ui/button";
 
 function formatRelativeTime(iso: string): string {
   const now = Date.now();
@@ -18,45 +18,34 @@ function formatRelativeTime(iso: string): string {
   return `${diffDays}d ${diffHr % 24}h`;
 }
 
+type ActiveView = "flow-editor" | "agent-workspace";
+
 interface TopBarProps {
+  activeView: ActiveView;
   flow: { name: string; enabled: boolean } | null;
   flowId: string | null;
   onTrigger: () => void;
-  onToggleEnabled: () => void;
   onRename: (name: string) => void;
+  agentName: string | null;
+  onBackToFlow: () => void;
   onSettingsClick: () => void;
-  consoleOpen: boolean;
-  onToggleConsole: () => void;
-  runLogOpen: boolean;
-  onToggleRunLog: () => void;
-  errorCount: number;
-  flowHasErrors?: boolean;
-  validationErrors?: Record<string, string[]>;
-  flowNodes?: FlowNode[];
   onReconnect?: () => void;
 }
 
 export default function TopBar({
+  activeView,
   flow,
   flowId,
   onTrigger,
-  onToggleEnabled,
   onRename,
+  agentName,
+  onBackToFlow,
   onSettingsClick,
-  consoleOpen,
-  onToggleConsole,
-  runLogOpen,
-  onToggleRunLog,
-  errorCount,
-  flowHasErrors,
-  validationErrors,
-  flowNodes,
   onReconnect,
 }: TopBarProps) {
   const [connected, setConnected] = useState(false);
-  const [showValidationGate, setShowValidationGate] = useState(false);
   const [nextRun, setNextRun] = useState<string | null>(null);
-  const [tokenOk, setTokenOk] = useState<boolean | null>(null); // null = unknown
+  const [tokenOk, setTokenOk] = useState<boolean | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const retryRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const connectedRef = useRef(false);
@@ -65,11 +54,6 @@ export default function TopBar({
   const [editing, setEditing] = useState(false);
   const [editName, setEditName] = useState("");
   const nameInputRef = useRef<HTMLInputElement>(null);
-
-  // Auto-dismiss gate when errors are fixed
-  useEffect(() => {
-    if (!flowHasErrors) setShowValidationGate(false);
-  }, [flowHasErrors]);
 
   // Fetch next run time for current flow
   useEffect(() => {
@@ -91,7 +75,6 @@ export default function TopBar({
   useEffect(() => {
     let cancelled = false;
 
-    // Fast retry on boot: 1s, 2s, 3s... then settle at 10s
     const check = async (interval: number) => {
       if (cancelled) return;
       const ok = await api.checkConnection();
@@ -105,7 +88,6 @@ export default function TopBar({
           onReconnectRef.current?.();
         }
 
-        // If still disconnected, retry faster (up to 10s)
         const nextInterval = ok ? 10000 : Math.min(interval + 1000, 10000);
         retryRef.current = setTimeout(() => check(nextInterval), nextInterval);
       }
@@ -119,7 +101,7 @@ export default function TopBar({
     };
   }, []);
 
-  // Check token status whenever we connect (and on first load)
+  // Check token status whenever we connect
   useEffect(() => {
     if (!connected) return;
     api.getTokenStatus()
@@ -145,158 +127,99 @@ export default function TopBar({
     }
   }, []);
 
-  const handleRunClick = () => {
-    if (flowHasErrors) {
-      setShowValidationGate(true);
-    } else {
-      onTrigger();
-    }
-  };
-
-  const handleRunAnyway = () => {
-    setShowValidationGate(false);
-    onTrigger();
-  };
-
-  const nodeMap = new Map((flowNodes ?? []).map((n) => [n.id, n]));
-
   return (
-    <>
-      <div className="top-bar">
-        <h1>Cthulu Studio</h1>
-        {flow && (
-          <>
-            {editing ? (
-              <input
-                ref={nameInputRef}
-                className="flow-name-input"
-                value={editName}
-                onChange={(e) => setEditName(e.target.value)}
-                onBlur={() => {
-                  const trimmed = editName.trim();
-                  if (trimmed && trimmed !== flow.name) onRename(trimmed);
-                  setEditing(false);
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") (e.target as HTMLInputElement).blur();
-                  if (e.key === "Escape") { setEditName(flow.name); setEditing(false); }
-                }}
-              />
-            ) : (
-              <span
-                className="flow-name"
-                onClick={() => { setEditName(flow.name); setEditing(true); setTimeout(() => nameInputRef.current?.select(), 0); }}
-                title="Click to rename"
-                style={{ cursor: "text" }}
-              >
-                {flow.name}
-              </span>
-            )}
-            {flow.enabled && (
-              <span className="flow-enabled-badge">Active</span>
-            )}
-            {nextRun && flow.enabled && (
-              <span className="next-run-label" title={new Date(nextRun).toLocaleString()}>
-                Next: {formatRelativeTime(nextRun)}
-              </span>
-            )}
-          </>
-        )}
-        <div className="spacer" />
-        {flow && (
-          <button
-            className="primary"
-            onClick={handleRunClick}
-            disabled={!connected}
-            title={
-              !connected
-                ? "Server disconnected"
-                : !(flow.enabled)
-                  ? "Flow is disabled — manual run still works"
-                  : undefined
-            }
-          >
-            Run{!(flow.enabled) ? " (Manual)" : ""}
-          </button>
-        )}
-        <div className="connection-status">
-          <div
-            className={`connection-dot ${connected ? "connected" : "disconnected"}`}
-          />
-          <span>{connected ? api.getServerUrl() : "Disconnected"}</span>
-        </div>
-        <button
-          className={`ghost ${runLogOpen ? "console-toggle-active" : ""}`}
-          onClick={onToggleRunLog}
-        >
-          Log
-        </button>
-        <button
-          className={`ghost ${consoleOpen ? "console-toggle-active" : ""}`}
-          onClick={onToggleConsole}
-          style={{ position: "relative" }}
-        >
-          Console
-          {errorCount > 0 && !consoleOpen && (
-            <span className="error-badge">{errorCount}</span>
+    <div className="top-bar">
+      <h1>Cthulu Studio</h1>
+
+      {activeView === "agent-workspace" && (
+        <Button variant="ghost" size="sm" className="top-bar-back" onClick={onBackToFlow}>
+          ← Back
+        </Button>
+      )}
+
+      {activeView === "flow-editor" && flow && (
+        <>
+          {editing ? (
+            <input
+              ref={nameInputRef}
+              className="flow-name-input"
+              value={editName}
+              onChange={(e) => setEditName(e.target.value)}
+              onBlur={() => {
+                const trimmed = editName.trim();
+                if (trimmed && trimmed !== flow.name) onRename(trimmed);
+                setEditing(false);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                if (e.key === "Escape") { setEditName(flow.name); setEditing(false); }
+              }}
+            />
+          ) : (
+            <span
+              className="flow-name"
+              onClick={() => { setEditName(flow.name); setEditing(true); setTimeout(() => nameInputRef.current?.select(), 0); }}
+              title="Click to rename"
+              style={{ cursor: "text" }}
+            >
+              {flow.name}
+            </span>
           )}
-        </button>
-        <button
-          className={tokenOk === false ? "topbar-token-btn expired" : "topbar-token-btn"}
-          onClick={handleRefreshToken}
-          disabled={refreshing || !connected}
+          {flow.enabled && (
+            <span className="flow-enabled-badge">Active</span>
+          )}
+          {nextRun && flow.enabled && (
+            <span className="next-run-label" title={new Date(nextRun).toLocaleString()}>
+              Next: {formatRelativeTime(nextRun)}
+            </span>
+          )}
+        </>
+      )}
+
+      {activeView === "agent-workspace" && agentName && (
+        <span className="top-bar-agent-name">{agentName}</span>
+      )}
+
+      <div className="spacer" />
+
+      {activeView === "flow-editor" && flow && (
+        <Button
+          size="sm"
+          onClick={onTrigger}
+          disabled={!connected}
           title={
-            tokenOk === false
-              ? "OAuth token expired — click to refresh"
-              : tokenOk === true
-                ? "OAuth token active — click to refresh"
-                : "Token status unknown"
+            !connected
+              ? "Server disconnected"
+              : !(flow.enabled)
+                ? "Flow is disabled — manual run still works"
+                : undefined
           }
         >
-          {refreshing
-            ? "Refreshing…"
-            : tokenOk === false
-              ? "⚠ Token Expired"
-              : "⟳ Token"}
-        </button>
-        <button className="ghost" onClick={onSettingsClick}>
-          Settings
-        </button>
+          Run{!(flow.enabled) ? " (Manual)" : ""}
+        </Button>
+      )}
+
+      <div className="connection-status">
+        <div
+          className={`connection-dot ${connected ? "connected" : "disconnected"}`}
+          title={connected ? api.getServerUrl() : "Disconnected"}
+        />
       </div>
 
-      {showValidationGate && validationErrors && (
-        <div className="validation-gate-overlay" onClick={() => setShowValidationGate(false)}>
-          <div className="validation-gate" onClick={(e) => e.stopPropagation()}>
-            <div className="validation-gate-header">
-              Flow has validation errors
-            </div>
-            <div className="validation-gate-body">
-              {Object.entries(validationErrors).map(([nodeId, errs]) => {
-                const node = nodeMap.get(nodeId);
-                return (
-                  <div key={nodeId} className="validation-gate-node">
-                    <strong>{node?.label ?? nodeId}</strong>
-                    <span className="validation-gate-kind">{node?.kind}</span>
-                    <ul>
-                      {errs.map((err, i) => (
-                        <li key={i}>{err}</li>
-                      ))}
-                    </ul>
-                  </div>
-                );
-              })}
-            </div>
-            <div className="validation-gate-footer">
-              <button className="ghost" onClick={() => setShowValidationGate(false)}>
-                Cancel
-              </button>
-              <button className="danger" onClick={handleRunAnyway}>
-                Run Anyway
-              </button>
-            </div>
-          </div>
-        </div>
+      {tokenOk === false && (
+        <button
+          className="topbar-token-btn expired"
+          onClick={handleRefreshToken}
+          disabled={refreshing || !connected}
+          title="OAuth token expired — click to refresh"
+        >
+          {refreshing ? "Refreshing…" : "⚠ Token Expired"}
+        </button>
       )}
-    </>
+
+      <Button variant="ghost" size="sm" onClick={onSettingsClick}>
+        Settings
+      </Button>
+    </div>
   );
 }

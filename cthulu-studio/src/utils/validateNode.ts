@@ -50,11 +50,6 @@ export function validateNode(node: FlowNode): string[] {
         errors.push("Repos is required");
       }
       break;
-    case "keyword":
-      if (!Array.isArray(cfg.keywords) || cfg.keywords.length === 0) {
-        errors.push("Keywords is required");
-      }
-      break;
     case "claude-code":
       if (!cfg.prompt || !(cfg.prompt as string).trim()) {
         errors.push("Prompt is required");

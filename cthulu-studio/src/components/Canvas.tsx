@@ -19,7 +19,6 @@ import "@xyflow/react/dist/style.css";
 import TriggerNode from "./NodeTypes/TriggerNode";
 import SourceNode from "./NodeTypes/SourceNode";
 import ExecutorNode from "./NodeTypes/ExecutorNode";
-import FilterNode from "./NodeTypes/FilterNode";
 import SinkNode from "./NodeTypes/SinkNode";
 import type { Flow, FlowNode, FlowEdge } from "../types/flow";
 import { log } from "../api/logger";
@@ -27,7 +26,6 @@ import { log } from "../api/logger";
 const rfNodeTypes: NodeTypes = {
   trigger: TriggerNode,
   source: SourceNode,
-  filter: FilterNode,
   executor: ExecutorNode,
   sink: SinkNode,
 };
@@ -95,6 +93,8 @@ export interface CanvasHandle {
   getNode: (id: string) => FlowNode | null;
   updateNodeData: (id: string, updates: { label?: string; config?: Record<string, unknown> }) => void;
   deleteNode: (id: string) => void;
+  /** Spread-merge nodes/edges from an external source (e.g. JSON editor). */
+  mergeFromFlow: (nodes: FlowNode[], edges: FlowEdge[]) => void;
 }
 
 interface CanvasProps {
@@ -232,6 +232,41 @@ const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(
       setNodes((nds) => nds.filter((n) => n.id !== id));
       setEdges((eds) => eds.filter((e) => e.source !== id && e.target !== id));
       onSelectionChange(null);
+    },
+
+    mergeFromFlow(flowNodes, flowEdges) {
+      // Spread-merge: preserve React Flow internals (measured, handleBounds)
+      setNodes((prev) => {
+        const prevMap = new Map(prev.map((n) => [n.id, n]));
+        return flowNodes.map((fn) => {
+          const existing = prevMap.get(fn.id);
+          if (existing) {
+            return {
+              ...existing,
+              position: { x: fn.position.x, y: fn.position.y },
+              data: { ...existing.data, label: fn.label, kind: fn.kind, config: fn.config },
+            };
+          }
+          return {
+            id: fn.id,
+            type: fn.node_type,
+            position: { x: fn.position.x, y: fn.position.y },
+            data: { label: fn.label, kind: fn.kind, config: fn.config },
+            sourcePosition: Position.Right,
+            targetPosition: Position.Left,
+          };
+        });
+      });
+      setEdges(flowEdges.map((fe) => ({
+        id: fe.id,
+        source: fe.source,
+        target: fe.target,
+        sourceHandle: "out",
+        targetHandle: "in",
+        type: "smoothstep",
+        animated: true,
+        style: EDGE_STYLE,
+      })));
     },
   }), [nodes, setNodes, setEdges, onSelectionChange]);
 

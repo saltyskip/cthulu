@@ -73,7 +73,7 @@ impl FlowRunner {
 
 impl FlowRunner {
     /// Prepare a session for interactive Claude Code use.
-    /// Runs sources + filters + prompt rendering but stops before executing.
+    /// Runs sources + prompt rendering but stops before executing.
     /// Returns everything the TUI needs to launch an interactive session.
     pub async fn prepare_session(&self, flow: &Flow) -> Result<SessionInfo> {
         let executor_node = flow
@@ -86,12 +86,6 @@ impl FlowRunner {
             .nodes
             .iter()
             .filter(|n| n.node_type == NodeType::Source)
-            .collect();
-
-        let filter_nodes: Vec<_> = flow
-            .nodes
-            .iter()
-            .filter(|n| n.node_type == NodeType::Filter)
             .collect();
 
         let sink_nodes: Vec<_> = flow
@@ -135,14 +129,7 @@ impl FlowRunner {
             vec![]
         };
 
-        // 2. Apply filters
-        let mut items = items;
-        for node in &filter_nodes {
-            let filter = processors::parse_filter_config(node)?;
-            items = filter.apply(items);
-        }
-
-        // 3. Render prompt
+        // 2. Render prompt
         let content = format_items(&items);
         let timestamp = Utc::now().format("%Y-%m-%d %H:%M UTC").to_string();
 
@@ -214,7 +201,7 @@ impl FlowRunner {
     }
 
     /// Prepare a session for a specific executor node (node-level chat).
-    /// Does NOT run sources/filters — just resolves the node's own config
+    /// Does NOT run sources — just resolves the node's own config
     /// (prompt, permissions, working_dir, system_prompt).
     pub fn prepare_node_session(flow: &Flow, node_id: &str) -> Result<SessionInfo> {
         let executor_node = flow
@@ -260,9 +247,9 @@ impl FlowRunner {
         })
     }
 
-    /// Execute a flow. If `context` is `Some`, skips source fetching/filtering
+    /// Execute a flow. If `context` is `Some`, skips source fetching
     /// and uses the provided variables for prompt rendering (e.g. PR diff).
-    /// If `context` is `None`, runs the full source → filter → render pipeline.
+    /// If `context` is `None`, runs the full source → render pipeline.
     pub async fn execute(
         &self,
         flow: &Flow,

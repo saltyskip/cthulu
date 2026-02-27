@@ -22,7 +22,6 @@ interface MiniFlowDiagramProps {
 const NODE_COLORS: Record<string, string> = {
   trigger: "var(--trigger, #d29922)",
   source: "var(--source, #58a6ff)",
-  filter: "var(--source, #58a6ff)",
   executor: "var(--executor, #bc8cff)",
   sink: "var(--sink, #3fb950)",
 };
@@ -124,22 +123,6 @@ export default function MiniFlowDiagram({ shape }: MiniFlowDiagramProps) {
       x += X_STEP;
     }
 
-    // --- Filters ---
-    const filterIds: string[] = [];
-    if (shape.filters.length > 0) {
-      shape.filters.forEach((kind, i) => {
-        const id = `f${i}`;
-        rfNodes.push(
-          makeMiniNode(id, kindLabel(kind), "filter", x, Y_CENTER)
-        );
-        filterIds.push(id);
-        // connect last group to filters
-        const prevGroup = sourceIds.length > 0 ? sourceIds : [triggerId];
-        prevGroup.forEach((pid) => rfEdges.push(makeMiniEdge(pid, id)));
-      });
-      x += X_STEP;
-    }
-
     // --- Executors ---
     const executorIds: string[] = [];
     shape.executors.forEach((kind, i) => {
@@ -149,11 +132,9 @@ export default function MiniFlowDiagram({ shape }: MiniFlowDiagramProps) {
       if (i === 0) {
         // Connect previous stage
         const prevGroup =
-          filterIds.length > 0
-            ? filterIds
-            : sourceIds.length > 0
-              ? sourceIds
-              : [triggerId];
+          sourceIds.length > 0
+            ? sourceIds
+            : [triggerId];
         prevGroup.forEach((pid) => rfEdges.push(makeMiniEdge(pid, id)));
       } else {
         // Chain executors

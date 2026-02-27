@@ -1,56 +1,48 @@
-import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import * as api from "./api/client";
-import { log, getEntries, subscribe } from "./api/logger";
+import { log } from "./api/logger";
 import { subscribeToRuns } from "./api/runStream";
 import type { Flow, FlowNode, FlowEdge, FlowSummary, NodeTypeSchema, RunEvent } from "./types/flow";
-import { validateFlow } from "./utils/validateNode";
 import TopBar from "./components/TopBar";
-import FlowList from "./components/FlowList";
-import AgentList from "./components/AgentList";
-
 import Sidebar from "./components/Sidebar";
-import Canvas, { type CanvasHandle } from "./components/Canvas";
-import PropertyPanel from "./components/PropertyPanel";
-import AgentEditor from "./components/AgentEditor";
-import RunHistory from "./components/RunHistory";
-import BottomPanel, { type BottomTab } from "./components/BottomPanel";
-import ErrorBoundary from "./components/ErrorBoundary";
+import FlowWorkspaceView from "./components/FlowWorkspaceView";
+import AgentWorkspaceView from "./components/AgentWorkspaceView";
+import { type CanvasHandle } from "./components/Canvas";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+
+type ActiveView = "flow-editor" | "agent-workspace";
 
 export default function App() {
   const [flows, setFlows] = useState<FlowSummary[]>([]);
   const [activeFlowId, setActiveFlowId] = useState<string | null>(null);
-
   const [initialFlow, setInitialFlow] = useState<Flow | null>(null);
   const [nodeTypes, setNodeTypes] = useState<NodeTypeSchema[]>([]);
-  const [promptFiles, setPromptFiles] = useState<api.PromptFile[]>([]);
 
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
+  const [selectedAgentName, setSelectedAgentName] = useState<string | null>(null);
+  const [visitedAgents, setVisitedAgents] = useState<Map<string, string>>(new Map()); // id -> name
   const [agentListKey, setAgentListKey] = useState(0);
   const [showSettings, setShowSettings] = useState(false);
-  const [activeBottomTab, setActiveBottomTab] = useState<BottomTab | null>(null);
-  const [bottomPanelHeight, setBottomPanelHeight] = useState(280);
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-  const [deleteSaving, setDeleteSaving] = useState(false);
-  const [errorCount, setErrorCount] = useState(0);
-  const [serverUrl, setServerUrlState] = useState(api.getServerUrl());
   const [runEvents, setRunEvents] = useState<RunEvent[]>([]);
   const [nodeRunStatus, setNodeRunStatus] = useState<Record<string, "running" | "completed" | "failed">>({});
+  const [runLogOpen, setRunLogOpen] = useState(false);
+  const [activeView, setActiveView] = useState<ActiveView>("flow-editor");
+
   // Keep a light reference for TopBar (name, enabled) without driving Canvas
   const [activeFlowMeta, setActiveFlowMeta] = useState<{ id: string; name: string; description: string; enabled: boolean } | null>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const canvasRef = useRef<CanvasHandle>(null);
 
-  // --- Validation state ---
-  const latestSnapshotRef = useRef<{ nodes: FlowNode[]; edges: FlowEdge[] } | null>(null);
-  const [snapshotVersion, setSnapshotVersion] = useState(0);
-
-  const nodeValidationErrors = useMemo(() => {
-    // snapshotVersion used as dependency trigger
-    void snapshotVersion;
-    return latestSnapshotRef.current ? validateFlow(latestSnapshotRef.current.nodes) : {};
-  }, [snapshotVersion]);
-  const flowHasErrors = Object.keys(nodeValidationErrors).length > 0;
+  // --- Server URL state ---
+  const [serverUrl, setServerUrlState] = useState(api.getServerUrl());
 
   // --- Drag-and-drop state (refs to avoid re-renders during drag) ---
   const dragging = useRef<NodeTypeSchema | null>(null);
@@ -68,16 +60,13 @@ export default function App() {
       if (!nt) return;
       dragging.current = null;
 
-      // Clean up ghost
       ghostEl.current?.remove();
       ghostEl.current = null;
       document.body.style.cursor = "";
 
-      // Hit-test: is the cursor over the canvas?
       const el = document.elementFromPoint(e.clientX, e.clientY);
       if (!el?.closest(".canvas-container")) return;
 
-      // Place the node — Canvas owns state, no need to update App
       canvasRef.current?.addNodeAtScreen(
         nt.node_type, nt.kind, nt.label, e.clientX, e.clientY
       );
@@ -102,14 +91,6 @@ export default function App() {
     ghostEl.current = ghost;
   }, []);
 
-  // --- Error count badge ---
-  useEffect(() => {
-    return subscribe(() => {
-      const errors = getEntries().filter((e) => e.level === "error").length;
-      setErrorCount(errors);
-    });
-  }, []);
-
   // --- SSE run event subscription ---
   const clearTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const handleRunEvent = useCallback((event: RunEvent) => {
@@ -118,13 +99,13 @@ export default function App() {
       return next.length > 500 ? next.slice(-500) : next;
     });
 
-    // Reset node statuses at start of a new run
+    // Auto-open run log when a run starts
     if (event.event_type === "run_started") {
       if (clearTimer.current) clearTimeout(clearTimer.current);
       setNodeRunStatus({});
+      setRunLogOpen(true);
     }
 
-    // Update node run status for canvas highlighting
     if (event.node_id) {
       if (event.event_type === "node_started") {
         setNodeRunStatus((prev) => ({ ...prev, [event.node_id!]: "running" }));
@@ -135,7 +116,6 @@ export default function App() {
       }
     }
 
-    // Clear all node statuses a while after a run finishes
     if (event.event_type === "run_completed" || event.event_type === "run_failed") {
       clearTimer.current = setTimeout(() => setNodeRunStatus({}), 10000);
     }
@@ -158,7 +138,34 @@ export default function App() {
     log("info", `Server URL: ${api.getServerUrl()}`);
     loadFlows();
     loadNodeTypes();
-    loadPromptFiles();
+  }, []);
+
+  // --- File change subscription (SSE) ---
+  const activeFlowIdRef = useRef(activeFlowId);
+  activeFlowIdRef.current = activeFlowId;
+  // Suppress the next auto-save when we receive an external update, to avoid write-back loops.
+  const suppressSaveRef = useRef(false);
+
+  useEffect(() => {
+    const cleanup = api.subscribeToChanges((event) => {
+      if (event.resource_type === "flow") {
+        loadFlows();
+        // If the active flow was updated externally, re-fetch and merge into canvas
+        if (activeFlowIdRef.current && event.resource_id === activeFlowIdRef.current && event.change_type === "updated") {
+          api.getFlow(activeFlowIdRef.current).then((flow) => {
+            setActiveFlowMeta({ id: flow.id, name: flow.name, description: flow.description, enabled: flow.enabled });
+            // Suppress the auto-save that will fire when canvas state changes
+            suppressSaveRef.current = true;
+            // Use imperative merge to update the canvas without triggering a flow switch
+            canvasRef.current?.mergeFromFlow(flow.nodes, flow.edges);
+          }).catch(() => { /* logged */ });
+        }
+      } else if (event.resource_type === "agent") {
+        setAgentListKey((k) => k + 1);
+      }
+      // prompt_change: no-op for now
+    });
+    return cleanup;
   }, []);
 
   // --- API helpers ---
@@ -170,15 +177,9 @@ export default function App() {
     try { setNodeTypes(await api.getNodeTypes()); } catch { /* logged */ }
   };
 
-  const loadPromptFiles = async () => {
-    try { setPromptFiles(await api.listPromptFiles()); } catch { /* logged */ }
-  };
-
-  // Re-fetch data when server connection is restored
   const handleReconnect = useCallback(() => {
     loadFlows();
     loadNodeTypes();
-    loadPromptFiles();
   }, []);
 
   const selectFlow = async (id: string) => {
@@ -188,22 +189,23 @@ export default function App() {
       setActiveFlowId(flow.id);
       setActiveFlowMeta({ id: flow.id, name: flow.name, description: flow.description, enabled: flow.enabled });
       setSelectedNodeId(null);
+      setActiveView("flow-editor");
     } catch { /* logged */ }
   };
 
-  const handleSelectPromptFile = (file: api.PromptFile) => {
-    if (!selectedNodeId || !canvasRef.current) return;
-    const node = canvasRef.current.getNode(selectedNodeId);
-    if (!node) return;
-    // Only apply to executor nodes
-    if (node.node_type !== "executor") {
-      log("warn", `Cannot assign prompt to ${node.node_type} node — select an executor node`);
-      return;
-    }
-    canvasRef.current.updateNodeData(selectedNodeId, {
-      config: { ...node.config, prompt: file.path },
-    });
-    log("info", `Prompt set: ${file.path} → ${node.label ?? selectedNodeId}`);
+  const handleSelectAgent = async (agentId: string) => {
+    try {
+      const agent = await api.getAgent(agentId);
+      setSelectedAgentId(agentId);
+      setSelectedAgentName(agent.name);
+      setVisitedAgents((prev) => new Map(prev).set(agentId, agent.name));
+      setSelectedNodeId(null);
+      setActiveView("agent-workspace");
+    } catch { /* logged */ }
+  };
+
+  const handleBackToFlow = () => {
+    setActiveView("flow-editor");
   };
 
   const createFlow = async () => {
@@ -214,9 +216,7 @@ export default function App() {
     } catch { /* logged */ }
   };
 
-  // Called when the user imports a template from the gallery.
-  // The flow has already been saved by the backend; we just reload and navigate.
-  const handleImportTemplate = async (flow: import("./types/flow").Flow) => {
+  const handleImportTemplate = async (flow: Flow) => {
     try {
       await loadFlows();
       await selectFlow(flow.id);
@@ -225,9 +225,12 @@ export default function App() {
 
   // --- Snapshot callback: Canvas pushes state here for persistence ---
   const handleFlowSnapshot = useCallback((snapshot: { nodes: FlowNode[]; edges: FlowEdge[] }) => {
-    latestSnapshotRef.current = snapshot;
-    setSnapshotVersion((v) => v + 1);
     if (!activeFlowId || !activeFlowMeta) return;
+    // Skip save if this snapshot was triggered by an external file change
+    if (suppressSaveRef.current) {
+      suppressSaveRef.current = false;
+      return;
+    }
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(async () => {
       try {
@@ -242,32 +245,8 @@ export default function App() {
     }, 500);
   }, [activeFlowId, activeFlowMeta]);
 
-  // Executor nodes for bottom panel tabs
-  const executorNodes = useMemo(() => {
-    void snapshotVersion;
-    return (latestSnapshotRef.current?.nodes ?? []).filter(
-      (n) => n.node_type === "executor"
-    );
-  }, [snapshotVersion]);
-
   const handleSelectionChange = useCallback((nodeId: string | null) => {
     setSelectedNodeId(nodeId);
-    setSelectedAgentId(null);
-    // If an executor node was clicked, open its bottom tab
-    if (nodeId) {
-      const snap = latestSnapshotRef.current;
-      if (snap) {
-        const node = snap.nodes.find((n) => n.id === nodeId);
-        if (node && node.node_type === "executor") {
-          setActiveBottomTab({
-            kind: "executor",
-            nodeId: node.id,
-            label: node.label || "Executor",
-            nodeKind: node.kind,
-          });
-        }
-      }
-    }
   }, []);
 
   const handleRename = async (name: string) => {
@@ -284,25 +263,18 @@ export default function App() {
     if (!activeFlowMeta) return;
     try {
       log("info", `Triggering flow: ${activeFlowMeta.name}`);
-      setActiveBottomTab({ kind: "log" });
+      setRunLogOpen(true);
       await api.triggerFlow(activeFlowMeta.id);
     } catch { /* logged */ }
-  };
-
-  const handleToggleEnabled = async () => {
-    if (!activeFlowMeta) return;
-    handleToggleFlowEnabled(activeFlowMeta.id);
   };
 
   const handleToggleFlowEnabled = async (flowId: string) => {
     const flow = flows.find((f) => f.id === flowId);
     if (!flow) return;
     const newEnabled = !flow.enabled;
-    // Optimistic update for the sidebar list
     setFlows((prev) =>
       prev.map((f) => (f.id === flowId ? { ...f, enabled: newEnabled } : f))
     );
-    // If this is the active flow, also update activeFlowMeta
     if (activeFlowMeta && activeFlowMeta.id === flowId) {
       setActiveFlowMeta((prev) => prev ? { ...prev, enabled: newEnabled } : prev);
     }
@@ -310,34 +282,6 @@ export default function App() {
       await api.updateFlow(flowId, { enabled: newEnabled });
       loadFlows();
     } catch { /* logged */ }
-  };
-
-  const handleDeleteFlow = async () => {
-    if (!activeFlowId) return;
-    setShowDeleteConfirm(true);
-  };
-
-  const doDeleteFlow = async () => {
-    if (!activeFlowId) return;
-    try {
-      await api.deleteFlow(activeFlowId);
-      setActiveBottomTab(null);
-      setShowDeleteConfirm(false);
-      setActiveFlowId(null);
-      setInitialFlow(null);
-      setActiveFlowMeta(null);
-      setSelectedNodeId(null);
-      loadFlows();
-    } catch { /* logged */ }
-  };
-
-  const handleSaveAndDelete = async () => {
-    if (!activeFlowId || !activeFlowMeta) return;
-    setDeleteSaving(true);
-    // Terminal transcripts are now managed by NodeTerminal component.
-    // Prompt saving from terminal sessions can be added as a future feature.
-    setDeleteSaving(false);
-    await doDeleteFlow();
   };
 
   const handleSaveSettings = () => {
@@ -348,177 +292,97 @@ export default function App() {
   };
 
   return (
-    <div className={activeBottomTab ? "app-with-console" : ""}>
+    <div className="app">
       <TopBar
+        activeView={activeView}
         flow={activeFlowMeta}
         flowId={activeFlowId}
         onTrigger={handleTrigger}
-        onToggleEnabled={handleToggleEnabled}
         onRename={handleRename}
+        agentName={selectedAgentName}
+        onBackToFlow={handleBackToFlow}
         onSettingsClick={() => setShowSettings(true)}
-        consoleOpen={activeBottomTab?.kind === "console"}
-        onToggleConsole={() => {
-          setActiveBottomTab((prev) =>
-            prev?.kind === "console" ? null : { kind: "console" }
-          );
-        }}
-        runLogOpen={activeBottomTab?.kind === "log"}
-        onToggleRunLog={() => {
-          setActiveBottomTab((prev) =>
-            prev?.kind === "log" ? null : { kind: "log" }
-          );
-        }}
-        errorCount={errorCount}
-        flowHasErrors={flowHasErrors}
-        validationErrors={nodeValidationErrors}
-        flowNodes={latestSnapshotRef.current?.nodes ?? []}
         onReconnect={handleReconnect}
       />
       <div className="app-layout">
-        <div style={{ display: "flex", flexDirection: "column", overflow: "hidden", width: 260, background: "var(--bg-secondary)", borderRight: "1px solid var(--border)" }}>
-          {/* Navigator — top half */}
-          <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", overflow: "hidden" }}>
-            <FlowList
-              flows={flows}
-              activeFlowId={activeFlowId}
-              onSelect={selectFlow}
-              onCreate={createFlow}
-              onImportTemplate={handleImportTemplate}
-              onToggleEnabled={handleToggleFlowEnabled}
-            />
-          </div>
+        <Sidebar
+          flows={flows}
+          activeFlowId={activeFlowId}
+          onSelectFlow={selectFlow}
+          onCreateFlow={createFlow}
+          onImportTemplate={handleImportTemplate}
+          onToggleEnabled={handleToggleFlowEnabled}
+          selectedAgentId={selectedAgentId}
+          onSelectAgent={handleSelectAgent}
+          agentListKey={agentListKey}
+          onAgentCreated={(id) => {
+            handleSelectAgent(id);
+          }}
+          activeView={activeView}
+          nodeTypes={nodeTypes}
+          onGrab={handleGrab}
+        />
 
-          {/* Agents */}
-          <div style={{ minHeight: 80, maxHeight: 200, display: "flex", flexDirection: "column", overflow: "hidden", borderTop: "1px solid var(--border)" }}>
-            <AgentList
-              key={agentListKey}
-              selectedAgentId={selectedAgentId}
-              onSelectAgent={(id) => {
-                setSelectedAgentId(id);
-                setSelectedNodeId(null);
-              }}
-            />
-          </div>
-
-          {/* Palette — bottom */}
-          <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", overflow: "hidden", borderTop: "1px solid var(--border)" }}>
-            <div style={{ flex: 1, overflowY: "auto", minHeight: 0 }}>
-              <Sidebar
-                nodeTypes={nodeTypes}
-                onGrab={handleGrab}
-                promptFiles={promptFiles}
-                onSelectPrompt={handleSelectPromptFile}
-              />
-            </div>
-          </div>
+        <div style={{ display: activeView === "flow-editor" ? "contents" : "none" }}>
+          <FlowWorkspaceView
+            flowId={activeFlowId}
+            initialFlow={initialFlow}
+            canvasRef={canvasRef}
+            onFlowSnapshot={handleFlowSnapshot}
+            onSelectionChange={handleSelectionChange}
+            selectedNodeId={selectedNodeId}
+            nodeRunStatus={nodeRunStatus}
+            runEvents={runEvents}
+            onRunEventsClear={() => setRunEvents([])}
+            runLogOpen={runLogOpen}
+            onRunLogClose={() => setRunLogOpen(false)}
+            activeFlowMeta={activeFlowMeta}
+          />
         </div>
-
-        {activeFlowId ? (
-          <ErrorBoundary>
-            <Canvas
-              ref={canvasRef}
-              flowId={activeFlowId}
-              initialFlow={initialFlow}
-              onFlowSnapshot={handleFlowSnapshot}
-              onSelectionChange={handleSelectionChange}
-              nodeRunStatus={nodeRunStatus}
-              nodeValidationErrors={nodeValidationErrors}
-            />
-          </ErrorBoundary>
-        ) : (
-          <div className="canvas-container">
-            <div className="empty-state">
-              <p>Select a flow or create a new one</p>
-            </div>
-          </div>
-        )}
-
-        <div style={{ display: "flex", flexDirection: "column" }}>
-          {selectedAgentId ? (
-            <AgentEditor
-              key={selectedAgentId}
-              agentId={selectedAgentId}
-              onClose={() => setSelectedAgentId(null)}
+        {[...visitedAgents.entries()].map(([agentId, agentName]) => (
+          <div
+            key={agentId}
+            style={{ display: activeView === "agent-workspace" && selectedAgentId === agentId ? "contents" : "none" }}
+          >
+            <AgentWorkspaceView
+              agentId={agentId}
+              agentName={agentName}
               onDeleted={() => {
+                setVisitedAgents((prev) => { const next = new Map(prev); next.delete(agentId); return next; });
                 setSelectedAgentId(null);
+                setSelectedAgentName(null);
                 setAgentListKey((k) => k + 1);
+                setActiveView("flow-editor");
               }}
             />
-          ) : (
-            <PropertyPanel
-              canvasRef={canvasRef}
-              selectedNodeId={selectedNodeId}
-              nodeValidationErrors={nodeValidationErrors}
-            />
-          )}
-          <RunHistory flowId={activeFlowId} />
-          {activeFlowId && (
-            <div style={{ padding: 16 }}>
-              <button className="danger" onClick={handleDeleteFlow}>
-                Delete Flow
-              </button>
-            </div>
-          )}
-        </div>
+          </div>
+        ))}
       </div>
 
-      <BottomPanel
-        activeTab={activeBottomTab}
-        onSelectTab={setActiveBottomTab}
-        height={bottomPanelHeight}
-        onHeightChange={setBottomPanelHeight}
-        flowId={activeFlowId}
-        executorNodes={executorNodes}
-        runEvents={runEvents}
-        onRunEventsClear={() => setRunEvents([])}
-        errorCount={errorCount}
-      />
-
-      {showDeleteConfirm && (
-        <div className="modal-overlay" onClick={() => setShowDeleteConfirm(false)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <h2>Delete Flow</h2>
-            <p style={{ fontSize: 13, color: "var(--text-secondary)", marginBottom: 16 }}>
-              This flow has an interact session with history. Would you like to save a summary to the Prompts Library before deleting?
-            </p>
-            <div className="modal-actions">
-              <button className="ghost" onClick={() => setShowDeleteConfirm(false)}>
-                Cancel
-              </button>
-              <button className="danger" onClick={doDeleteFlow}>
-                Delete Only
-              </button>
-              <button className="primary" onClick={handleSaveAndDelete} disabled={deleteSaving}>
-                {deleteSaving ? "Saving..." : "Save & Delete"}
-              </button>
-            </div>
+      <Dialog open={showSettings} onOpenChange={setShowSettings}>
+        <DialogContent className="bg-[var(--bg-secondary)] border-[var(--border)] text-[var(--text)]">
+          <DialogHeader>
+            <DialogTitle>Server Settings</DialogTitle>
+          </DialogHeader>
+          <div className="form-group">
+            <label>Server URL</label>
+            <input
+              value={serverUrl}
+              onChange={(e) => setServerUrlState(e.target.value)}
+              placeholder="http://localhost:8081"
+              className="w-full bg-[var(--bg)] border border-[var(--border)] rounded-md px-3 py-2 text-[var(--text)] text-sm outline-none focus:border-[var(--accent)]"
+            />
           </div>
-        </div>
-      )}
-
-      {showSettings && (
-        <div className="modal-overlay" onClick={() => setShowSettings(false)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <h2>Server Settings</h2>
-            <div className="form-group">
-              <label>Server URL</label>
-              <input
-                value={serverUrl}
-                onChange={(e) => setServerUrlState(e.target.value)}
-                placeholder="http://localhost:8081"
-              />
-            </div>
-            <div className="modal-actions">
-              <button className="ghost" onClick={() => setShowSettings(false)}>
-                Cancel
-              </button>
-              <button className="primary" onClick={handleSaveSettings}>
-                Save
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setShowSettings(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleSaveSettings}>
+              Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -37,6 +37,11 @@ export function getServerUrl(): string {
   return getBaseUrl();
 }
 
+export function getTerminalWsUrl(agentId: string): string {
+  const wsBase = getBaseUrl().replace(/^http/, "ws");
+  return `${wsBase}/api/agents/${agentId}/terminal`;
+}
+
 async function apiFetch<T>(
   path: string,
   options: RequestInit = {}
@@ -465,6 +470,47 @@ export async function updateAgent(
 
 export async function deleteAgent(id: string): Promise<void> {
   await apiFetch(`/agents/${id}`, { method: "DELETE" });
+}
+
+// ---------------------------------------------------------------------------
+// File Change Subscriptions (SSE)
+// ---------------------------------------------------------------------------
+
+export interface ResourceChangeEvent {
+  resource_type: "flow" | "agent" | "prompt";
+  change_type: "created" | "updated" | "deleted";
+  resource_id: string;
+  timestamp: string;
+}
+
+/**
+ * Subscribe to real-time resource change events via SSE.
+ * Returns a cleanup function to close the connection.
+ */
+export function subscribeToChanges(
+  onEvent: (event: ResourceChangeEvent) => void
+): () => void {
+  const url = `${getBaseUrl()}/api/changes`;
+  const source = new EventSource(url);
+
+  const handler = (e: MessageEvent) => {
+    try {
+      const event: ResourceChangeEvent = JSON.parse(e.data);
+      onEvent(event);
+    } catch {
+      log("warn", "Failed to parse change event", e.data);
+    }
+  };
+
+  source.addEventListener("flow_change", handler);
+  source.addEventListener("agent_change", handler);
+  source.addEventListener("prompt_change", handler);
+
+  source.onerror = () => {
+    log("warn", "Changes SSE connection error — will auto-reconnect");
+  };
+
+  return () => source.close();
 }
 
 // ---------------------------------------------------------------------------

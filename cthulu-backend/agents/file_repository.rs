@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
@@ -13,6 +13,8 @@ use super::repository::AgentRepository;
 pub struct FileAgentRepository {
     agents: RwLock<HashMap<String, Agent>>,
     dir: PathBuf,
+    /// Filenames written by this process — used to skip fs-watcher events for our own writes.
+    self_writes: std::sync::Mutex<HashSet<String>>,
 }
 
 impl FileAgentRepository {
@@ -20,7 +22,39 @@ impl FileAgentRepository {
         Self {
             agents: RwLock::new(HashMap::new()),
             dir: base_dir.as_ref().join("agents"),
+            self_writes: std::sync::Mutex::new(HashSet::new()),
         }
+    }
+
+    /// Mark a filename as written by this process (for fs-watcher loop prevention).
+    pub fn mark_self_write(&self, filename: &str) {
+        self.self_writes.lock().unwrap().insert(filename.to_string());
+    }
+
+    /// Consume (remove) a self-write marker. Returns true if the filename was present.
+    pub fn consume_self_write(&self, filename: &str) -> bool {
+        self.self_writes.lock().unwrap().remove(filename)
+    }
+
+    /// Re-read a single agent JSON file from disk into the cache. Returns the resource ID if successful.
+    pub async fn reload_file(&self, filename: &str) -> Option<String> {
+        let path = self.dir.join(filename);
+        let content = std::fs::read_to_string(&path).ok()?;
+        let agent: Agent = serde_json::from_str(&content).ok()?;
+        let id = agent.id.clone();
+        self.agents.write().await.insert(id.clone(), agent);
+        tracing::debug!(agent_id = %id, filename, "reloaded agent from disk");
+        Some(id)
+    }
+
+    /// Remove an agent from the cache by filename. Returns the resource ID if it was present.
+    pub async fn evict_file(&self, filename: &str) -> Option<String> {
+        let id = filename.trim_end_matches(".json").to_string();
+        let removed = self.agents.write().await.remove(&id);
+        if removed.is_some() {
+            tracing::debug!(agent_id = %id, filename, "evicted agent from cache");
+        }
+        removed.map(|a| a.id)
     }
 }
 
@@ -36,7 +70,9 @@ impl AgentRepository for FileAgentRepository {
 
     async fn save(&self, agent: Agent) -> Result<()> {
         std::fs::create_dir_all(&self.dir)?;
-        let path = self.dir.join(format!("{}.json", agent.id));
+        let filename = format!("{}.json", agent.id);
+        self.mark_self_write(&filename);
+        let path = self.dir.join(&filename);
         let content = serde_json::to_string_pretty(&agent)?;
 
         // Atomic write via temp file + rename
@@ -49,8 +85,10 @@ impl AgentRepository for FileAgentRepository {
     }
 
     async fn delete(&self, id: &str) -> Result<bool> {
+        let filename = format!("{id}.json");
+        self.mark_self_write(&filename);
         let existed = self.agents.write().await.remove(id).is_some();
-        let path = self.dir.join(format!("{id}.json"));
+        let path = self.dir.join(&filename);
         if path.exists() {
             std::fs::remove_file(&path)?;
         }
@@ -95,7 +133,6 @@ impl AgentRepository for FileAgentRepository {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::Utc;
 
     #[tokio::test]
     async fn test_agent_crud() {
@@ -104,17 +141,12 @@ mod tests {
         store.load_all().await.unwrap();
 
         // Create
-        let agent = Agent {
-            id: "test-1".to_string(),
-            name: "Test Agent".to_string(),
-            description: "A test agent".to_string(),
-            prompt: "You are a helpful assistant.".to_string(),
-            permissions: vec!["Read".to_string()],
-            append_system_prompt: None,
-            working_dir: None,
-            created_at: Utc::now(),
-            updated_at: Utc::now(),
-        };
+        let agent = Agent::builder("test-1")
+            .name("Test Agent")
+            .description("A test agent")
+            .prompt("You are a helpful assistant.")
+            .permissions(vec!["Read".to_string()])
+            .build();
         store.save(agent.clone()).await.unwrap();
 
         // List
@@ -150,17 +182,12 @@ mod tests {
         let store = FileAgentRepository::new(tmp.path());
         store.load_all().await.unwrap();
 
-        let agent = Agent {
-            id: "persist-1".to_string(),
-            name: "Persistent".to_string(),
-            description: String::new(),
-            prompt: "Do stuff".to_string(),
-            permissions: vec![],
-            append_system_prompt: Some("Be brief.".to_string()),
-            working_dir: Some("/tmp".to_string()),
-            created_at: Utc::now(),
-            updated_at: Utc::now(),
-        };
+        let agent = Agent::builder("persist-1")
+            .name("Persistent")
+            .prompt("Do stuff")
+            .append_system_prompt("Be brief.")
+            .working_dir("/tmp")
+            .build();
         store.save(agent).await.unwrap();
 
         // New store instance, load from disk

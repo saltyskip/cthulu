@@ -13,7 +13,7 @@ debug-assertions = false
 overflow-checks = false
 
 [dependencies]
-axum = { version = "0.8.8", features = ["json"] }
+axum = { version = "0.8.8", features = ["json", "ws"] }
 tokio = { version = "1.49.0", features = ["full"] }
 tokio-stream = { version = "0.1.18", features = ["io-util"] }
 futures = "0.3.32"
@@ -38,6 +38,9 @@ tower-http = { version = "0.6.8", features = ["cors"] }
 clap = { version = "4.5.60", features = ["derive"] }
 tokio-tungstenite = "0.28"
 futures-util = "0.3.32"
+portable-pty = "0.9"
+notify = "7"
+notify-debouncer-mini = "0.5"
 
 # Tracing
 tracing = "0.1.44"

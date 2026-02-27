@@ -17,8 +17,6 @@ use crate::tasks::executors::Executor;
 use crate::tasks::executors::claude_code::ClaudeCodeExecutor;
 use crate::tasks::executors::sandbox::SandboxExecutor;
 use crate::tasks::executors::vm_executor::VmExecutor;
-use crate::tasks::filters::Filter;
-use crate::tasks::filters::keyword::{KeywordFilter, MatchField};
 use crate::tasks::pipeline::{format_items, resolve_sinks};
 use crate::tasks::sources;
 
@@ -45,7 +43,6 @@ pub async fn process_node(
     match node.node_type {
         NodeType::Trigger => Ok(NodeOutput::Empty),
         NodeType::Source => process_source(node, deps).await,
-        NodeType::Filter => process_filter(node, input),
         NodeType::Executor => process_executor(node, input, deps).await,
         NodeType::Sink => process_sink(node, input, deps).await,
     }
@@ -74,24 +71,6 @@ async fn process_source(node: &Node, deps: &NodeDeps) -> Result<NodeOutput> {
     );
 
     Ok(NodeOutput::Items(items))
-}
-
-// ── Filter Processing ──────────────────────────────────────────────────
-
-fn process_filter(node: &Node, input: NodeOutput) -> Result<NodeOutput> {
-    let items = input.as_items();
-    let filter = parse_filter_config(node)?;
-    let before = items.len();
-    let filtered = filter.apply(items);
-
-    tracing::debug!(
-        node = %node.label,
-        before = before,
-        after = filtered.len(),
-        "Filter applied",
-    );
-
-    Ok(NodeOutput::Items(filtered))
 }
 
 // ── Executor Processing ────────────────────────────────────────────────
@@ -415,27 +394,6 @@ pub fn parse_source_configs(nodes: &[&Node]) -> Result<Vec<SourceConfig>> {
         configs.push(config);
     }
     Ok(configs)
-}
-
-pub fn parse_filter_config(node: &Node) -> Result<Box<dyn Filter>> {
-    match node.kind.as_str() {
-        "keyword" => {
-            let keywords: Vec<String> = node.config["keywords"]
-                .as_array()
-                .context("keyword filter missing 'keywords'")?
-                .iter()
-                .filter_map(|v| v.as_str().map(String::from))
-                .collect();
-            let require_all = node.config["require_all"].as_bool().unwrap_or(false);
-            let field = match node.config["field"].as_str().unwrap_or("title_or_summary") {
-                "title" => MatchField::Title,
-                "summary" => MatchField::Summary,
-                _ => MatchField::TitleOrSummary,
-            };
-            Ok(Box::new(KeywordFilter::new(keywords, require_all, field)))
-        }
-        other => bail!("unknown filter kind: {other}"),
-    }
 }
 
 pub fn parse_sink_configs(nodes: &[&Node]) -> Result<Vec<SinkConfig>> {

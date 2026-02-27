@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import type { Agent } from "../types/flow";
+import { STUDIO_ASSISTANT_ID, type Agent } from "../types/flow";
 import { getAgent, updateAgent, deleteAgent } from "../api/client";
+import { Button } from "@/components/ui/button";
+import { FormField } from "@/components/ui/form-field";
 
 interface AgentEditorProps {
   agentId: string;
@@ -95,9 +97,9 @@ export default function AgentEditor({
       <div className="property-panel">
         <div className="sidebar-header">
           <h2>Agent</h2>
-          <button className="ghost" onClick={onClose}>
+          <Button variant="ghost" size="icon-xs" onClick={onClose}>
             ×
-          </button>
+          </Button>
         </div>
         <div style={{ padding: 12, fontSize: 12, color: "var(--text-secondary)" }}>
           Agent not found
@@ -124,42 +126,38 @@ export default function AgentEditor({
             </span>
           )}
         </h2>
-        <button className="ghost" onClick={onClose} title="Close agent editor">
+        <Button variant="ghost" size="icon-xs" onClick={onClose} title="Close agent editor">
           ×
-        </button>
+        </Button>
       </div>
 
       <div className="property-fields">
-        <div className="form-group">
-          <label>Name</label>
+        <FormField label="Name">
           <input
             value={agent.name}
             onChange={(e) => handleChange("name", e.target.value)}
             placeholder="Agent name"
           />
-        </div>
+        </FormField>
 
-        <div className="form-group">
-          <label>Description</label>
+        <FormField label="Description">
           <input
             value={agent.description}
             onChange={(e) => handleChange("description", e.target.value)}
             placeholder="What does this agent do?"
           />
-        </div>
+        </FormField>
 
-        <div className="form-group">
-          <label>Prompt (file path or inline)</label>
+        <FormField label="Prompt (file path or inline)">
           <textarea
             value={agent.prompt}
             onChange={(e) => handleChange("prompt", e.target.value)}
             placeholder="examples/my_prompt.md"
             rows={6}
           />
-        </div>
+        </FormField>
 
-        <div className="form-group">
-          <label>Permissions (comma separated)</label>
+        <FormField label="Permissions (comma separated)">
           <input
             value={agent.permissions.join(", ")}
             onChange={(e) =>
@@ -173,10 +171,9 @@ export default function AgentEditor({
             }
             placeholder="Bash, Read, Grep, Glob"
           />
-        </div>
+        </FormField>
 
-        <div className="form-group">
-          <label>System Prompt</label>
+        <FormField label="System Prompt">
           <textarea
             value={agent.append_system_prompt || ""}
             onChange={(e) =>
@@ -188,10 +185,9 @@ export default function AgentEditor({
             placeholder="Additional instructions appended to Claude's system prompt"
             rows={4}
           />
-        </div>
+        </FormField>
 
-        <div className="form-group">
-          <label>Working Directory</label>
+        <FormField label="Working Directory">
           <input
             value={agent.working_dir || ""}
             onChange={(e) =>
@@ -199,15 +195,17 @@ export default function AgentEditor({
             }
             placeholder="Default working directory (optional)"
           />
-        </div>
+        </FormField>
 
         <div style={{ padding: "12px 0", borderTop: "1px solid var(--border)", marginTop: 8 }}>
           <div style={{ fontSize: 10, color: "var(--text-secondary)", marginBottom: 8 }}>
             ID: {agent.id}
           </div>
-          <button className="danger" onClick={handleDelete}>
-            Delete Agent
-          </button>
+          {agent.id !== STUDIO_ASSISTANT_ID && (
+            <Button variant="destructive" size="sm" onClick={handleDelete}>
+              Delete Agent
+            </Button>
+          )}
         </div>
       </div>
     </div>

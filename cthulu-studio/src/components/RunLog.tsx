@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import type { RunEvent } from "../types/flow";
+import { Button } from "@/components/ui/button";
 
 const EVENT_COLORS: Record<string, string> = {
   run_started: "var(--accent)",
@@ -71,12 +72,12 @@ export default function RunLog({ events, onClear, onClose }: RunLogProps) {
       <div className="console-header">
         <span className="console-title">Run Log</span>
         <div className="spacer" />
-        <button className="ghost console-btn" onClick={onClear}>
+        <Button variant="ghost" size="xs" onClick={onClear}>
           Clear
-        </button>
-        <button className="ghost console-btn" onClick={onClose}>
+        </Button>
+        <Button variant="ghost" size="xs" onClick={onClose}>
           Close
-        </button>
+        </Button>
       </div>
       <div className="console-body" onScroll={handleScroll}>
         {events.length === 0 && (

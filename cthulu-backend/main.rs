@@ -7,6 +7,7 @@ mod sandbox;
 mod api;
 mod tasks;
 mod templates;
+mod watcher;
 
 use anyhow::{Context, Result};
 use axum::body::Body;
@@ -24,6 +25,8 @@ use tracing_subscriber::util::SubscriberInitExt;
 
 use crate::agents::file_repository::FileAgentRepository;
 use crate::agents::repository::AgentRepository;
+use crate::agents::{STUDIO_ASSISTANT_ID, default_studio_assistant};
+use crate::api::changes::ResourceChangeEvent;
 use crate::flows::events::RunEvent;
 use crate::flows::file_repository::FileFlowRepository;
 use crate::flows::repository::FlowRepository;
@@ -116,27 +119,41 @@ async fn run_server(start_disabled: bool) -> Result<(), Box<dyn Error>> {
         .join(".cthulu");
 
     // Initialize flow repository (flows + runs)
-    let flow_repo: Arc<dyn FlowRepository> = Arc::new(FileFlowRepository::new(base_dir.clone()));
-    flow_repo
+    // Keep concrete Arc for the file watcher, upcast to trait object for AppState.
+    let file_flow_repo = Arc::new(FileFlowRepository::new(base_dir.clone()));
+    file_flow_repo
         .load_all()
         .await
         .context("failed to load flow repository")?;
+    let flow_repo: Arc<dyn FlowRepository> = file_flow_repo.clone();
 
     // Initialize prompt repository
-    let prompt_repo: Arc<dyn PromptRepository> = Arc::new(FilePromptRepository::new(base_dir.clone()));
-    prompt_repo
+    let file_prompt_repo = Arc::new(FilePromptRepository::new(base_dir.clone()));
+    file_prompt_repo
         .load_all()
         .await
         .context("failed to load prompt repository")?;
+    let prompt_repo: Arc<dyn PromptRepository> = file_prompt_repo.clone();
 
     // Initialize agent repository
-    let agent_repo: Arc<dyn AgentRepository> = Arc::new(FileAgentRepository::new(base_dir.clone()));
-    agent_repo
+    let file_agent_repo = Arc::new(FileAgentRepository::new(base_dir.clone()));
+    file_agent_repo
         .load_all()
         .await
         .context("failed to load agent repository")?;
+    let agent_repo: Arc<dyn AgentRepository> = file_agent_repo.clone();
+
+    // Seed the built-in Studio Assistant if it doesn't exist yet
+    if agent_repo.get(STUDIO_ASSISTANT_ID).await.is_none() {
+        tracing::info!("seeding built-in Studio Assistant agent");
+        agent_repo
+            .save(default_studio_assistant())
+            .await
+            .context("failed to seed Studio Assistant agent")?;
+    }
 
     let (events_tx, _) = tokio::sync::broadcast::channel::<RunEvent>(256);
+    let (changes_tx, _) = tokio::sync::broadcast::channel::<ResourceChangeEvent>(256);
 
     // Load persisted interact sessions + VM mappings from ~/.cthulu/sessions.yaml
     let sessions_path = base_dir.join("sessions.yaml");
@@ -339,16 +356,31 @@ async fn run_server(start_disabled: bool) -> Result<(), Box<dyn Error>> {
         agent_repo,
         scheduler,
         events_tx,
+        changes_tx: changes_tx.clone(),
         interact_sessions: Arc::new(tokio::sync::RwLock::new(persisted_sessions)),
         sessions_path,
-        data_dir: base_dir,
+        data_dir: base_dir.clone(),
         static_dir,
         live_processes: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
+        pty_processes: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
         sandbox_provider,
         vm_manager: vm_manager_arc,
         vm_mappings,
         oauth_token: Arc::new(tokio::sync::RwLock::new(oauth_token)),
     };
+
+    // Start file change watcher (keeps caches in sync with external edits)
+    let _watcher = watcher::FileChangeWatcher::start(
+        base_dir,
+        file_flow_repo,
+        file_agent_repo,
+        file_prompt_repo,
+        changes_tx,
+    )
+    .context("failed to start file change watcher")?;
+
+    let pty_processes = app_state.pty_processes.clone();
+    let live_processes = app_state.live_processes.clone();
 
     let app = api::create_app(app_state)
         .layer(SentryHttpLayer::new().enable_transaction())
@@ -358,9 +390,49 @@ async fn run_server(start_disabled: bool) -> Result<(), Box<dyn Error>> {
     let addr = format!("0.0.0.0:{port}");
     let listener = TcpListener::bind(&addr).await?;
     println!("Listening on http://{addr}");
-    axum::serve(listener, app).await?;
+    axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_signal())
+        .await?;
+
+    // Server has stopped — kill all child processes then exit immediately.
+    // We can't wait for spawn_blocking PTY reader threads (they hold cloned fds
+    // and block on read()), so we kill children and force-exit.
+    tracing::info!("shutting down: killing child processes");
+    {
+        let mut pool = pty_processes.lock().await;
+        pool.clear(); // Drop triggers PtyProcess::drop which calls child.kill()
+    }
+    {
+        let mut pool = live_processes.lock().await;
+        for (key, mut proc) in pool.drain() {
+            if let Err(e) = proc.child.kill().await {
+                tracing::trace!(key = %key, error = %e, "live process kill on shutdown");
+            }
+        }
+    }
+    // Force exit — spawn_blocking reader threads can't be stopped gracefully
+    std::process::exit(0);
 
     Ok(())
+}
+
+/// Wait for Ctrl+C or SIGTERM to initiate graceful shutdown.
+async fn shutdown_signal() {
+    let ctrl_c = tokio::signal::ctrl_c();
+    #[cfg(unix)]
+    {
+        let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+            .expect("failed to register SIGTERM handler");
+        tokio::select! {
+            _ = ctrl_c => {},
+            _ = sigterm.recv() => {},
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        ctrl_c.await.ok();
+    }
+    tracing::info!("shutdown signal received");
 }
 
 /// Build a `FirecrackerConfig` with the transport-specific `host` variant and

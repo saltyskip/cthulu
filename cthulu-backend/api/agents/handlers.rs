@@ -7,7 +7,8 @@ use serde_json::{json, Value};
 use uuid::Uuid;
 
 use crate::api::AppState;
-use crate::agents::Agent;
+use crate::api::changes::{ChangeType, ResourceChangeEvent, ResourceType};
+use crate::agents::{Agent, STUDIO_ASSISTANT_ID};
 
 pub(crate) async fn list_agents(State(state): State<AppState>) -> Json<Value> {
     let agents = state.agent_repo.list().await;
@@ -62,18 +63,18 @@ pub(crate) async fn create_agent(
     State(state): State<AppState>,
     Json(body): Json<CreateAgentRequest>,
 ) -> (StatusCode, Json<Value>) {
-    let now = Utc::now();
-    let agent = Agent {
-        id: Uuid::new_v4().to_string(),
-        name: body.name,
-        description: body.description,
-        prompt: body.prompt,
-        permissions: body.permissions,
-        append_system_prompt: body.append_system_prompt,
-        working_dir: body.working_dir,
-        created_at: now,
-        updated_at: now,
-    };
+    let mut builder = Agent::builder(Uuid::new_v4().to_string())
+        .name(body.name)
+        .description(body.description)
+        .prompt(body.prompt)
+        .permissions(body.permissions);
+    if let Some(s) = body.append_system_prompt {
+        builder = builder.append_system_prompt(s);
+    }
+    if let Some(w) = body.working_dir {
+        builder = builder.working_dir(w);
+    }
+    let agent = builder.build();
 
     let id = agent.id.clone();
     if let Err(e) = state.agent_repo.save(agent).await {
@@ -82,6 +83,13 @@ pub(crate) async fn create_agent(
             Json(json!({ "error": format!("failed to save agent: {e}") })),
         );
     }
+
+    let _ = state.changes_tx.send(ResourceChangeEvent {
+        resource_type: ResourceType::Agent,
+        change_type: ChangeType::Created,
+        resource_id: id.clone(),
+        timestamp: Utc::now(),
+    });
 
     (StatusCode::CREATED, Json(json!({ "id": id })))
 }
@@ -141,6 +149,13 @@ pub(crate) async fn update_agent(
         )
     })?;
 
+    let _ = state.changes_tx.send(ResourceChangeEvent {
+        resource_type: ResourceType::Agent,
+        change_type: ChangeType::Updated,
+        resource_id: id,
+        timestamp: Utc::now(),
+    });
+
     Ok(Json(serde_json::to_value(&agent).unwrap()))
 }
 
@@ -148,6 +163,13 @@ pub(crate) async fn delete_agent(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    if id == STUDIO_ASSISTANT_ID {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({ "error": "cannot delete the built-in Studio Assistant" })),
+        ));
+    }
+
     let existed = state.agent_repo.delete(&id).await.map_err(|e| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -161,6 +183,13 @@ pub(crate) async fn delete_agent(
             Json(json!({ "error": "agent not found" })),
         ));
     }
+
+    let _ = state.changes_tx.send(ResourceChangeEvent {
+        resource_type: ResourceType::Agent,
+        change_type: ChangeType::Deleted,
+        resource_id: id,
+        timestamp: Utc::now(),
+    });
 
     Ok(Json(json!({ "deleted": true })))
 }

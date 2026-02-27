@@ -219,6 +219,15 @@ pub(crate) async fn stop_chat(
         }
     }
 
+    // Also kill any PTY process for this agent
+    {
+        let mut pty_pool = state.pty_processes.lock().await;
+        if let Some(mut pty) = pty_pool.remove(&key) {
+            let _ = pty.child.kill();
+            let _ = pty.child.wait();
+        }
+    }
+
     let mut all_sessions = state.interact_sessions.write().await;
     if let Some(flow_sessions) = all_sessions.get_mut(&key) {
         let target_sid = body
@@ -645,19 +654,40 @@ pub(crate) async fn chat(
                         "system" => {
                             // Skip system events on resume
                         }
+                        "content_block_delta" => {
+                            // Stream text deltas token-by-token as they arrive
+                            if let Some(delta) = json_val.get("delta") {
+                                let delta_type = delta.get("type").and_then(|v| v.as_str()).unwrap_or("");
+                                if delta_type == "text_delta" {
+                                    let text = delta.get("text").and_then(|v| v.as_str()).unwrap_or("");
+                                    if !text.is_empty() {
+                                        yield Ok(Event::default().event("text").data(
+                                            serde_json::to_string(&json!({"text": text})).unwrap()
+                                        ));
+                                    }
+                                }
+                            }
+                        }
+                        "content_block_start" => {
+                            // Forward tool_use start events immediately
+                            if let Some(content_block) = json_val.get("content_block") {
+                                let block_type = content_block.get("type").and_then(|v| v.as_str()).unwrap_or("");
+                                if block_type == "tool_use" {
+                                    let tool = content_block.get("name").and_then(|v| v.as_str()).unwrap_or("?");
+                                    yield Ok(Event::default().event("tool_use").data(
+                                        serde_json::to_string(&json!({"tool": tool, "input": ""})).unwrap()
+                                    ));
+                                }
+                            }
+                        }
                         "assistant" => {
+                            // Complete assistant message — extract tool_use and tool_result blocks.
+                            // Text blocks are already streamed via content_block_delta above,
+                            // so we skip text here to avoid duplicating output.
                             if let Some(content) = json_val.get("message").and_then(|m| m.get("content")).and_then(|c| c.as_array()) {
                                 for block in content {
                                     let block_type = block.get("type").and_then(|v| v.as_str()).unwrap_or("");
                                     match block_type {
-                                        "text" => {
-                                            let text = block.get("text").and_then(|v| v.as_str()).unwrap_or("");
-                                            if !text.is_empty() {
-                                                yield Ok(Event::default().event("text").data(
-                                                    serde_json::to_string(&json!({"text": text})).unwrap()
-                                                ));
-                                            }
-                                        }
                                         "tool_use" => {
                                             let tool = block.get("name").and_then(|v| v.as_str()).unwrap_or("?");
                                             let input = block.get("input").map(|v| {
@@ -677,6 +707,7 @@ pub(crate) async fn chat(
                                                 serde_json::to_string(&json!({"content": result_content})).unwrap()
                                             ));
                                         }
+                                        // Skip "text" — already streamed via content_block_delta
                                         _ => {}
                                     }
                                 }
@@ -781,12 +812,6 @@ fn node_config_summary(node: &Node) -> String {
             format!("poll: {poll}s")
         }
         "market-data" => "(fetches BTC/ETH, Fear & Greed, S&P 500)".into(),
-        "keyword" => {
-            let kw = node.config.get("keywords").and_then(|v| v.as_array())
-                .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>().join(", "))
-                .unwrap_or_else(|| "?".into());
-            format!("keywords: {kw}")
-        }
         "claude-code" => {
             let prompt = node.config.get("prompt").and_then(|v| v.as_str()).unwrap_or("(inline)");
             format!("prompt: {prompt}")
@@ -867,14 +892,6 @@ fn build_workflow_context_md(flow: &Flow, node_id: &str) -> String {
         if n.node_type == NodeType::Source {
             let marker = if n.id == node_id { "**" } else { "" };
             pipeline_lines.push(format!("    -> {marker}Source: {} ({}) -- {}{marker}",
-                n.label, n.kind, node_config_summary(n)));
-        }
-    }
-
-    for n in &flow.nodes {
-        if n.node_type == NodeType::Filter {
-            let marker = if n.id == node_id { "**" } else { "" };
-            pipeline_lines.push(format!("    -> {marker}Filter: {} ({}) -- {}{marker}",
                 n.label, n.kind, node_config_summary(n)));
         }
     }

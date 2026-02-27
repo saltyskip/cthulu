@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
@@ -11,6 +11,8 @@ use super::repository::PromptRepository;
 pub struct FilePromptRepository {
     base_dir: PathBuf,
     prompts: RwLock<HashMap<String, SavedPrompt>>,
+    /// Filenames written by this process — used to skip fs-watcher events for our own writes.
+    self_writes: std::sync::Mutex<HashSet<String>>,
 }
 
 impl FilePromptRepository {
@@ -18,7 +20,39 @@ impl FilePromptRepository {
         Self {
             base_dir: base_dir.as_ref().to_path_buf(),
             prompts: RwLock::new(HashMap::new()),
+            self_writes: std::sync::Mutex::new(HashSet::new()),
         }
+    }
+
+    /// Mark a filename as written by this process (for fs-watcher loop prevention).
+    pub fn mark_self_write(&self, filename: &str) {
+        self.self_writes.lock().unwrap().insert(filename.to_string());
+    }
+
+    /// Consume (remove) a self-write marker. Returns true if the filename was present.
+    pub fn consume_self_write(&self, filename: &str) -> bool {
+        self.self_writes.lock().unwrap().remove(filename)
+    }
+
+    /// Re-read a single prompt JSON file from disk into the cache. Returns the resource ID if successful.
+    pub async fn reload_file(&self, filename: &str) -> Option<String> {
+        let path = self.prompts_dir().join(filename);
+        let content = std::fs::read_to_string(&path).ok()?;
+        let prompt: SavedPrompt = serde_json::from_str(&content).ok()?;
+        let id = prompt.id.clone();
+        self.prompts.write().await.insert(id.clone(), prompt);
+        tracing::debug!(prompt_id = %id, filename, "reloaded prompt from disk");
+        Some(id)
+    }
+
+    /// Remove a prompt from the cache by filename. Returns the resource ID if it was present.
+    pub async fn evict_file(&self, filename: &str) -> Option<String> {
+        let id = filename.trim_end_matches(".json").to_string();
+        let removed = self.prompts.write().await.remove(&id);
+        if removed.is_some() {
+            tracing::debug!(prompt_id = %id, filename, "evicted prompt from cache");
+        }
+        removed.map(|p| p.id)
     }
 
     fn prompts_dir(&self) -> PathBuf {
@@ -41,7 +75,9 @@ impl PromptRepository for FilePromptRepository {
         std::fs::create_dir_all(&dir)
             .with_context(|| format!("failed to create prompts dir: {}", dir.display()))?;
 
-        let path = dir.join(format!("{}.json", prompt.id));
+        let filename = format!("{}.json", prompt.id);
+        self.mark_self_write(&filename);
+        let path = dir.join(&filename);
         let content = serde_json::to_string_pretty(&prompt)
             .context("failed to serialize prompt")?;
         std::fs::write(&path, content)
@@ -52,7 +88,9 @@ impl PromptRepository for FilePromptRepository {
     }
 
     async fn delete_prompt(&self, id: &str) -> Result<bool> {
-        let path = self.prompts_dir().join(format!("{id}.json"));
+        let filename = format!("{id}.json");
+        self.mark_self_write(&filename);
+        let path = self.prompts_dir().join(&filename);
         let existed = self.prompts.write().await.remove(id).is_some();
 
         if path.exists() {

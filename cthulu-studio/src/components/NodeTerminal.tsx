@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useCallback } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
+import { AttachAddon } from "@xterm/addon-attach";
 import "@xterm/xterm/css/xterm.css";
-import { startAgentChat, type InteractSSEEvent } from "../api/interactStream";
-import * as api from "../api/client";
+import { Button } from "@/components/ui/button";
+import { getTerminalWsUrl } from "../api/client";
 
 interface NodeTerminalProps {
   agentId: string;
@@ -13,32 +14,18 @@ interface NodeTerminalProps {
   runtime?: string; // "local" | "sandbox" | "vm-sandbox"
 }
 
-// ANSI color codes
-const RESET = "\x1b[0m";
-const CYAN = "\x1b[36m";
-const DIM = "\x1b[2m";
-const GREEN = "\x1b[32m";
-const RED = "\x1b[31m";
-const YELLOW = "\x1b[33m";
-const BOLD = "\x1b[1m";
-
 export default function NodeTerminal({
   agentId,
-  flowId,
-  nodeId,
   nodeLabel,
   runtime,
 }: NodeTerminalProps) {
   const termRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
-  const [sessionId, setSessionId] = useState<string | null>(null);
-  const [running, setRunning] = useState(false);
-  const abortRef = useRef<AbortController | null>(null);
-  const inputBuffer = useRef("");
+  const wsRef = useRef<WebSocket | null>(null);
   const initializedRef = useRef(false);
 
-  // Initialize terminal
+  // Initialize terminal + WebSocket
   useEffect(() => {
     if (!termRef.current || initializedRef.current) return;
     initializedRef.current = true;
@@ -57,59 +44,28 @@ export default function NodeTerminal({
         yellow: "#ddc856",
       },
       cursorBlink: true,
-      convertEol: true,
     });
 
     const fitAddon = new FitAddon();
     term.loadAddon(fitAddon);
     term.open(termRef.current);
 
-    // Delay fit to ensure container is sized
+    terminalRef.current = term;
+    fitAddonRef.current = fitAddon;
+
+    // Delay fit + WS connect to ensure container is sized
     requestAnimationFrame(() => {
       try {
         fitAddon.fit();
       } catch {
         // Container may not be visible yet
       }
+      connectWs(term, fitAddon);
     });
-
-    terminalRef.current = term;
-    fitAddonRef.current = fitAddon;
-
-    term.writeln(`${BOLD}${CYAN}${nodeLabel}${RESET} ${DIM}(${runtime || "local"})${RESET}`);
-    term.writeln(`${DIM}Type a message and press Enter to send${RESET}`);
-    term.writeln("");
-
-    // Handle user input
-    term.onData((data) => {
-      if (running) return; // Don't accept input while processing
-
-      if (data === "\r") {
-        // Enter pressed — send message
-        const message = inputBuffer.current.trim();
-        inputBuffer.current = "";
-        term.write("\r\n");
-        if (message) {
-          sendMessage(message);
-        } else {
-          writePrompt(term);
-        }
-      } else if (data === "\x7f") {
-        // Backspace
-        if (inputBuffer.current.length > 0) {
-          inputBuffer.current = inputBuffer.current.slice(0, -1);
-          term.write("\b \b");
-        }
-      } else if (data >= " " || data === "\t") {
-        // Printable character
-        inputBuffer.current += data;
-        term.write(data);
-      }
-    });
-
-    writePrompt(term);
 
     return () => {
+      wsRef.current?.close();
+      wsRef.current = null;
       term.dispose();
       terminalRef.current = null;
       fitAddonRef.current = null;
@@ -117,6 +73,41 @@ export default function NodeTerminal({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  function connectWs(term: Terminal, fitAddon: FitAddon) {
+    const url = getTerminalWsUrl(agentId);
+    const ws = new WebSocket(url);
+    ws.binaryType = "arraybuffer";
+    wsRef.current = ws;
+
+    ws.onopen = () => {
+      // Attach addon handles bidirectional binary I/O
+      const attachAddon = new AttachAddon(ws);
+      term.loadAddon(attachAddon);
+
+      // Send initial resize
+      try {
+        fitAddon.fit();
+      } catch {
+        // ignore
+      }
+      sendResize(ws, term.cols, term.rows);
+    };
+
+    ws.onclose = () => {
+      term.writeln("\r\n\x1b[2m[disconnected]\x1b[0m");
+    };
+
+    ws.onerror = () => {
+      term.writeln("\r\n\x1b[31m[connection error]\x1b[0m");
+    };
+  }
+
+  function sendResize(ws: WebSocket, cols: number, rows: number) {
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: "resize", cols, rows }));
+    }
+  }
 
   // Handle resize
   useEffect(() => {
@@ -126,149 +117,25 @@ export default function NodeTerminal({
       } catch {
         // ignore
       }
+      const term = terminalRef.current;
+      const ws = wsRef.current;
+      if (term && ws) {
+        sendResize(ws, term.cols, term.rows);
+      }
     };
     const observer = new ResizeObserver(handleResize);
     if (termRef.current) observer.observe(termRef.current);
     return () => observer.disconnect();
   }, []);
 
-  // Initialize session
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const sessions = await api.listAgentSessions(agentId);
-        if (cancelled) return;
-        if (sessions.sessions.length > 0) {
-          setSessionId(sessions.active_session);
-        } else {
-          const result = await api.newAgentSession(agentId);
-          if (!cancelled) setSessionId(result.session_id);
-        }
-      } catch {
-        // Will create session on first message
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [agentId]);
-
-  function writePrompt(term: Terminal) {
-    term.write(`${GREEN}> ${RESET}`);
-  }
-
-  const sendMessage = useCallback(
-    (message: string) => {
-      const term = terminalRef.current;
-      if (!term || running) return;
-
-      setRunning(true);
-      term.writeln(`${BOLD}${YELLOW}You:${RESET} ${message}`);
-
-      const handleEvent = (event: InteractSSEEvent) => {
-        try {
-          const parsed = JSON.parse(event.data);
-
-          switch (event.type) {
-            case "system":
-              term.writeln(`${DIM}${parsed.message || ""}${RESET}`);
-              break;
-            case "text":
-              term.write(parsed.text || "");
-              break;
-            case "tool_use":
-              term.writeln(
-                `\r\n${CYAN}[tool] ${parsed.tool}${RESET}${DIM} ${truncate(parsed.input || "", 120)}${RESET}`
-              );
-              break;
-            case "tool_result":
-              term.writeln(
-                `${DIM}[result] ${truncate(parsed.content || "", 200)}${RESET}`
-              );
-              break;
-            case "result":
-              term.writeln(
-                `\r\n${GREEN}${parsed.text || ""}${RESET}`
-              );
-              if (parsed.cost) {
-                term.writeln(
-                  `${DIM}(${parsed.turns || 0} turns, $${Number(parsed.cost).toFixed(4)})${RESET}`
-                );
-              }
-              break;
-            case "error":
-              term.writeln(`${RED}Error: ${parsed.message || event.data}${RESET}`);
-              break;
-            case "cost":
-              term.writeln(
-                `${DIM}Cost: $${Number(parsed.total_cost || 0).toFixed(4)}${RESET}`
-              );
-              break;
-            default:
-              break;
-          }
-        } catch {
-          // Non-JSON data
-          term.writeln(event.data);
-        }
-      };
-
-      const handleDone = () => {
-        setRunning(false);
-        abortRef.current = null;
-        term.writeln("");
-        writePrompt(term);
-      };
-
-      const handleError = (err: string) => {
-        term.writeln(`${RED}Error: ${err}${RESET}`);
-        setRunning(false);
-        abortRef.current = null;
-        writePrompt(term);
-      };
-
-      const flowContext = flowId && nodeId ? { flow_id: flowId, node_id: nodeId } : undefined;
-
-      abortRef.current = startAgentChat(
-        agentId,
-        message,
-        sessionId,
-        handleEvent,
-        handleDone,
-        handleError,
-        flowContext
-      );
-    },
-    [agentId, flowId, nodeId, sessionId, running]
-  );
-
-  const handleNewSession = useCallback(async () => {
-    try {
-      const result = await api.newAgentSession(agentId);
-      setSessionId(result.session_id);
-      const term = terminalRef.current;
-      if (term) {
-        term.writeln(`\r\n${DIM}--- New session ---${RESET}\r\n`);
-        writePrompt(term);
-      }
-    } catch (e) {
-      console.error("Failed to create session:", e);
+  const handleStop = useCallback(() => {
+    const ws = wsRef.current;
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      // Send Ctrl+C as binary
+      const ctrlC = new Uint8Array([0x03]);
+      ws.send(ctrlC);
     }
-  }, [agentId]);
-
-  const handleStop = useCallback(async () => {
-    abortRef.current?.abort();
-    try {
-      await api.stopAgentChat(agentId, sessionId || undefined);
-    } catch {
-      // ignore
-    }
-    setRunning(false);
-    const term = terminalRef.current;
-    if (term) {
-      term.writeln(`\r\n${RED}[stopped]${RESET}`);
-      writePrompt(term);
-    }
-  }, [agentId, sessionId]);
+  }, []);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
@@ -287,37 +154,17 @@ export default function NodeTerminal({
         <span>{nodeLabel}</span>
         <span style={{ opacity: 0.5 }}>|</span>
         <span>{runtime || "local"}</span>
-        {running && (
-          <>
-            <span style={{ opacity: 0.5 }}>|</span>
-            <span style={{ color: "var(--accent)" }}>running...</span>
-          </>
-        )}
         <div style={{ marginLeft: "auto", display: "flex", gap: 4 }}>
-          {running ? (
-            <button
-              className="ghost"
-              style={{ fontSize: 10, padding: "1px 6px" }}
-              onClick={handleStop}
-            >
-              Stop
-            </button>
-          ) : (
-            <button
-              className="ghost"
-              style={{ fontSize: 10, padding: "1px 6px" }}
-              onClick={handleNewSession}
-            >
-              New Session
-            </button>
-          )}
+          <Button
+            variant="ghost"
+            size="xs"
+            onClick={handleStop}
+          >
+            Stop
+          </Button>
         </div>
       </div>
       <div ref={termRef} style={{ flex: 1, minHeight: 0 }} />
     </div>
   );
-}
-
-function truncate(str: string, max: number): string {
-  return str.length > max ? str.slice(0, max) + "..." : str;
 }

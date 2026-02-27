@@ -1,5 +1,6 @@
 pub mod chat;
 pub mod handlers;
+pub mod terminal;
 
 use axum::routing::{delete, get, post};
 use axum::Router;
@@ -27,4 +28,6 @@ pub fn router() -> Router<AppState> {
         )
         .route("/agents/{id}/chat", post(chat::chat))
         .route("/agents/{id}/chat/stop", post(chat::stop_chat))
+        // PTY terminal WebSocket
+        .route("/agents/{id}/terminal", get(terminal::terminal_ws))
 }
