@@ -72,14 +72,19 @@ pub(crate) async fn list_sessions(
             .sessions
             .iter()
             .map(|s| {
-                json!({
+                let mut v = json!({
                     "session_id": s.session_id,
                     "summary": s.summary,
                     "message_count": s.message_count,
                     "total_cost": s.total_cost,
                     "created_at": s.created_at,
                     "busy": s.busy,
-                })
+                    "kind": s.kind,
+                });
+                if let Some(ref fr) = s.flow_run {
+                    v["flow_run"] = serde_json::to_value(fr).unwrap_or_default();
+                }
+                v
             })
             .collect();
         Json(json!({
@@ -142,6 +147,8 @@ pub(crate) async fn new_session(
         total_cost: 0.0,
         created_at: now.clone(),
         skills_dir: None,
+        kind: "interactive".to_string(),
+        flow_run: None,
     });
     flow_sessions.active_session = new_id.clone();
 
@@ -162,6 +169,17 @@ pub(crate) async fn delete_session(
     Path((id, session_id)): Path<(String, String)>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let key = agent_key(&id);
+
+    // Kill PTY process for this specific session
+    {
+        let mut pty_pool = state.pty_processes.lock().await;
+        let pty_k = super::terminal::pty_key(&id, Some(&session_id));
+        if let Some(mut pty) = pty_pool.remove(&pty_k) {
+            let _ = pty.child.kill();
+            let _ = pty.child.wait();
+        }
+    }
+
     let mut all_sessions = state.interact_sessions.write().await;
 
     let active_after = {
@@ -211,6 +229,12 @@ pub(crate) async fn stop_chat(
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let key = agent_key(&id);
 
+    let target_sid = {
+        let sessions = state.interact_sessions.read().await;
+        body.and_then(|b| b.session_id.clone())
+            .or_else(|| sessions.get(&key).map(|fs| fs.active_session.clone()))
+    };
+
     // Remove the persistent process from the pool and kill it
     {
         let mut pool = state.live_processes.lock().await;
@@ -219,10 +243,20 @@ pub(crate) async fn stop_chat(
         }
     }
 
-    // Also kill any PTY process for this agent
+    // Kill PTY process — try session-scoped key first, then legacy agent-level key
     {
         let mut pty_pool = state.pty_processes.lock().await;
-        if let Some(mut pty) = pty_pool.remove(&key) {
+        let pty_k = match &target_sid {
+            Some(sid) => super::terminal::pty_key(&id, Some(sid)),
+            None => super::terminal::pty_key(&id, None),
+        };
+        if let Some(mut pty) = pty_pool.remove(&pty_k) {
+            let _ = pty.child.kill();
+            let _ = pty.child.wait();
+        }
+        // Also try legacy key (agent-level, no session) for backward compat
+        let legacy_key = key.clone();
+        if let Some(mut pty) = pty_pool.remove(&legacy_key) {
             let _ = pty.child.kill();
             let _ = pty.child.wait();
         }
@@ -230,11 +264,9 @@ pub(crate) async fn stop_chat(
 
     let mut all_sessions = state.interact_sessions.write().await;
     if let Some(flow_sessions) = all_sessions.get_mut(&key) {
-        let target_sid = body
-            .and_then(|b| b.session_id.clone())
-            .unwrap_or_else(|| flow_sessions.active_session.clone());
+        let sid = target_sid.unwrap_or_else(|| flow_sessions.active_session.clone());
 
-        if let Some(session) = flow_sessions.get_session_mut(&target_sid) {
+        if let Some(session) = flow_sessions.get_session_mut(&sid) {
             if let Some(pid) = session.active_pid.take() {
                 kill_pid(pid);
             }
@@ -317,6 +349,8 @@ pub(crate) async fn chat(
                         total_cost: 0.0,
                         created_at: Utc::now().to_rfc3339(),
                         skills_dir: None,
+                        kind: "interactive".to_string(),
+                        flow_run: None,
                     }],
                 }
             });
@@ -779,6 +813,113 @@ pub(crate) async fn chat(
     };
 
     Ok(Sse::new(stream).keep_alive(KeepAlive::new().interval(std::time::Duration::from_secs(15))))
+}
+
+// ---------------------------------------------------------------------------
+// Flow-run session streaming endpoints
+// ---------------------------------------------------------------------------
+
+/// GET /agents/{id}/sessions/{session_id}/stream — SSE stream for flow-run session
+pub(crate) async fn stream_session_log(
+    State(state): State<AppState>,
+    Path((id, session_id)): Path<(String, String)>,
+) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, (StatusCode, Json<Value>)> {
+    let key = agent_key(&id);
+
+    // Verify the session exists and is a flow_run session
+    {
+        let sessions = state.interact_sessions.read().await;
+        let flow_sessions = sessions.get(&key).ok_or_else(|| {
+            (StatusCode::NOT_FOUND, Json(json!({ "error": "no sessions for this agent" })))
+        })?;
+        let session = flow_sessions.get_session(&session_id).ok_or_else(|| {
+            (StatusCode::NOT_FOUND, Json(json!({ "error": "session not found" })))
+        })?;
+        if session.kind != "flow_run" {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(json!({ "error": "session is not a flow_run session" })),
+            ));
+        }
+    }
+
+    let logs_dir = state.data_dir.join("session_logs");
+    let log_path = logs_dir.join(format!("{session_id}.jsonl"));
+    let session_streams = state.session_streams.clone();
+    let interact_sessions = state.interact_sessions.clone();
+    let agent_key_owned = key;
+
+    let stream = async_stream::stream! {
+        // 1. Replay existing lines from JSONL file (catch-up)
+        if log_path.exists() {
+            if let Ok(content) = tokio::fs::read_to_string(&log_path).await {
+                for line in content.lines() {
+                    if !line.is_empty() {
+                        yield Ok(Event::default().event("line").data(line.to_string()));
+                    }
+                }
+            }
+        }
+
+        // 2. Subscribe to broadcast for live lines (if session is still busy)
+        let is_busy = {
+            let sessions = interact_sessions.read().await;
+            sessions.get(&agent_key_owned)
+                .and_then(|fs| fs.get_session(&session_id))
+                .map(|s| s.busy)
+                .unwrap_or(false)
+        };
+
+        if is_busy {
+            let mut rx = {
+                let streams = session_streams.lock().await;
+                streams.get(&session_id).map(|tx| tx.subscribe())
+            };
+
+            if let Some(ref mut rx) = rx {
+                loop {
+                    match rx.recv().await {
+                        Ok(line) => {
+                            yield Ok(Event::default().event("line").data(line));
+                        }
+                        Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                            tracing::warn!(session_id = %session_id, skipped = n, "session stream subscriber lagged");
+                            continue;
+                        }
+                        Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        yield Ok(Event::default().event("done").data(
+            serde_json::to_string(&json!({"status": "complete"})).unwrap()
+        ));
+    };
+
+    Ok(Sse::new(stream).keep_alive(KeepAlive::new().interval(std::time::Duration::from_secs(15))))
+}
+
+/// GET /agents/{id}/sessions/{session_id}/log — full JSONL log as JSON array
+pub(crate) async fn get_session_log(
+    State(state): State<AppState>,
+    Path((_id, session_id)): Path<(String, String)>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let logs_dir = state.data_dir.join("session_logs");
+    let log_path = logs_dir.join(format!("{session_id}.jsonl"));
+
+    if !log_path.exists() {
+        return Ok(Json(json!({ "lines": [] })));
+    }
+
+    let content = tokio::fs::read_to_string(&log_path).await.map_err(|e| {
+        (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": format!("failed to read log: {e}") })))
+    })?;
+
+    let lines: Vec<&str> = content.lines().filter(|l| !l.is_empty()).collect();
+    Ok(Json(json!({ "lines": lines })))
 }
 
 // ---------------------------------------------------------------------------

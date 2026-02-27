@@ -37,9 +37,10 @@ export function getServerUrl(): string {
   return getBaseUrl();
 }
 
-export function getTerminalWsUrl(agentId: string): string {
+export function getTerminalWsUrl(agentId: string, sessionId?: string): string {
   const wsBase = getBaseUrl().replace(/^http/, "ws");
-  return `${wsBase}/api/agents/${agentId}/terminal`;
+  const base = `${wsBase}/api/agents/${agentId}/terminal`;
+  return sessionId ? `${base}?session_id=${encodeURIComponent(sessionId)}` : base;
 }
 
 async function apiFetch<T>(
@@ -165,13 +166,23 @@ export interface AgentSessionsInfo {
   sessions: InteractSessionInfo[];
 }
 
-interface InteractSessionInfo {
+export interface FlowRunMeta {
+  flow_id: string;
+  flow_name: string;
+  run_id: string;
+  node_id: string;
+  node_label: string;
+}
+
+export interface InteractSessionInfo {
   session_id: string;
   summary: string;
   message_count: number;
   total_cost: number;
   created_at: string;
   busy: boolean;
+  kind: "interactive" | "flow_run";
+  flow_run?: FlowRunMeta;
 }
 
 export async function listAgentSessions(
@@ -205,9 +216,52 @@ export async function stopAgentChat(
   });
 }
 
+/** Fetch the full JSONL log for a completed flow-run session. */
+export async function getSessionLog(
+  agentId: string,
+  sessionId: string
+): Promise<string[]> {
+  const data = await apiFetch<{ lines: string[] }>(
+    `/agents/${agentId}/sessions/${sessionId}/log`
+  );
+  return data.lines;
+}
+
+/** Subscribe to a live flow-run session via SSE. Returns cleanup function. */
+export function streamSessionLog(
+  agentId: string,
+  sessionId: string,
+  onLine: (line: string) => void,
+  onDone: () => void
+): () => void {
+  const url = `${getBaseUrl()}/api/agents/${agentId}/sessions/${sessionId}/stream`;
+  const source = new EventSource(url);
+
+  source.addEventListener("line", (e: MessageEvent) => {
+    onLine(e.data);
+  });
+
+  source.addEventListener("done", () => {
+    onDone();
+    source.close();
+  });
+
+  source.onerror = () => {
+    log("warn", "Session stream SSE error — closing");
+    onDone();
+    source.close();
+  };
+
+  return () => source.close();
+}
+
 export async function listPrompts(): Promise<SavedPrompt[]> {
   const data = await apiFetch<{ prompts: SavedPrompt[] }>("/prompts");
   return data.prompts;
+}
+
+export async function getPrompt(id: string): Promise<SavedPrompt> {
+  return apiFetch<SavedPrompt>(`/prompts/${id}`);
 }
 
 export async function savePrompt(prompt: {

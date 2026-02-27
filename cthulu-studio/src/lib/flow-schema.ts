@@ -51,7 +51,7 @@ export const flowJsonSchema = {
           },
           config: {
             type: "object",
-            description: "Node-specific configuration",
+            description: "Node-specific configuration. Executor nodes require 'agent_id'.",
             additionalProperties: true,
           },
         },

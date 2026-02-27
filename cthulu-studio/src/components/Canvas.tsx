@@ -230,11 +230,13 @@ const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(
         finalLabel = `Executor - E${String(existingCount + 1).padStart(2, "0")}`;
       }
 
+      const defaultConfig = nodeType === "executor" ? { agent_id: "" } : {};
+
       const newNode: RFNode = {
         id: crypto.randomUUID(),
         type: nodeType,
         position,
-        data: { label: finalLabel, kind, config: {} },
+        data: { label: finalLabel, kind, config: defaultConfig },
         sourcePosition: Position.Right,
         targetPosition: Position.Left,
       };
@@ -248,7 +250,7 @@ const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(
         id: newNode.id,
         node_type: nodeType as FlowNode["node_type"],
         kind,
-        config: {},
+        config: defaultConfig,
         position: { x: position.x, y: position.y },
         label: finalLabel,
       };

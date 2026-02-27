@@ -1,11 +1,11 @@
 import { useState, useEffect, useCallback } from "react";
-import { STUDIO_ASSISTANT_ID, type FlowSummary, type Flow, type NodeTypeSchema, type AgentSummary } from "../types/flow";
-import { listAgents, createAgent, deleteAgent } from "../api/client";
+import { STUDIO_ASSISTANT_ID, type FlowSummary, type Flow, type NodeTypeSchema, type AgentSummary, type SavedPrompt } from "../types/flow";
+import { listAgents, createAgent, deleteAgent, listPrompts, savePrompt, deletePrompt as deletePromptApi, listAgentSessions } from "../api/client";
 import { Switch } from "@/components/ui/switch";
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
 import TemplateGallery from "./TemplateGallery";
 
-type ActiveView = "flow-editor" | "agent-workspace";
+type ActiveView = "flow-editor" | "agent-grid" | "agent-workspace" | "prompt-editor";
 
 interface SidebarProps {
   // Flow list
@@ -18,8 +18,13 @@ interface SidebarProps {
   // Agent list
   selectedAgentId: string | null;
   onSelectAgent: (id: string) => void;
+  onShowAgentGrid: () => void;
   agentListKey: number;
   onAgentCreated: (id: string) => void;
+  // Prompts
+  selectedPromptId: string | null;
+  onSelectPrompt: (id: string) => void;
+  promptListKey: number;
   // Node palette (only in flow editor view)
   activeView: ActiveView;
   nodeTypes: NodeTypeSchema[];
@@ -42,14 +47,20 @@ export default function Sidebar({
   onToggleEnabled,
   selectedAgentId,
   onSelectAgent,
+  onShowAgentGrid,
   agentListKey,
   onAgentCreated,
+  selectedPromptId,
+  onSelectPrompt,
+  promptListKey,
   activeView,
   nodeTypes,
   onGrab,
 }: SidebarProps) {
   const [showGallery, setShowGallery] = useState(false);
   const [agents, setAgents] = useState<AgentSummary[]>([]);
+  const [prompts, setPrompts] = useState<SavedPrompt[]>([]);
+  const [agentMeta, setAgentMeta] = useState<Map<string, { busy: boolean; sessions: number; cost: number }>>(new Map());
 
   const refreshAgents = useCallback(async () => {
     try {
@@ -63,6 +74,69 @@ export default function Sidebar({
   useEffect(() => {
     refreshAgents();
   }, [refreshAgents, agentListKey]);
+
+  // Poll agent session metadata for status indicators
+  useEffect(() => {
+    if (agents.length === 0) return;
+
+    const fetchMeta = async () => {
+      const results = await Promise.allSettled(
+        agents.map((a) => listAgentSessions(a.id).then((info) => ({ id: a.id, info })))
+      );
+      const next = new Map<string, { busy: boolean; sessions: number; cost: number }>();
+      for (const r of results) {
+        if (r.status === "fulfilled") {
+          const { id, info } = r.value;
+          const busy = info.sessions.some((s) => s.busy);
+          const cost = info.sessions.reduce((sum, s) => sum + s.total_cost, 0);
+          next.set(id, { busy, sessions: info.sessions.length, cost });
+        }
+      }
+      setAgentMeta(next);
+    };
+
+    fetchMeta();
+    const interval = setInterval(fetchMeta, 5000);
+    return () => clearInterval(interval);
+  }, [agents]);
+
+  const refreshPrompts = useCallback(async () => {
+    try {
+      setPrompts(await listPrompts());
+    } catch {
+      // Server may not be reachable
+    }
+  }, []);
+
+  useEffect(() => {
+    refreshPrompts();
+  }, [refreshPrompts, promptListKey]);
+
+  async function handleCreatePrompt() {
+    try {
+      const { id } = await savePrompt({
+        title: "New Prompt",
+        summary: "",
+        source_flow_name: "",
+        tags: [],
+      });
+      await refreshPrompts();
+      onSelectPrompt(id);
+    } catch (e) {
+      console.error("Failed to create prompt:", e);
+    }
+  }
+
+  async function handleDeletePrompt(e: React.MouseEvent, id: string) {
+    e.stopPropagation();
+    if (!confirm("Delete this prompt?")) return;
+    try {
+      await deletePromptApi(id);
+      await refreshPrompts();
+    } catch (e) {
+      console.error("Failed to delete prompt:", e);
+    }
+  }
 
   async function handleCreateAgent() {
     try {
@@ -166,7 +240,16 @@ export default function Sidebar({
         <CollapsibleTrigger asChild>
           <div className="sidebar-section-header">
             <span className="sidebar-chevron">▶</span>
-            <h2>Agents</h2>
+            <h2
+              onClick={(e) => {
+                e.stopPropagation();
+                onShowAgentGrid();
+              }}
+              style={{ cursor: "pointer" }}
+              title="View all agents"
+            >
+              Agents
+            </h2>
             <div style={{ flex: 1 }} />
             <button
               className="ghost sidebar-action-btn"
@@ -192,7 +275,12 @@ export default function Sidebar({
                 onClick={() => onSelectAgent(agent.id)}
               >
                 <div className="sidebar-item-row">
-                  <div className="sidebar-item-name">{agent.name}</div>
+                  <div className="sidebar-item-name">
+                    {agentMeta.get(agent.id)?.busy && (
+                      <span className="sidebar-agent-busy" />
+                    )}
+                    {agent.name}
+                  </div>
                   {agent.id !== STUDIO_ASSISTANT_ID && (
                     <button
                       className="ghost sidebar-delete-btn"
@@ -203,6 +291,14 @@ export default function Sidebar({
                     </button>
                   )}
                 </div>
+                {agentMeta.has(agent.id) && (
+                  <div className="sidebar-agent-meta">
+                    {agentMeta.get(agent.id)!.sessions}s
+                    {agentMeta.get(agent.id)!.cost > 0 && (
+                      <> &middot; ${agentMeta.get(agent.id)!.cost.toFixed(2)}</>
+                    )}
+                  </div>
+                )}
                 {agent.description && (
                   <div className="sidebar-item-meta">{agent.description}</div>
                 )}
@@ -210,6 +306,54 @@ export default function Sidebar({
             ))}
             {agents.length === 0 && (
               <div className="sidebar-item-empty">No agents yet</div>
+            )}
+          </div>
+        </CollapsibleContent>
+      </Collapsible>
+
+      {/* Prompts section */}
+      <Collapsible defaultOpen className="sidebar-section">
+        <CollapsibleTrigger asChild>
+          <div className="sidebar-section-header">
+            <span className="sidebar-chevron">▶</span>
+            <h2>Prompts</h2>
+            <div style={{ flex: 1 }} />
+            <button
+              className="ghost sidebar-action-btn"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleCreatePrompt();
+              }}
+            >
+              +
+            </button>
+          </div>
+        </CollapsibleTrigger>
+        <CollapsibleContent>
+          <div className="sidebar-section-body">
+            {prompts.map((p) => (
+              <div
+                key={p.id}
+                className={`sidebar-item${p.id === selectedPromptId && activeView === "prompt-editor" ? " active" : ""}`}
+                onClick={() => onSelectPrompt(p.id)}
+              >
+                <div className="sidebar-item-row">
+                  <div className="sidebar-item-name">{p.title}</div>
+                  <button
+                    className="ghost sidebar-delete-btn"
+                    onClick={(e) => handleDeletePrompt(e, p.id)}
+                    title="Delete prompt"
+                  >
+                    ×
+                  </button>
+                </div>
+                {p.tags.length > 0 && (
+                  <div className="sidebar-item-meta">{p.tags.join(", ")}</div>
+                )}
+              </div>
+            ))}
+            {prompts.length === 0 && (
+              <div className="sidebar-item-empty">No prompts yet</div>
             )}
           </div>
         </CollapsibleContent>

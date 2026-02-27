@@ -18,7 +18,7 @@ function formatRelativeTime(iso: string): string {
   return `${diffDays}d ${diffHr % 24}h`;
 }
 
-type ActiveView = "flow-editor" | "agent-workspace";
+type ActiveView = "flow-editor" | "agent-grid" | "agent-workspace" | "prompt-editor";
 
 interface TopBarProps {
   activeView: ActiveView;
@@ -28,6 +28,7 @@ interface TopBarProps {
   onRename: (name: string) => void;
   agentName: string | null;
   onBackToFlow: () => void;
+  onShowAgentGrid?: () => void;
   onSettingsClick: () => void;
   onReconnect?: () => void;
 }
@@ -40,6 +41,7 @@ export default function TopBar({
   onRename,
   agentName,
   onBackToFlow,
+  onShowAgentGrid,
   onSettingsClick,
   onReconnect,
 }: TopBarProps) {
@@ -131,10 +133,28 @@ export default function TopBar({
     <div className="top-bar">
       <h1>Cthulu Studio</h1>
 
+      {activeView === "agent-grid" && (
+        <>
+          <Button variant="ghost" size="sm" className="top-bar-back" onClick={onBackToFlow}>
+            ← Back
+          </Button>
+          <span className="top-bar-agent-name">Agents</span>
+        </>
+      )}
+
       {activeView === "agent-workspace" && (
-        <Button variant="ghost" size="sm" className="top-bar-back" onClick={onBackToFlow}>
-          ← Back
+        <Button variant="ghost" size="sm" className="top-bar-back" onClick={onShowAgentGrid || onBackToFlow}>
+          ← Agents
         </Button>
+      )}
+
+      {activeView === "prompt-editor" && (
+        <>
+          <Button variant="ghost" size="sm" className="top-bar-back" onClick={onBackToFlow}>
+            ← Back
+          </Button>
+          <span className="top-bar-agent-name">Prompt Editor</span>
+        </>
       )}
 
       {activeView === "flow-editor" && flow && (

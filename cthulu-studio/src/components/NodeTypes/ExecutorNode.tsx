@@ -21,12 +21,6 @@ const LockIcon = () => (
   </svg>
 );
 
-const TerminalIcon = () => (
-  <svg viewBox="0 0 16 16" width="12" height="12" fill="currentColor">
-    <path d="M2.146 4.854a.5.5 0 0 1 .708-.708l3 3a.5.5 0 0 1 0 .708l-3 3a.5.5 0 0 1-.708-.708L4.793 7.5 2.146 4.854zM7.5 10.5a.5.5 0 0 0 0 1h4a.5.5 0 0 0 0-1h-4z" />
-  </svg>
-);
-
 function runtimeLabel(config: Record<string, unknown>, kind: string): string {
   const runtime = (config.runtime as string) || kind;
   switch (runtime) {
@@ -42,6 +36,8 @@ function runtimeLabel(config: Record<string, unknown>, kind: string): string {
 export default function ExecutorNode({ data }: { data: ExecutorNodeData }) {
   const isSandboxed = data.kind === "vm-sandbox" || data.config?.runtime === "vm-sandbox";
   const agentName = data.config?.agent_name as string | undefined;
+  const agentId = data.config?.agent_id as string | undefined;
+  const hasAgent = agentId && agentId.length > 0;
   const runtime = runtimeLabel(data.config || {}, data.kind);
 
   return (
@@ -49,7 +45,7 @@ export default function ExecutorNode({ data }: { data: ExecutorNodeData }) {
       <Handle id="in" type="target" position={Position.Left} />
       <div className="node-header">
         <span className="node-type-badge executor">
-          {agentName ? "Agent" : "Executor"}
+          {hasAgent ? "Agent" : "Executor"}
         </span>
         <span
           className="node-runtime-badge"
@@ -67,35 +63,12 @@ export default function ExecutorNode({ data }: { data: ExecutorNodeData }) {
         {data.validationErrors && data.validationErrors.length > 0 && (
           <span className="node-validation-badge" title={data.validationErrors.join("\n")}>!</span>
         )}
-        <button
-          className="node-step-in"
-          title="Open terminal"
-          style={{
-            marginLeft: "auto",
-            background: "none",
-            border: "none",
-            cursor: "pointer",
-            color: "var(--text-secondary)",
-            padding: "0 2px",
-            display: "flex",
-            alignItems: "center",
-          }}
-          onClick={(e) => {
-            e.stopPropagation();
-            // Dispatch custom event to open the bottom panel terminal tab
-            window.dispatchEvent(
-              new CustomEvent("cthulu:step-in", { detail: { nodeId: data.config?.nodeId || "" } })
-            );
-          }}
-        >
-          <TerminalIcon />
-        </button>
       </div>
       <div className="node-label">{data.label}</div>
-      {agentName ? (
-        <div className="node-kind" style={{ color: "var(--accent)" }}>{agentName}</div>
+      {hasAgent ? (
+        <div className="node-kind" style={{ color: "var(--accent)" }}>{agentName || agentId}</div>
       ) : (
-        <div className="node-kind">{data.kind}</div>
+        <div className="node-kind" style={{ color: "var(--warning)" }}>No agent selected</div>
       )}
       {isSandboxed && <LockIcon />}
       <Handle id="out" type="source" position={Position.Right} />

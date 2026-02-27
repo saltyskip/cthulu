@@ -1,10 +1,12 @@
 import { useState, useCallback, useRef, useEffect, type RefObject } from "react";
 import { STUDIO_ASSISTANT_ID, type Flow, type FlowNode, type FlowEdge, type RunEvent } from "../types/flow";
+import { listAgentSessions, newAgentSession } from "../api/client";
 import type { UpdateSignal } from "../hooks/useFlowDispatch";
 import Canvas, { type CanvasHandle } from "./Canvas";
 import FlowEditor, { type FlowEditorHandle } from "./FlowEditor";
 import RunLog from "./RunLog";
-import NodeTerminal from "./NodeTerminal";
+import AgentChatView from "./AgentChatView";
+import NodeConfigPanel from "./NodeConfigPanel";
 import ErrorBoundary from "./ErrorBoundary";
 
 interface FlowWorkspaceViewProps {
@@ -52,6 +54,8 @@ export default function FlowWorkspaceView({
   const [bottomOpen, setBottomOpen] = useState(false);
   const [bottomTab, setBottomTab] = useState<BottomTab>("log");
 
+  const [studioSessionId, setStudioSessionId] = useState<string | null>(null);
+
   const editorRef = useRef<FlowEditorHandle>(null);
   const hDragRef = useRef<{ startX: number; startW: number } | null>(null);
   const vDragRef = useRef<{ startY: number; startH: number } | null>(null);
@@ -66,6 +70,27 @@ export default function FlowWorkspaceView({
   if (updateSignal.source === "init" && updateSignal.counter > 0) {
     editorDefaultText.current = initialEditorText;
   }
+
+  // Auto-resolve or create a session for the Studio Assistant terminal
+  useEffect(() => {
+    if (bottomTab !== "terminal" || studioSessionId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const info = await listAgentSessions(STUDIO_ASSISTANT_ID);
+        if (cancelled) return;
+        if (info.sessions.length > 0) {
+          setStudioSessionId(info.active_session || info.sessions[0].session_id);
+        } else {
+          const result = await newAgentSession(STUDIO_ASSISTANT_ID);
+          if (!cancelled) setStudioSessionId(result.session_id);
+        }
+      } catch {
+        // server unreachable
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [bottomTab, studioSessionId]);
 
   useEffect(() => {
     if (updateSignal.counter <= lastEditorCounter.current) return;
@@ -84,10 +109,12 @@ export default function FlowWorkspaceView({
   );
 
   // Open bottom pane when run log is requested
-  if (runLogOpen && !bottomOpen) {
-    setBottomOpen(true);
-    setBottomTab("log");
-  }
+  useEffect(() => {
+    if (runLogOpen && !bottomOpen) {
+      setBottomOpen(true);
+      setBottomTab("log");
+    }
+  }, [runLogOpen, bottomOpen]);
 
   // --- Click-to-jump: Canvas selection → Editor highlight ---
   const handleSelectionChange = useCallback(
@@ -193,12 +220,21 @@ export default function FlowWorkspaceView({
               onMouseDown={handleHDragStart}
             />
             <div className="flow-workspace-editor" style={{ width: editorWidth }}>
-              <FlowEditor
-                key={flowId}
-                ref={editorRef}
-                defaultValue={editorDefaultText.current}
-                onChange={handleLocalEditorChange}
-              />
+              {selectedNodeId && canonicalFlow ? (
+                <NodeConfigPanel
+                  key={selectedNodeId}
+                  nodeId={selectedNodeId}
+                  canonicalFlow={canonicalFlow}
+                  canvasRef={canvasRef}
+                />
+              ) : (
+                <FlowEditor
+                  key={flowId}
+                  ref={editorRef}
+                  defaultValue={editorDefaultText.current}
+                  onChange={handleLocalEditorChange}
+                />
+              )}
             </div>
           </>
         )}
@@ -238,12 +274,11 @@ export default function FlowWorkspaceView({
                   onClose={handleBottomClose}
                 />
               )}
-              {bottomTab === "terminal" && (
-                <NodeTerminal
-                  key={`workspace-term:${STUDIO_ASSISTANT_ID}`}
+              {bottomTab === "terminal" && studioSessionId && (
+                <AgentChatView
+                  key={`workspace-chat:${STUDIO_ASSISTANT_ID}`}
                   agentId={STUDIO_ASSISTANT_ID}
-                  nodeLabel="Studio Assistant"
-                  runtime="local"
+                  sessionId={studioSessionId}
                 />
               )}
             </div>

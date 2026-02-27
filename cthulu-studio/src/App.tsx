@@ -6,7 +6,9 @@ import type { Flow, FlowNode, FlowEdge, FlowSummary, NodeTypeSchema, RunEvent } 
 import TopBar from "./components/TopBar";
 import Sidebar from "./components/Sidebar";
 import FlowWorkspaceView from "./components/FlowWorkspaceView";
-import AgentWorkspaceView from "./components/AgentWorkspaceView";
+import AgentGridView from "./components/AgentGridView";
+import AgentDetailView from "./components/AgentDetailView";
+import PromptEditorView from "./components/PromptEditorView";
 import { type CanvasHandle } from "./components/Canvas";
 import {
   Dialog,
@@ -18,7 +20,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { useFlowDispatch } from "./hooks/useFlowDispatch";
 
-type ActiveView = "flow-editor" | "agent-workspace";
+type ActiveView = "flow-editor" | "agent-grid" | "agent-workspace" | "prompt-editor";
 
 export default function App() {
   const [flows, setFlows] = useState<FlowSummary[]>([]);
@@ -30,6 +32,8 @@ export default function App() {
   const [selectedAgentName, setSelectedAgentName] = useState<string | null>(null);
   const [visitedAgents, setVisitedAgents] = useState<Map<string, string>>(new Map()); // id -> name
   const [agentListKey, setAgentListKey] = useState(0);
+  const [selectedPromptId, setSelectedPromptId] = useState<string | null>(null);
+  const [promptListKey, setPromptListKey] = useState(0);
   const [showSettings, setShowSettings] = useState(false);
   const [runEvents, setRunEvents] = useState<RunEvent[]>([]);
   const [nodeRunStatus, setNodeRunStatus] = useState<Record<string, "running" | "completed" | "failed">>({});
@@ -184,8 +188,9 @@ export default function App() {
         }
       } else if (event.resource_type === "agent") {
         setAgentListKey((k) => k + 1);
+      } else if (event.resource_type === "prompt") {
+        setPromptListKey((k) => k + 1);
       }
-      // prompt_change: no-op for now
     });
     return cleanup;
   }, [dispatchFlowUpdate]);
@@ -222,6 +227,17 @@ export default function App() {
 
   const handleBackToFlow = () => {
     setActiveView("flow-editor");
+  };
+
+  const handleShowAgentGrid = () => {
+    setSelectedAgentId(null);
+    setSelectedAgentName(null);
+    setActiveView("agent-grid");
+  };
+
+  const handleSelectPrompt = (promptId: string) => {
+    setSelectedPromptId(promptId);
+    setActiveView("prompt-editor");
   };
 
   const createFlow = async () => {
@@ -313,6 +329,7 @@ export default function App() {
         onRename={handleRename}
         agentName={selectedAgentName}
         onBackToFlow={handleBackToFlow}
+        onShowAgentGrid={handleShowAgentGrid}
         onSettingsClick={() => setShowSettings(true)}
         onReconnect={handleReconnect}
       />
@@ -326,10 +343,14 @@ export default function App() {
           onToggleEnabled={handleToggleFlowEnabled}
           selectedAgentId={selectedAgentId}
           onSelectAgent={handleSelectAgent}
+          onShowAgentGrid={handleShowAgentGrid}
           agentListKey={agentListKey}
           onAgentCreated={(id) => {
             handleSelectAgent(id);
           }}
+          selectedPromptId={selectedPromptId}
+          onSelectPrompt={handleSelectPrompt}
+          promptListKey={promptListKey}
           activeView={activeView}
           nodeTypes={nodeTypes}
           onGrab={handleGrab}
@@ -352,12 +373,40 @@ export default function App() {
             onRunLogClose={() => setRunLogOpen(false)}
           />
         </div>
+        {activeView === "agent-grid" && (
+          <AgentGridView
+            onSelectAgent={handleSelectAgent}
+            onCreateAgent={async () => {
+              try {
+                const { id } = await api.createAgent({ name: "New Agent" });
+                setAgentListKey((k) => k + 1);
+                handleSelectAgent(id);
+              } catch { /* logged */ }
+            }}
+            agentListKey={agentListKey}
+          />
+        )}
+        {activeView === "prompt-editor" && selectedPromptId && (
+          <PromptEditorView
+            key={selectedPromptId}
+            promptId={selectedPromptId}
+            onDeleted={() => {
+              setSelectedPromptId(null);
+              setPromptListKey((k) => k + 1);
+              setActiveView("flow-editor");
+            }}
+            onBack={handleBackToFlow}
+            onTitleChanged={() => {
+              setPromptListKey((k) => k + 1);
+            }}
+          />
+        )}
         {[...visitedAgents.entries()].map(([agentId, agentName]) => (
           <div
             key={agentId}
             style={{ display: activeView === "agent-workspace" && selectedAgentId === agentId ? "contents" : "none" }}
           >
-            <AgentWorkspaceView
+            <AgentDetailView
               agentId={agentId}
               agentName={agentName}
               onDeleted={() => {
@@ -365,7 +414,7 @@ export default function App() {
                 setSelectedAgentId(null);
                 setSelectedAgentName(null);
                 setAgentListKey((k) => k + 1);
-                setActiveView("flow-editor");
+                setActiveView("agent-grid");
               }}
             />
           </div>

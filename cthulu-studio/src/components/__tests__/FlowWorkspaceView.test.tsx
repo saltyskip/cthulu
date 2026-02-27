@@ -47,9 +47,9 @@ vi.mock("../RunLog", () => ({
   default: () => <div data-testid="run-log" />,
 }));
 
-// --- Mock NodeTerminal ---
-vi.mock("../NodeTerminal", () => ({
-  default: () => <div data-testid="node-terminal" />,
+// --- Mock AgentChatView ---
+vi.mock("../AgentChatView", () => ({
+  default: () => <div data-testid="agent-chat-view" />,
 }));
 
 // --- Mock ErrorBoundary ---

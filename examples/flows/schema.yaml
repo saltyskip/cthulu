@@ -201,21 +201,22 @@ executors:
   # --------------------------------------------------------------------------
   # Claude Code (runs on host via Claude CLI)
   # --------------------------------------------------------------------------
+  # Every executor must reference an existing agent via agent_id.
+  # The agent owns permissions, system prompt, and personality.
+  # The executor node owns the flow-specific prompt template and working_dir.
   - kind: claude-code
     label: "Executor - E01"           # optional display name
     config:
+      agent_id: <agent-uuid>          # required - ID of the agent to use
+                                      #   Create agents via the Agents sidebar or API.
+                                      #   The agent's permissions and system prompt
+                                      #   are used at execution time.
       prompt: examples/prompts/my_prompt.md   # required - file path or inline text
                                               #   File paths are relative to project root.
                                               #   If the value looks like a path (contains /
                                               #   or ends in .md/.txt), it's read as a file.
                                               #   Otherwise treated as inline prompt text.
-      permissions:                    # optional - Claude CLI tool permissions (default: [])
-        - Bash                        #   Allowed values: Bash, Read, Write, Edit,
-        - Read                        #   Grep, Glob, WebFetch, WebSearch, TodoWrite
-        - Grep                        #   Use Bash(*), Read(*) etc. for wildcard perms
-        - Glob
-      append_system_prompt: null      # optional - extra instructions appended to
-                                      #   Claude's system prompt
+      working_dir: "."                # optional - working directory (default: ".")
 
   # --------------------------------------------------------------------------
   # VM Sandbox (runs inside a Firecracker microVM)
@@ -223,12 +224,12 @@ executors:
   # - kind: vm-sandbox
   #   label: "VM Agent"
   #   config:
+  #     agent_id: <agent-uuid>        # required - ID of the agent to use
   #     tier: nano                    # optional - VM size (default: "nano")
   #                                   #   "nano"  = 1 vCPU, 512 MB RAM
   #                                   #   "micro" = 2 vCPU, 1024 MB RAM
   #     prompt: "Inline prompt..."    # optional - file path or inline text
-  #     permissions: []               # optional - tool permissions (default: [])
-  #     append_system_prompt: null    # optional - additional system prompt
+  #     working_dir: "."              # optional - working directory (default: ".")
 
 
 # ============================================================================

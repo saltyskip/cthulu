@@ -51,12 +51,17 @@ export function validateNode(node: FlowNode): string[] {
       }
       break;
     case "claude-code":
+      if (!cfg.agent_id || !(cfg.agent_id as string).trim()) {
+        errors.push("Select an agent for this executor");
+      }
       if (!cfg.prompt || !(cfg.prompt as string).trim()) {
         errors.push("Prompt is required");
       }
       break;
     case "vm-sandbox":
-      // No required fields — tier has a default, api_key is optional
+      if (!cfg.agent_id || !(cfg.agent_id as string).trim()) {
+        errors.push("Select an agent for this executor");
+      }
       break;
     case "slack":
       if (

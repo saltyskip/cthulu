@@ -6,6 +6,7 @@ pub mod processors;
 pub mod repository;
 pub mod runner;
 pub mod scheduler;
+pub mod session_bridge;
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
