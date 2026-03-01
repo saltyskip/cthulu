@@ -23,6 +23,7 @@ import SinkNode from "./NodeTypes/SinkNode";
 import type { Flow, FlowNode, FlowEdge } from "../types/flow";
 import type { UpdateSignal } from "../hooks/useFlowDispatch";
 import { log } from "../api/logger";
+import { useTheme } from "../lib/ThemeContext";
 
 const rfNodeTypes: NodeTypes = {
   trigger: TriggerNode,
@@ -31,7 +32,7 @@ const rfNodeTypes: NodeTypes = {
   sink: SinkNode,
 };
 
-const EDGE_STYLE = { stroke: "#30363d", strokeWidth: 2 };
+const EDGE_STYLE = { strokeWidth: 2 };
 
 function toRFNodes(flow: Flow): RFNode[] {
   return flow.nodes.map((n) => ({
@@ -115,6 +116,8 @@ const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(
   const [nodes, setNodes, onNodesChange] = useNodesState<RFNode>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<RFEdge>([]);
   const rfInstance = useRef<any>(null);
+  const { theme: appTheme } = useTheme();
+  const tv = appTheme.vars;
   const prevFlowId = useRef<string | null>(null);
   const nodesRef = useRef<RFNode[]>(nodes);
   nodesRef.current = nodes;
@@ -362,16 +365,16 @@ const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(
         fitView
         proOptions={{ hideAttribution: true }}
       >
-        <Background variant={BackgroundVariant.Dots} gap={20} size={1} color="#21262d" />
+        <Background variant={BackgroundVariant.Dots} gap={20} size={1} color={tv["bg-tertiary"]} />
         <Controls />
         <MiniMap
           nodeColor={(node) => {
             switch (node.type) {
-              case "trigger": return "#d29922";
-              case "source": return "#58a6ff";
-              case "executor": return "#bc8cff";
-              case "sink": return "#3fb950";
-              default: return "#30363d";
+              case "trigger": return tv["trigger-color"];
+              case "source": return tv["source-color"];
+              case "executor": return tv["executor-color"];
+              case "sink": return tv["sink-color"];
+              default: return tv["border"];
             }
           }}
           maskColor="rgba(0,0,0,0.5)"

@@ -2,6 +2,18 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import * as api from "../api/client";
 import { log } from "../api/logger";
 import { Button } from "@/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectLabel,
+  SelectSeparator,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { useTheme } from "@/lib/ThemeContext";
+import { themes } from "@/lib/themes";
 
 function formatRelativeTime(iso: string): string {
   const now = Date.now();
@@ -237,9 +249,44 @@ export default function TopBar({
         </button>
       )}
 
+      <ThemeSelector />
+
       <Button variant="ghost" size="sm" onClick={onSettingsClick}>
         Settings
       </Button>
     </div>
+  );
+}
+
+function ThemeSelector() {
+  const { theme, setThemeId } = useTheme();
+  const branded = themes.filter((t) => t.group === "branded");
+  const presets = themes.filter((t) => t.group === "preset");
+
+  return (
+    <Select value={theme.id} onValueChange={setThemeId}>
+      <SelectTrigger size="sm" className="text-xs h-7 min-w-[120px]">
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectGroup>
+          <SelectLabel>Branded</SelectLabel>
+          {branded.map((t) => (
+            <SelectItem key={t.id} value={t.id} className="text-xs">
+              {t.label}
+            </SelectItem>
+          ))}
+        </SelectGroup>
+        <SelectSeparator />
+        <SelectGroup>
+          <SelectLabel>Presets</SelectLabel>
+          {presets.map((t) => (
+            <SelectItem key={t.id} value={t.id} className="text-xs">
+              {t.label}
+            </SelectItem>
+          ))}
+        </SelectGroup>
+      </SelectContent>
+    </Select>
   );
 }

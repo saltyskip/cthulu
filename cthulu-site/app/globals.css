@@ -1,31 +1,40 @@
 @import "tailwindcss";
 
 :root {
-  --bg: #0d1117;
-  --bg-secondary: #161b22;
-  --bg-tertiary: #21262d;
-  --border: #30363d;
-  --text: #e6edf3;
-  --text-secondary: #8b949e;
-  --trigger-color: #d29922;
-  --source-color: #58a6ff;
-  --executor-color: #bc8cff;
-  --sink-color: #3fb950;
-  --accent: #58a6ff;
+  /* Eldritch Dark — deep ocean, bioluminescent accents */
+  --bg: #0b1317;
+  --bg-secondary: #111e25;
+  --bg-tertiary: #182b34;
+  --border: #24404c;
+  --text: #d1e1e8;
+  --text-secondary: #7a9baa;
+  --accent: #4ec9b0;
+  --success: #5bb98c;
+  --danger: #f07068;
+  --warning: #daa850;
+  --trigger-color: #daa850;
+  --source-color: #4ec9b0;
+  --executor-color: #9d8ce0;
+  --sink-color: #5bb98c;
+  --primary-foreground: #0b1317;
 }
 
 @theme {
-  --color-bg: #0d1117;
-  --color-bg-secondary: #161b22;
-  --color-bg-tertiary: #21262d;
-  --color-border: #30363d;
-  --color-text: #e6edf3;
-  --color-text-secondary: #8b949e;
-  --color-trigger: #d29922;
-  --color-source: #58a6ff;
-  --color-executor: #bc8cff;
-  --color-sink: #3fb950;
-  --color-accent: #58a6ff;
+  --color-bg: #0b1317;
+  --color-bg-secondary: #111e25;
+  --color-bg-tertiary: #182b34;
+  --color-border: #24404c;
+  --color-text: #d1e1e8;
+  --color-text-secondary: #7a9baa;
+  --color-accent: #4ec9b0;
+  --color-success: #5bb98c;
+  --color-danger: #f07068;
+  --color-warning: #daa850;
+  --color-trigger: #daa850;
+  --color-source: #4ec9b0;
+  --color-executor: #9d8ce0;
+  --color-sink: #5bb98c;
+  --color-primary-foreground: #0b1317;
 }
 
 * {
@@ -52,6 +61,18 @@ body {
 .react-flow__edge-path {
   stroke-width: 2;
 }
+
+/* Edge colors by type */
+.edge-trigger .react-flow__edge-path { stroke: var(--trigger-color); }
+.edge-source .react-flow__edge-path { stroke: var(--source-color); }
+.edge-executor .react-flow__edge-path { stroke: var(--executor-color); }
+.edge-sink .react-flow__edge-path { stroke: var(--sink-color); }
+
+/* SVG stroke utilities */
+.stroke-trigger { stroke: var(--trigger-color); }
+.stroke-source { stroke: var(--source-color); }
+.stroke-executor { stroke: var(--executor-color); }
+.stroke-sink { stroke: var(--sink-color); }
 
 /* Animated edge dots */
 @keyframes flowDots {
@@ -86,11 +107,12 @@ body {
   line-height: 1.6;
 }
 
-.toml-key { color: #79c0ff; }
-.toml-string { color: #a5d6ff; }
-.toml-comment { color: #8b949e; }
-.toml-header { color: #d2a8ff; }
-.toml-value { color: #3fb950; }
+/* Syntax highlighting — matches Eldritch Shiki token palette */
+.toml-key { color: #e0c08a; }       /* warm sand — properties */
+.toml-string { color: #8ed4a8; }    /* seafoam green — strings */
+.toml-comment { color: var(--text-secondary); }
+.toml-header { color: var(--executor-color); }
+.toml-value { color: #f0a070; }     /* coral-orange — numbers/values */
 
 /* Terminal typing animation — loops every 10s */
 @keyframes terminalLine {

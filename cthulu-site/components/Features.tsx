@@ -8,42 +8,42 @@ const features = [
     description:
       "Polls GitHub repos, detects new PRs, runs Claude Code reviews with scoped permissions. Posts inline comments and approve/request-changes.",
     icon: "\ud83d\udd0d",
-    color: "#58a6ff",
+    color: "var(--source-color)",
   },
   {
     title: "News Monitoring",
     description:
       "RSS feeds, web scrapers, CSS-selector scrapers. Fetch from any source, filter by keywords, process with AI.",
     icon: "\ud83d\udcf0",
-    color: "#d29922",
+    color: "var(--trigger-color)",
   },
   {
     title: "Rich Delivery",
     description:
       "Slack (webhooks + Bot API with Block Kit threading) and Notion (database pages with images, callouts, memes, tables).",
     icon: "\ud83d\udce4",
-    color: "#3fb950",
+    color: "var(--sink-color)",
   },
   {
     title: "Prompt Templates",
     description:
       "Markdown prompt files with {{variable}} substitution. Battle-tested templates for PR reviews, changelogs, newsletters.",
     icon: "\ud83d\udcdd",
-    color: "#bc8cff",
+    color: "var(--executor-color)",
   },
   {
     title: "Scoped Permissions",
     description:
       "Per-task --allowedTools instead of --dangerously-skip-permissions. Each pipeline gets only the tools it needs.",
     icon: "\ud83d\udd12",
-    color: "#f85149",
+    color: "var(--danger)",
   },
   {
     title: "Market Data",
     description:
       "Built-in CoinGecko, Fear & Greed, S&P 500 integration. Auto-injected via {{market_data}} template variable.",
     icon: "\ud83d\udcc8",
-    color: "#d29922",
+    color: "var(--warning)",
   },
 ];
 
@@ -75,7 +75,7 @@ export default function Features() {
             >
               <div
                 className="flex h-10 w-10 items-center justify-center rounded-lg text-xl"
-                style={{ background: f.color + "18" }}
+                style={{ background: `color-mix(in srgb, ${f.color} 9%, transparent)` }}
               >
                 {f.icon}
               </div>
