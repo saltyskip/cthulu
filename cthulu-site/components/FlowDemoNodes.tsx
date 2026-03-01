@@ -3,10 +3,10 @@
 import { Handle, Position } from "@xyflow/react";
 
 const nodeColors: Record<string, string> = {
-  trigger: "#d29922",
-  source: "#58a6ff",
-  executor: "#bc8cff",
-  sink: "#3fb950",
+  trigger: "var(--trigger-color)",
+  source: "var(--source-color)",
+  executor: "var(--executor-color)",
+  sink: "var(--sink-color)",
 };
 
 function DemoNode({
@@ -14,7 +14,7 @@ function DemoNode({
 }: {
   data: { label: string; type: string; icon: string };
 }) {
-  const color = nodeColors[data.type] || "#8b949e";
+  const color = nodeColors[data.type] || "var(--text-secondary)";
 
   return (
     <>
@@ -29,22 +29,22 @@ function DemoNode({
       <div
         className="rounded-lg border px-4 py-3"
         style={{
-          background: "#161b22",
-          borderColor: "#30363d",
+          background: "var(--bg-secondary)",
+          borderColor: "var(--border)",
           minWidth: 160,
         }}
       >
         <div className="flex items-center gap-2">
           <span
             className="rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase"
-            style={{ background: color + "22", color }}
+            style={{ background: `color-mix(in srgb, ${color} 13%, transparent)`, color }}
           >
             {data.type}
           </span>
         </div>
         <div className="mt-1.5 flex items-center gap-2">
           <span className="text-base">{data.icon}</span>
-          <span className="text-sm font-medium text-[#e6edf3]">
+          <span className="text-sm font-medium" style={{ color: "var(--text)" }}>
             {data.label}
           </span>
         </div>
@@ -66,7 +66,7 @@ function DemoNodeVertical({
 }: {
   data: { label: string; type: string; icon: string };
 }) {
-  const color = nodeColors[data.type] || "#8b949e";
+  const color = nodeColors[data.type] || "var(--text-secondary)";
 
   return (
     <>
@@ -81,22 +81,22 @@ function DemoNodeVertical({
       <div
         className="rounded-lg border px-3 py-2"
         style={{
-          background: "#161b22",
-          borderColor: "#30363d",
+          background: "var(--bg-secondary)",
+          borderColor: "var(--border)",
           width: 140,
         }}
       >
         <div className="flex items-center gap-2">
           <span
             className="rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase"
-            style={{ background: color + "22", color }}
+            style={{ background: `color-mix(in srgb, ${color} 13%, transparent)`, color }}
           >
             {data.type}
           </span>
         </div>
         <div className="mt-1 flex items-center gap-2">
           <span className="text-sm">{data.icon}</span>
-          <span className="text-xs font-medium text-[#e6edf3]">
+          <span className="text-xs font-medium" style={{ color: "var(--text)" }}>
             {data.label}
           </span>
         </div>

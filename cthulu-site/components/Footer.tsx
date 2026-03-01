@@ -25,7 +25,7 @@ export default function Footer() {
                 maskSize: "150%",
                 maskRepeat: "no-repeat",
                 maskPosition: "center",
-                backgroundColor: "#10b981",
+                backgroundColor: "var(--accent)",
               }}
             />
             <span className="text-lg font-bold text-text">Cthulu</span>

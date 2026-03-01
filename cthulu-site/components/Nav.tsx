@@ -26,7 +26,7 @@ export default function Nav() {
               maskSize: "150%",
               maskRepeat: "no-repeat",
               maskPosition: "center 45%",
-              backgroundColor: "#10b981",
+              backgroundColor: "var(--accent)",
             }}
           />
           <span className="text-xl font-bold leading-tight text-text">Cthulu</span>
@@ -48,7 +48,7 @@ export default function Nav() {
           ))}
           <a
             href="#waitlist"
-            className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90"
+            className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90"
           >
             Sign Up for the Waitlist
           </a>
@@ -91,7 +91,7 @@ export default function Nav() {
           ))}
           <a
             href="#waitlist"
-            className="mt-2 block rounded-lg bg-accent px-4 py-2 text-center text-sm font-medium text-white"
+            className="mt-2 block rounded-lg bg-accent px-4 py-2 text-center text-sm font-medium text-primary-foreground"
           >
             Sign Up for the Waitlist
           </a>

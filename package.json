@@ -3,6 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "workspaces": [
+    "packages/*",
     "cthulu-studio",
     "cthulu-site"
   ],

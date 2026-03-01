@@ -5,28 +5,28 @@ import { motion } from "framer-motion";
 const steps = [
   {
     label: "Define",
-    color: "#d29922",
+    color: "var(--trigger-color)",
     icon: "\ud83d\udccb",
     title: "Pick a trigger, point at your data",
-    description: "Choose what kicks off the pipeline — a cron schedule, a new GitHub PR, or a manual trigger. Then define where the data comes from: RSS feeds, web scrapers, GitHub repos, or market APIs.",
+    description: "Choose what kicks off the pipeline \u2014 a cron schedule, a new GitHub PR, or a manual trigger. Then define where the data comes from: RSS feeds, web scrapers, GitHub repos, or market APIs.",
   },
   {
     label: "Sandbox",
-    color: "#58a6ff",
+    color: "var(--source-color)",
     icon: "\ud83d\udd12",
     title: "Scoped environments, real access",
-    description: "Each agent runs in a sandboxed environment with filesystem access, CLI tools, and only the permissions you grant. Not a prompt wrapper — a real runtime with real capabilities.",
+    description: "Each agent runs in a sandboxed environment with filesystem access, CLI tools, and only the permissions you grant. Not a prompt wrapper \u2014 a real runtime with real capabilities.",
   },
   {
     label: "Execute",
-    color: "#bc8cff",
+    color: "var(--executor-color)",
     icon: "\ud83e\udde0",
     title: "Agents that actually do things",
-    description: "Agents don't just process text. They clone repos, grep codebases, read files, run commands, and generate structured output. The same things a human would do, on autopilot.",
+    description: "Agents don\u2019t just process text. They clone repos, grep codebases, read files, run commands, and generate structured output. The same things a human would do, on autopilot.",
   },
   {
     label: "Deliver",
-    color: "#3fb950",
+    color: "var(--sink-color)",
     icon: "\ud83d\udce4",
     title: "Output where you need it",
     description: "Results go to Slack (with Block Kit threading), Notion (rich database pages with images and callouts), GitHub (inline PR comments), or wherever your team works.",
@@ -63,14 +63,14 @@ export default function HowItWorks() {
               <div className="flex flex-col items-center">
                 <div
                   className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-lg"
-                  style={{ background: step.color + "22", color: step.color }}
+                  style={{ background: `color-mix(in srgb, ${step.color} 13%, transparent)`, color: step.color }}
                 >
                   {step.icon}
                 </div>
                 {i < steps.length - 1 && (
                   <div
                     className="w-0.5 grow"
-                    style={{ background: step.color + "33" }}
+                    style={{ background: `color-mix(in srgb, ${step.color} 20%, transparent)` }}
                   />
                 )}
               </div>
@@ -79,7 +79,7 @@ export default function HowItWorks() {
               <div className="pb-10">
                 <span
                   className="rounded px-2 py-0.5 text-xs font-semibold uppercase"
-                  style={{ background: step.color + "22", color: step.color }}
+                  style={{ background: `color-mix(in srgb, ${step.color} 13%, transparent)`, color: step.color }}
                 >
                   {step.label}
                 </span>

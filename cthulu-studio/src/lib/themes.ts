@@ -8,6 +8,7 @@ export interface ThemeDefinition {
   vars: Record<string, string>;
 }
 
+import { eldritchDark, eldritchLight, toCssVarMap } from "@cthulu/brand";
 import { eldritchShikiTheme } from "./shiki-eldritch";
 import { eldritchLightShikiTheme } from "./shiki-eldritch-light";
 
@@ -21,32 +22,7 @@ export const themes: ThemeDefinition[] = [
     group: "branded",
     colorScheme: "dark",
     shikiTheme: eldritchShikiTheme,
-    vars: {
-      // Backgrounds — deep ocean, clear layer separation (~5L steps)
-      bg: "#0b1317",
-      "bg-secondary": "#111e25",
-      "bg-tertiary": "#182b34",
-      // Border — visible on all three backgrounds
-      border: "#24404c",
-      // Text — moonlight on water, high contrast (11:1+)
-      text: "#d1e1e8",
-      // Text-secondary — muted teal, passes AA (5.4:1)
-      "text-secondary": "#7a9baa",
-      // Accent — bioluminescent teal, vivid but not neon
-      accent: "#4ec9b0",
-      // Success — warm green, clearly distinct from teal accent
-      success: "#5bb98c",
-      // Danger — living coral, not generic red
-      danger: "#f07068",
-      // Warning — anglerfish amber
-      warning: "#daa850",
-      // Node colors — each hue is distinct at a glance
-      "trigger-color": "#daa850",
-      "source-color": "#4ec9b0",
-      "executor-color": "#9d8ce0",
-      "sink-color": "#5bb98c",
-      "primary-foreground": "#0b1317",
-    },
+    vars: toCssVarMap(eldritchDark),
   },
   {
     id: "cosmic",
@@ -78,26 +54,7 @@ export const themes: ThemeDefinition[] = [
     group: "branded",
     colorScheme: "light",
     shikiTheme: eldritchLightShikiTheme,
-    vars: {
-      // Backgrounds — clean, barely tinted. Identity lives in accents, not surfaces.
-      bg: "#f7f9f8",
-      "bg-secondary": "#ffffff",
-      "bg-tertiary": "#eaefed",
-      border: "#c8d4d0",
-      // Text — deep ink, high contrast
-      text: "#1a2a28",
-      "text-secondary": "#5a7a72",
-      // Accent — darkened teal for light bg contrast
-      accent: "#0c8c72",
-      success: "#167a4a",
-      danger: "#c04040",
-      warning: "#9a7018",
-      "trigger-color": "#9a7018",
-      "source-color": "#0c8c72",
-      "executor-color": "#6a4daa",
-      "sink-color": "#167a4a",
-      "primary-foreground": "#fff",
-    },
+    vars: toCssVarMap(eldritchLight),
   },
   {
     id: "cosmic-light",

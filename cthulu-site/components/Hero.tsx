@@ -37,7 +37,7 @@ export default function Hero() {
           <div className="mt-8 flex items-center justify-center gap-4">
             <a
               href="#waitlist"
-              className="rounded-lg bg-accent px-6 py-3 font-medium text-white transition-opacity hover:opacity-90"
+              className="rounded-lg bg-accent px-6 py-3 font-medium text-primary-foreground transition-opacity hover:opacity-90"
             >
               Sign Up for the Waitlist
             </a>

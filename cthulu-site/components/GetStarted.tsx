@@ -62,7 +62,7 @@ export default function GetStarted() {
         >
           <a
             href="#waitlist"
-            className="inline-block rounded-lg bg-accent px-8 py-3 font-medium text-white transition-opacity hover:opacity-90"
+            className="inline-block rounded-lg bg-accent px-8 py-3 font-medium text-primary-foreground transition-opacity hover:opacity-90"
           >
             Sign Up for the Waitlist
           </a>

@@ -3,13 +3,13 @@
 import { motion } from "framer-motion";
 
 const nodeTypes = [
-  { label: "Cron Trigger", color: "#d29922", type: "trigger" },
-  { label: "RSS Source", color: "#58a6ff", type: "source" },
-  { label: "Web Scraper", color: "#58a6ff", type: "source" },
-  { label: "Keyword Filter", color: "#8b949e", type: "filter" },
-  { label: "Agent", color: "#bc8cff", type: "executor" },
-  { label: "Slack Sink", color: "#3fb950", type: "sink" },
-  { label: "Notion Sink", color: "#3fb950", type: "sink" },
+  { label: "Cron Trigger", color: "var(--trigger-color)", type: "trigger" },
+  { label: "RSS Source", color: "var(--source-color)", type: "source" },
+  { label: "Web Scraper", color: "var(--source-color)", type: "source" },
+  { label: "Keyword Filter", color: "var(--text-secondary)", type: "filter" },
+  { label: "Agent", color: "var(--executor-color)", type: "executor" },
+  { label: "Slack Sink", color: "var(--sink-color)", type: "sink" },
+  { label: "Notion Sink", color: "var(--sink-color)", type: "sink" },
 ];
 
 function MockNode({
@@ -32,7 +32,7 @@ function MockNode({
     >
       <span
         className="rounded px-1.5 py-0.5 text-[9px] font-semibold uppercase"
-        style={{ background: color + "22", color }}
+        style={{ background: `color-mix(in srgb, ${color} 13%, transparent)`, color }}
       >
         {type}
       </span>
@@ -68,9 +68,9 @@ export default function StudioShowcase() {
           {/* Title bar */}
           <div className="flex items-center gap-2 border-b border-border px-4 py-3">
             <div className="flex gap-1.5">
-              <div className="h-3 w-3 rounded-full bg-[#f85149]" />
-              <div className="h-3 w-3 rounded-full bg-[#d29922]" />
-              <div className="h-3 w-3 rounded-full bg-[#3fb950]" />
+              <div className="h-3 w-3 rounded-full" style={{ background: "var(--danger)" }} />
+              <div className="h-3 w-3 rounded-full" style={{ background: "var(--warning)" }} />
+              <div className="h-3 w-3 rounded-full" style={{ background: "var(--success)" }} />
             </div>
             <span className="ml-4 text-xs text-text-secondary">
               Cthulu Studio - crypto-news-brief
@@ -110,25 +110,25 @@ export default function StudioShowcase() {
                     height="20"
                     patternUnits="userSpaceOnUse"
                   >
-                    <circle cx="1" cy="1" r="0.5" fill="#21262d" />
+                    <circle cx="1" cy="1" r="0.5" fill="var(--bg-tertiary)" />
                   </pattern>
                 </defs>
                 <rect width="100%" height="100%" fill="url(#grid)" />
                 {/* Connection lines */}
-                <line x1="155" y1="45" x2="220" y2="70" stroke="#d2992255" strokeWidth="1.5" />
-                <line x1="155" y1="45" x2="220" y2="150" stroke="#d2992255" strokeWidth="1.5" />
-                <line x1="340" y1="85" x2="400" y2="120" stroke="#58a6ff55" strokeWidth="1.5" />
-                <line x1="340" y1="165" x2="400" y2="120" stroke="#58a6ff55" strokeWidth="1.5" />
-                <line x1="540" y1="135" x2="600" y2="70" stroke="#bc8cff55" strokeWidth="1.5" />
-                <line x1="540" y1="135" x2="600" y2="190" stroke="#bc8cff55" strokeWidth="1.5" />
+                <line x1="155" y1="45" x2="220" y2="70" className="stroke-trigger" strokeOpacity="0.33" strokeWidth="1.5" />
+                <line x1="155" y1="45" x2="220" y2="150" className="stroke-trigger" strokeOpacity="0.33" strokeWidth="1.5" />
+                <line x1="340" y1="85" x2="400" y2="120" className="stroke-source" strokeOpacity="0.33" strokeWidth="1.5" />
+                <line x1="340" y1="165" x2="400" y2="120" className="stroke-source" strokeOpacity="0.33" strokeWidth="1.5" />
+                <line x1="540" y1="135" x2="600" y2="70" className="stroke-executor" strokeOpacity="0.33" strokeWidth="1.5" />
+                <line x1="540" y1="135" x2="600" y2="190" className="stroke-executor" strokeOpacity="0.33" strokeWidth="1.5" />
               </svg>
 
-              <MockNode label="Every 4h" color="#d29922" type="trigger" x={30} y={25} />
-              <MockNode label="RSS Feeds" color="#58a6ff" type="source" x={220} y={50} />
-              <MockNode label="Web Scraper" color="#58a6ff" type="source" x={220} y={130} />
-              <MockNode label="Agent" color="#bc8cff" type="executor" x={410} y={95} />
-              <MockNode label="Slack" color="#3fb950" type="sink" x={600} y={50} />
-              <MockNode label="Notion" color="#3fb950" type="sink" x={600} y={170} />
+              <MockNode label="Every 4h" color="var(--trigger-color)" type="trigger" x={30} y={25} />
+              <MockNode label="RSS Feeds" color="var(--source-color)" type="source" x={220} y={50} />
+              <MockNode label="Web Scraper" color="var(--source-color)" type="source" x={220} y={130} />
+              <MockNode label="Agent" color="var(--executor-color)" type="executor" x={410} y={95} />
+              <MockNode label="Slack" color="var(--sink-color)" type="sink" x={600} y={50} />
+              <MockNode label="Notion" color="var(--sink-color)" type="sink" x={600} y={170} />
 
               {/* Minimap */}
               <div className="absolute right-3 bottom-3 h-16 w-24 rounded border border-border bg-bg/80">
@@ -177,9 +177,9 @@ export default function StudioShowcase() {
                   <span className="text-sink">Success</span>
                 </div>
                 <div className="flex items-center gap-2 text-[10px]">
-                  <span className="h-1.5 w-1.5 rounded-full bg-[#f85149]" />
+                  <span className="h-1.5 w-1.5 rounded-full" style={{ background: "var(--danger)" }} />
                   <span className="text-text-secondary">8h ago</span>
-                  <span className="text-[#f85149]">Failed</span>
+                  <span style={{ color: "var(--danger)" }}>Failed</span>
                 </div>
               </div>
             </div>

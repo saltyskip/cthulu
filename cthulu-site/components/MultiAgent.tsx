@@ -4,67 +4,59 @@ import { motion } from "framer-motion";
 
 const terminalOutputs = [
   {
-    title: "claude — pr-review",
+    title: "claude \u2014 pr-review",
     lines: [
-      { text: "$ claude --allowedTools Read,Grep,Bash", color: "#3fb950" },
-      { text: "Cloning acme-corp/api-server...", color: "#8b949e" },
-      { text: "Reading src/handlers/auth.rs...", color: "#8b949e" },
-      { text: "⠋ Analyzing PR #142 diff...", color: "#58a6ff" },
-      { text: "Found 3 issues in auth middleware", color: "#d29922" },
-      { text: "Posting inline comment on L47...", color: "#8b949e" },
-      { text: "Posting inline comment on L93...", color: "#8b949e" },
-      { text: "gh pr review --request-changes", color: "#3fb950" },
+      { text: "$ claude --allowedTools Read,Grep,Bash", color: "var(--success)" },
+      { text: "Cloning acme-corp/api-server...", color: "var(--text-secondary)" },
+      { text: "Reading src/handlers/auth.rs...", color: "var(--text-secondary)" },
+      { text: "\u280b Analyzing PR #142 diff...", color: "var(--source-color)" },
+      { text: "Found 3 issues in auth middleware", color: "var(--warning)" },
+      { text: "Posting inline comment on L47...", color: "var(--text-secondary)" },
+      { text: "Posting inline comment on L93...", color: "var(--text-secondary)" },
+      { text: "gh pr review --request-changes", color: "var(--success)" },
     ],
-    x: 0,
-    y: 0,
     delay: 0,
   },
   {
-    title: "claude — newsletter",
+    title: "claude \u2014 newsletter",
     lines: [
-      { text: "$ claude --allowedTools Read,Bash", color: "#3fb950" },
-      { text: "Fetching thedefiant.io/feed...", color: "#8b949e" },
-      { text: "Fetching blockworks.co/feed...", color: "#8b949e" },
-      { text: "⠋ 23 items fetched, filtering...", color: "#58a6ff" },
-      { text: "Generating newsletter draft...", color: "#8b949e" },
-      { text: "Adding market data table...", color: "#8b949e" },
-      { text: "Publishing to Notion...", color: "#bc8cff" },
-      { text: "✓ Newsletter published", color: "#3fb950" },
+      { text: "$ claude --allowedTools Read,Bash", color: "var(--success)" },
+      { text: "Fetching thedefiant.io/feed...", color: "var(--text-secondary)" },
+      { text: "Fetching blockworks.co/feed...", color: "var(--text-secondary)" },
+      { text: "\u280b 23 items fetched, filtering...", color: "var(--source-color)" },
+      { text: "Generating newsletter draft...", color: "var(--text-secondary)" },
+      { text: "Adding market data table...", color: "var(--text-secondary)" },
+      { text: "Publishing to Notion...", color: "var(--executor-color)" },
+      { text: "\u2713 Newsletter published", color: "var(--success)" },
     ],
-    x: 52,
-    y: 0,
     delay: 2,
   },
   {
-    title: "claude — changelog",
+    title: "claude \u2014 changelog",
     lines: [
-      { text: "$ claude --allowedTools Read,Grep", color: "#3fb950" },
-      { text: "Querying merged PRs (7 days)...", color: "#8b949e" },
-      { text: "Found 12 PRs across 4 repos", color: "#8b949e" },
-      { text: "⠋ Categorizing changes...", color: "#58a6ff" },
-      { text: "3 features, 7 fixes, 2 chores", color: "#d29922" },
-      { text: "Formatting Slack blocks...", color: "#8b949e" },
-      { text: "Posted to #dev-updates", color: "#bc8cff" },
-      { text: "✓ Changelog delivered", color: "#3fb950" },
+      { text: "$ claude --allowedTools Read,Grep", color: "var(--success)" },
+      { text: "Querying merged PRs (7 days)...", color: "var(--text-secondary)" },
+      { text: "Found 12 PRs across 4 repos", color: "var(--text-secondary)" },
+      { text: "\u280b Categorizing changes...", color: "var(--source-color)" },
+      { text: "3 features, 7 fixes, 2 chores", color: "var(--warning)" },
+      { text: "Formatting Slack blocks...", color: "var(--text-secondary)" },
+      { text: "Posted to #dev-updates", color: "var(--executor-color)" },
+      { text: "\u2713 Changelog delivered", color: "var(--success)" },
     ],
-    x: 0,
-    y: 52,
     delay: 4,
   },
   {
-    title: "you@macbook — zsh",
+    title: "you@macbook \u2014 zsh",
     lines: [
-      { text: "$ gh pr review 142 --approve", color: "#3fb950" },
-      { text: "✓ Approved  # didn't read it", color: "#f85149" },
-      { text: "$ gh pr review 143 --approve", color: "#3fb950" },
-      { text: "✓ Approved  # mass deletes prod db?", color: "#f85149" },
-      { text: "$ gh pr review 144 --approve", color: "#3fb950" },
-      { text: "✓ Approved  # rm -rf / looks fine", color: "#f85149" },
-      { text: "$ gh pr review 145 --approve", color: "#3fb950" },
-      { text: "✓ Approved  # who needs tests anyway", color: "#f85149" },
+      { text: "$ gh pr review 142 --approve", color: "var(--success)" },
+      { text: "\u2713 Approved  # didn't read it", color: "var(--danger)" },
+      { text: "$ gh pr review 143 --approve", color: "var(--success)" },
+      { text: "\u2713 Approved  # mass deletes prod db?", color: "var(--danger)" },
+      { text: "$ gh pr review 144 --approve", color: "var(--success)" },
+      { text: "\u2713 Approved  # rm -rf / looks fine", color: "var(--danger)" },
+      { text: "$ gh pr review 145 --approve", color: "var(--success)" },
+      { text: "\u2713 Approved  # who needs tests anyway", color: "var(--danger)" },
     ],
-    x: 52,
-    y: 52,
     delay: 1,
   },
 ];
@@ -79,12 +71,12 @@ function AnimatedTerminal({
   delay: number;
 }) {
   return (
-    <div className="flex h-full flex-col overflow-hidden rounded border border-border bg-[#0d1117]">
+    <div className="flex h-full flex-col overflow-hidden rounded border border-border" style={{ background: "var(--bg)" }}>
       <div className="flex items-center gap-1.5 border-b border-border px-2.5 py-1.5 shrink-0">
         <div className="flex gap-1">
-          <div className="h-2 w-2 rounded-full bg-[#f85149]" />
-          <div className="h-2 w-2 rounded-full bg-[#d29922]" />
-          <div className="h-2 w-2 rounded-full bg-[#3fb950]" />
+          <div className="h-2 w-2 rounded-full" style={{ background: "var(--danger)" }} />
+          <div className="h-2 w-2 rounded-full" style={{ background: "var(--warning)" }} />
+          <div className="h-2 w-2 rounded-full" style={{ background: "var(--success)" }} />
         </div>
         <span className="ml-1 truncate text-[9px] text-text-secondary font-mono">{title}</span>
       </div>
@@ -121,7 +113,14 @@ function TerminalChaos() {
       </div>
       {/* Overlay badge */}
       <div className="absolute inset-0 flex items-end justify-center pb-3 pointer-events-none">
-        <span className="rounded-full bg-[#0d1117ee] border border-[#f8514944] px-3 py-1 text-xs text-[#f85149]">
+        <span
+          className="rounded-full px-3 py-1 text-xs"
+          style={{
+            background: "color-mix(in srgb, var(--bg) 93%, transparent)",
+            border: "1px solid color-mix(in srgb, var(--danger) 27%, transparent)",
+            color: "var(--danger)",
+          }}
+        >
           You, pretending you know what&apos;s happening
         </span>
       </div>
@@ -136,28 +135,28 @@ function OrchestrationView() {
       status: "running",
       trigger: "GitHub PR",
       lastRun: "12s ago",
-      color: "#3fb950",
+      color: "var(--success)",
     },
     {
       name: "Market Brief",
       status: "scheduled",
       trigger: "Every 4h",
       lastRun: "2h ago",
-      color: "#58a6ff",
+      color: "var(--source-color)",
     },
     {
       name: "Dev Changelog",
       status: "idle",
       trigger: "Mondays 9am",
       lastRun: "5d ago",
-      color: "#8b949e",
+      color: "var(--text-secondary)",
     },
     {
       name: "Newsletter",
       status: "running",
       trigger: "Daily 8am",
       lastRun: "3m ago",
-      color: "#3fb950",
+      color: "var(--success)",
     },
   ];
 
@@ -167,7 +166,7 @@ function OrchestrationView() {
       <div className="flex items-center justify-between border-b border-border px-4 py-2">
         <span className="text-xs font-medium text-text">Cthulu Dashboard</span>
         <div className="flex items-center gap-2">
-          <span className="h-1.5 w-1.5 rounded-full bg-[#3fb950]" />
+          <span className="h-1.5 w-1.5 rounded-full" style={{ background: "var(--success)" }} />
           <span className="text-[10px] text-text-secondary">4 flows active</span>
         </div>
       </div>
@@ -226,7 +225,13 @@ export default function MultiAgent() {
             transition={{ duration: 0.5 }}
           >
             <div className="mb-3 flex items-center gap-2">
-              <span className="rounded bg-[#f8514922] px-2 py-0.5 text-xs font-medium text-[#f85149]">
+              <span
+                className="rounded px-2 py-0.5 text-xs font-medium"
+                style={{
+                  background: "color-mix(in srgb, var(--danger) 13%, transparent)",
+                  color: "var(--danger)",
+                }}
+              >
                 Before
               </span>
               <span className="text-sm text-text-secondary">
@@ -243,7 +248,13 @@ export default function MultiAgent() {
             transition={{ duration: 0.5 }}
           >
             <div className="mb-3 flex items-center gap-2">
-              <span className="rounded bg-[#3fb95022] px-2 py-0.5 text-xs font-medium text-[#3fb950]">
+              <span
+                className="rounded px-2 py-0.5 text-xs font-medium"
+                style={{
+                  background: "color-mix(in srgb, var(--success) 13%, transparent)",
+                  color: "var(--success)",
+                }}
+              >
                 With Cthulu
               </span>
               <span className="text-sm text-text-secondary">

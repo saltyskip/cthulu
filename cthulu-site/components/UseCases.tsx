@@ -75,7 +75,7 @@ export default function UseCases() {
               onClick={() => setActive(c.id)}
               className={`rounded-lg px-5 py-2.5 text-sm font-medium transition-colors ${
                 active === c.id
-                  ? "bg-accent text-white"
+                  ? "bg-accent text-primary-foreground"
                   : "border border-border text-text-secondary hover:text-text"
               }`}
             >
