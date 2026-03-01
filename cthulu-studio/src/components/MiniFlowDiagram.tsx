@@ -20,10 +20,10 @@ interface MiniFlowDiagramProps {
 
 // Node colour mapping — matches the existing Studio colour system
 const NODE_COLORS: Record<string, string> = {
-  trigger: "var(--trigger, #d29922)",
-  source: "var(--source, #58a6ff)",
-  executor: "var(--executor, #bc8cff)",
-  sink: "var(--sink, #3fb950)",
+  trigger: "var(--trigger-color)",
+  source: "var(--source-color)",
+  executor: "var(--executor-color)",
+  sink: "var(--sink-color)",
 };
 
 const X_STEP = 110;
@@ -43,7 +43,7 @@ function makeMiniNode(
     data: { label },
     style: {
       background: NODE_COLORS[kind] ?? "var(--bg-tertiary)",
-      color: "#fff",
+      color: "var(--primary-foreground)",
       border: "none",
       borderRadius: 6,
       padding: "3px 7px",

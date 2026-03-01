@@ -33,7 +33,7 @@
   --popover: var(--bg-secondary);
   --popover-foreground: var(--text);
   --primary: var(--accent);
-  --primary-foreground: #0b1317;
+  --primary-foreground: var(--bg);
   --secondary: var(--bg-secondary);
   --secondary-foreground: var(--text);
   --muted: var(--bg-tertiary);
@@ -396,7 +396,7 @@ button:disabled {
   font-size: 10px;
   font-weight: 600;
   color: var(--success);
-  background: rgba(63, 185, 80, 0.15);
+  background: color-mix(in srgb, var(--success) 15%, transparent);
   padding: 2px 8px;
   border-radius: 4px;
   text-transform: uppercase;
@@ -587,7 +587,7 @@ button:disabled {
 
 .agent-card:hover {
   border-color: var(--accent);
-  box-shadow: 0 0 0 1px rgba(88, 166, 255, 0.25), 0 4px 16px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 25%, transparent), 0 4px 16px rgba(0, 0, 0, 0.3);
 }
 
 .agent-card-name {
@@ -857,22 +857,22 @@ button:disabled {
 }
 
 .custom-node .node-type-badge.trigger {
-  background: rgba(210, 153, 34, 0.2);
+  background: color-mix(in srgb, var(--trigger-color) 20%, transparent);
   color: var(--trigger-color);
 }
 
 .custom-node .node-type-badge.source {
-  background: rgba(88, 166, 255, 0.2);
+  background: color-mix(in srgb, var(--source-color) 20%, transparent);
   color: var(--source-color);
 }
 
 .custom-node .node-type-badge.executor {
-  background: rgba(188, 140, 255, 0.2);
+  background: color-mix(in srgb, var(--executor-color) 20%, transparent);
   color: var(--executor-color);
 }
 
 .custom-node .node-type-badge.sink {
-  background: rgba(63, 185, 80, 0.2);
+  background: color-mix(in srgb, var(--sink-color) 20%, transparent);
   color: var(--sink-color);
 }
 
@@ -911,23 +911,23 @@ button:disabled {
 /* Node run status highlights */
 .custom-node.run-running {
   border-color: var(--accent);
-  box-shadow: 0 0 8px rgba(88, 166, 255, 0.4);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 40%, transparent);
   animation: pulse-running 1.5s ease-in-out infinite;
 }
 
 .custom-node.run-completed {
-  border-color: #3fb950;
-  box-shadow: 0 0 8px rgba(63, 185, 80, 0.35);
+  border-color: var(--success);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--success) 35%, transparent);
 }
 
 .custom-node.run-failed {
   border-color: var(--danger);
-  box-shadow: 0 0 8px rgba(248, 81, 73, 0.4);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--danger) 40%, transparent);
 }
 
 @keyframes pulse-running {
-  0%, 100% { box-shadow: 0 0 8px rgba(88, 166, 255, 0.4); }
-  50% { box-shadow: 0 0 16px rgba(88, 166, 255, 0.7); }
+  0%, 100% { box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 40%, transparent); }
+  50% { box-shadow: 0 0 16px color-mix(in srgb, var(--accent) 70%, transparent); }
 }
 
 .react-flow__node.selected .custom-node {
@@ -1067,15 +1067,15 @@ button:disabled {
 }
 
 .console-entry:hover {
-  background: rgba(255, 255, 255, 0.02);
+  background: color-mix(in srgb, var(--text) 2%, transparent);
 }
 
 .console-entry.console-error {
-  background: rgba(248, 81, 73, 0.06);
+  background: color-mix(in srgb, var(--danger) 6%, transparent);
 }
 
 .console-entry.console-warn {
-  background: rgba(210, 153, 34, 0.06);
+  background: color-mix(in srgb, var(--warning) 6%, transparent);
 }
 
 .console-time {
@@ -1156,11 +1156,11 @@ button:disabled {
 }
 
 .run-log-entry.run-log-failed {
-  background: rgba(248, 81, 73, 0.06);
+  background: color-mix(in srgb, var(--danger) 6%, transparent);
 }
 
 .run-log-entry.run-log-completed {
-  background: rgba(63, 185, 80, 0.04);
+  background: color-mix(in srgb, var(--success) 4%, transparent);
 }
 
 .console-toggle-active {
@@ -1231,7 +1231,7 @@ button:disabled {
 .cron-preview-time {
   font-size: 11px;
   color: var(--accent);
-  background: rgba(88, 166, 255, 0.1);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
   padding: 1px 6px;
   border-radius: 3px;
   font-family: "SF Mono", "Fira Code", monospace;
@@ -1305,7 +1305,7 @@ button:disabled {
 }
 
 .vm-terminal-btn.danger:hover {
-  background: rgba(248, 81, 73, 0.15);
+  background: color-mix(in srgb, var(--danger) 15%, transparent);
 }
 
 .vm-terminal-iframe {
@@ -1474,9 +1474,9 @@ button:disabled {
 
 /* Error banner */
 .tg-error-banner {
-  background: color-mix(in srgb, var(--danger, #f85149) 15%, var(--bg-secondary));
-  border-bottom: 1px solid var(--danger, #f85149);
-  color: var(--danger, #f85149);
+  background: color-mix(in srgb, var(--danger) 15%, var(--bg-secondary));
+  border-bottom: 1px solid var(--danger);
+  color: var(--danger);
   font-size: 12px;
   padding: 8px 20px;
   display: flex;
@@ -1657,9 +1657,9 @@ button:disabled {
 .tg-cost-badge {
   font-size: 10px;
   font-weight: 600;
-  color: var(--sink, #3fb950);
-  background: color-mix(in srgb, var(--sink, #3fb950) 12%, var(--bg-tertiary));
-  border: 1px solid color-mix(in srgb, var(--sink, #3fb950) 30%, var(--border));
+  color: var(--sink-color);
+  background: color-mix(in srgb, var(--sink-color) 12%, var(--bg-tertiary));
+  border: 1px solid color-mix(in srgb, var(--sink-color) 30%, var(--border));
   border-radius: 4px;
   padding: 2px 6px;
   white-space: nowrap;
@@ -1802,14 +1802,14 @@ button:disabled {
 }
 
 .topbar-token-btn.expired {
-  background: rgba(210, 153, 34, 0.15);
-  border-color: #d29922;
-  color: #d29922;
+  background: color-mix(in srgb, var(--warning) 15%, transparent);
+  border-color: var(--warning);
+  color: var(--warning);
   font-weight: 700;
   animation: pulse 1.8s ease-in-out infinite;
 }
 .topbar-token-btn.expired:hover:not(:disabled) {
-  background: rgba(210, 153, 34, 0.28);
+  background: color-mix(in srgb, var(--warning) 28%, transparent);
 }
 
 /* ── TemplateGallery import panel ── */

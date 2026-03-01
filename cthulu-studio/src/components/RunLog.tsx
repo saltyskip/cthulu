@@ -5,9 +5,9 @@ import { Button } from "@/components/ui/button";
 const EVENT_COLORS: Record<string, string> = {
   run_started: "var(--accent)",
   node_started: "var(--accent)",
-  node_completed: "#3fb950",
+  node_completed: "var(--success)",
   node_failed: "var(--danger)",
-  run_completed: "#3fb950",
+  run_completed: "var(--success)",
   run_failed: "var(--danger)",
   log: "var(--text-secondary)",
 };
