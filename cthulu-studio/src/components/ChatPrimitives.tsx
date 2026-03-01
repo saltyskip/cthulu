@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { MessagePrimitive, type ToolCallMessagePartProps } from "@assistant-ui/react";
 import { MarkdownTextPrimitive } from "@assistant-ui/react-markdown";
+import { SyntaxHighlighter } from "./assistant-ui/shiki-highlighter";
+import { ToolGroup } from "./assistant-ui/tool-group";
 import "@assistant-ui/react-ui/styles/markdown.css";
 
 export function CompactAssistantMessage() {
@@ -10,6 +12,7 @@ export function CompactAssistantMessage() {
         components={{
           Text: CompactMarkdown,
           tools: { Fallback: CompactToolCall },
+          ToolGroup,
         }}
       />
     </MessagePrimitive.Root>
@@ -29,7 +32,7 @@ export function CompactUserMessage() {
 export function CompactMarkdown() {
   return (
     <div className="fr-md">
-      <MarkdownTextPrimitive />
+      <MarkdownTextPrimitive components={{ SyntaxHighlighter }} />
     </div>
   );
 }

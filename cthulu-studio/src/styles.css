@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "tw-shimmer";
 
 * {
   margin: 0;
@@ -7,21 +8,22 @@
 }
 
 :root {
-  --bg: #0d1117;
-  --bg-secondary: #161b22;
-  --bg-tertiary: #21262d;
-  --border: #30363d;
-  --text: #e6edf3;
-  --text-secondary: #8b949e;
-  --accent: #58a6ff;
-  --success: #3fb950;
-  --danger: #f85149;
-  --warning: #d29922;
+  /* Fallback values (Eldritch) — overridden at runtime by ThemeProvider */
+  --bg: #0b1317;
+  --bg-secondary: #111e25;
+  --bg-tertiary: #182b34;
+  --border: #24404c;
+  --text: #d1e1e8;
+  --text-secondary: #7a9baa;
+  --accent: #4ec9b0;
+  --success: #5bb98c;
+  --danger: #f07068;
+  --warning: #daa850;
 
-  --trigger-color: #d29922;
-  --source-color: #58a6ff;
-  --executor-color: #bc8cff;
-  --sink-color: #3fb950;
+  --trigger-color: #daa850;
+  --source-color: #4ec9b0;
+  --executor-color: #9d8ce0;
+  --sink-color: #5bb98c;
 
   /* shadcn/ui CSS variable overrides — map to our theme */
   --background: var(--bg);
@@ -31,7 +33,7 @@
   --popover: var(--bg-secondary);
   --popover-foreground: var(--text);
   --primary: var(--accent);
-  --primary-foreground: #000;
+  --primary-foreground: #0b1317;
   --secondary: var(--bg-secondary);
   --secondary-foreground: var(--text);
   --muted: var(--bg-tertiary);
@@ -173,7 +175,7 @@ button.primary {
 }
 
 button.primary:hover {
-  background: #4c9aed;
+  background: color-mix(in srgb, var(--accent) 85%, white);
 }
 
 button.danger {
@@ -182,7 +184,7 @@ button.danger {
 }
 
 button.danger:hover {
-  background: #e04040;
+  background: color-mix(in srgb, var(--danger) 85%, white);
 }
 
 button.ghost {
@@ -821,7 +823,6 @@ button:disabled {
   flex-shrink: 0;
 }
 
-
 /* Canvas */
 .canvas-container {
   flex: 1;
@@ -886,7 +887,6 @@ button:disabled {
   font-size: 11px;
   margin-top: 2px;
 }
-
 
 @keyframes pulse {
   0%, 100% { opacity: 1; }
@@ -1043,7 +1043,6 @@ button:disabled {
   color: var(--text);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
 }
-
 
 .console-body {
   flex: 1;
@@ -1211,8 +1210,6 @@ button:disabled {
 .input-error {
   border-color: var(--danger) !important;
 }
-
-
 
 /* Cron preview (next fire times) */
 .cron-preview {
@@ -2224,7 +2221,7 @@ button:disabled {
 }
 
 .fr-bar-live {
-  color: #4ade80;
+  color: var(--success);
   font-weight: 600;
   animation: fr-pulse 1.5s ease-in-out infinite;
 }
@@ -2260,7 +2257,7 @@ button:disabled {
 
 /* Markdown: dense, inherits monospace */
 .fr-md {
-  line-height: 1.45;
+  line-height: 1.6;
 }
 
 .fr-md h1, .fr-md h2, .fr-md h3 {
@@ -2273,20 +2270,21 @@ button:disabled {
 .fr-md h1 { font-size: 14px; }
 
 .fr-md p {
-  margin: 2px 0;
+  margin: 6px 0;
 }
 
 .fr-md ul, .fr-md ol {
   padding-left: 16px;
-  margin: 2px 0;
+  margin: 6px 0;
 }
 
 .fr-md li {
-  margin: 1px 0;
+  margin: 3px 0;
 }
 
 .fr-md code {
   background: var(--bg-tertiary);
+  color: var(--accent);
   padding: 1px 4px;
   border-radius: 2px;
   font-size: 12px;
@@ -2368,7 +2366,7 @@ button:disabled {
 }
 
 .fr-tool-done {
-  color: #4ade80;
+  color: var(--success);
   font-size: 10px;
   margin-left: auto;
 }
@@ -2424,7 +2422,7 @@ button:disabled {
 }
 
 /* Override assistant-ui markdown styles to match our theme */
-.fr-md .aui-md-p { margin: 2px 0; }
+.fr-md .aui-md-p { margin: 6px 0; }
 .fr-md .aui-md-pre { background: var(--bg-tertiary); border: 1px solid var(--border); }
 
 /* Flow-run session tab styling */

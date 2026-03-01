@@ -32,23 +32,36 @@ type ContentPart = TextPart | ToolCallPart;
 export default function AgentChatView({ agentId, sessionId }: AgentChatViewProps) {
   const [messages, setMessages] = useState<ThreadMessageLike[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
-  const [streamingText, setStreamingText] = useState("");
-  const [streamingToolCalls, setStreamingToolCalls] = useState<ContentPart[]>([]);
+  const [streamingParts, setStreamingParts] = useState<ContentPart[]>([]);
   const [resultMeta, setResultMeta] = useState<{ cost: number; turns: number } | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const rafRef = useRef<number | null>(null);
-  const textBufRef = useRef("");
-  // Mirror of streamingToolCalls for reading in onDone without nested setState
-  const toolCallsRef = useRef<ContentPart[]>([]);
+  // Mutable mirror of streamingParts — SSE callbacks read/write this,
+  // then flush to React state via rAF or direct setState.
+  const partsRef = useRef<ContentPart[]>([]);
 
-  const flushText = useCallback(() => {
+  const flushParts = useCallback(() => {
     rafRef.current = null;
-    setStreamingText(textBufRef.current);
+    setStreamingParts([...partsRef.current]);
   }, []);
+
+  // Append text to the last text part, or create a new one.
+  // Batches via rAF for perf during rapid token streaming.
+  const appendText = useCallback((text: string) => {
+    const parts = partsRef.current;
+    const last = parts[parts.length - 1];
+    if (last && last.type === "text") {
+      last.text += text;
+    } else {
+      parts.push({ type: "text", text });
+    }
+    if (rafRef.current == null) {
+      rafRef.current = requestAnimationFrame(flushParts);
+    }
+  }, [flushParts]);
 
   const handleSend = useCallback(
     async (message: { content: unknown; role?: string }) => {
-      // Extract text from the AppendMessage content parts
       let text = "";
       const content = message.content;
       if (typeof content === "string") {
@@ -62,13 +75,10 @@ export default function AgentChatView({ agentId, sessionId }: AgentChatViewProps
 
       if (!text.trim()) return;
 
-      // Append user message
       setMessages((prev) => [...prev, { role: "user" as const, content: text }]);
       setIsStreaming(true);
-      setStreamingText("");
-      setStreamingToolCalls([]);
-      textBufRef.current = "";
-      toolCallsRef.current = [];
+      setStreamingParts([]);
+      partsRef.current = [];
 
       const controller = startAgentChat(
         agentId,
@@ -76,45 +86,49 @@ export default function AgentChatView({ agentId, sessionId }: AgentChatViewProps
         sessionId,
         // onEvent
         (event) => {
+          console.log(`[SSE] ${event.type}:`, event.data);
           try {
             const data = JSON.parse(event.data);
 
             if (event.type === "text") {
-              textBufRef.current += data.text || "";
-              if (rafRef.current == null) {
-                rafRef.current = requestAnimationFrame(flushText);
-              }
+              appendText(data.text || "");
             } else if (event.type === "tool_use") {
-              const part: ToolCallPart = {
-                type: "tool-call",
-                toolCallId: data.id || `tool-${Date.now()}`,
-                toolName: data.name || "unknown",
-                args: (data.input || {}) as Record<string, string | number | boolean | null>,
-              };
-              toolCallsRef.current = [...toolCallsRef.current, part];
-              setStreamingToolCalls(toolCallsRef.current);
+              // Backend sends {tool, input} — input may be a JSON string
+              let parsedArgs: Record<string, string | number | boolean | null> = {};
+              if (typeof data.input === "string" && data.input) {
+                try { parsedArgs = JSON.parse(data.input); } catch { /* leave empty */ }
+              } else if (typeof data.input === "object" && data.input) {
+                parsedArgs = data.input;
+              }
+              partsRef.current = [...partsRef.current, {
+                type: "tool-call" as const,
+                toolCallId: data.id || `tool-${Date.now()}-${partsRef.current.length}`,
+                toolName: data.tool || data.name || "unknown",
+                args: parsedArgs,
+              }];
+              setStreamingParts([...partsRef.current]);
             } else if (event.type === "tool_result") {
-              const prev = toolCallsRef.current;
-              if (prev.length > 0) {
-                const last = prev[prev.length - 1];
-                if (last && last.type === "tool-call") {
-                  const updated = [...prev];
-                  updated[updated.length - 1] = {
-                    ...last,
+              const parts = partsRef.current;
+              // Find last tool-call part (scanning backwards)
+              for (let i = parts.length - 1; i >= 0; i--) {
+                if (parts[i].type === "tool-call" && !(parts[i] as ToolCallPart).result) {
+                  const updated = [...parts];
+                  updated[i] = {
+                    ...(parts[i] as ToolCallPart),
                     result: data.content ?? data.output ?? "done",
                   };
-                  toolCallsRef.current = updated;
-                  setStreamingToolCalls(updated);
+                  partsRef.current = updated;
+                  setStreamingParts(updated);
+                  break;
                 }
               }
             } else if (event.type === "result") {
               // Result event carries the complete response text AND cost/turns.
-              // Only use result.text if nothing was streamed via text events.
-              if (data.text && !textBufRef.current) {
-                textBufRef.current = data.text;
-                if (rafRef.current == null) {
-                  rafRef.current = requestAnimationFrame(flushText);
-                }
+              // Only use result.text if no text was streamed.
+              const hasText = partsRef.current.some((p) => p.type === "text");
+              if (data.text && !hasText) {
+                partsRef.current = [...partsRef.current, { type: "text", text: data.text }];
+                setStreamingParts([...partsRef.current]);
               }
               setResultMeta({
                 cost: data.cost || 0,
@@ -122,43 +136,28 @@ export default function AgentChatView({ agentId, sessionId }: AgentChatViewProps
               });
             }
           } catch {
-            // Non-JSON event data (e.g., plain text fallback)
             if (event.type === "text") {
-              textBufRef.current += event.data;
-              if (rafRef.current == null) {
-                rafRef.current = requestAnimationFrame(flushText);
-              }
+              appendText(event.data);
             }
           }
         },
         // onDone
         () => {
-          // Cancel any pending rAF
           if (rafRef.current != null) {
             cancelAnimationFrame(rafRef.current);
             rafRef.current = null;
           }
 
-          // Read final values from refs (no nested setState)
-          const finalText = textBufRef.current;
-          const finalTools = toolCallsRef.current;
-
-          const parts: ContentPart[] = [];
-          if (finalText) parts.push({ type: "text", text: finalText });
-          parts.push(...finalTools);
-
-          if (parts.length > 0) {
+          const finalParts = partsRef.current;
+          if (finalParts.length > 0) {
             setMessages((prev) => [
               ...prev,
-              { role: "assistant" as const, content: parts },
+              { role: "assistant" as const, content: [...finalParts] },
             ]);
           }
 
-          // Clear streaming state
-          setStreamingText("");
-          setStreamingToolCalls([]);
-          textBufRef.current = "";
-          toolCallsRef.current = [];
+          setStreamingParts([]);
+          partsRef.current = [];
           setIsStreaming(false);
         },
         // onError
@@ -168,17 +167,15 @@ export default function AgentChatView({ agentId, sessionId }: AgentChatViewProps
             ...prev,
             { role: "assistant" as const, content: `Error: ${err}` },
           ]);
-          setStreamingText("");
-          setStreamingToolCalls([]);
-          textBufRef.current = "";
-          toolCallsRef.current = [];
+          setStreamingParts([]);
+          partsRef.current = [];
           setIsStreaming(false);
         }
       );
 
       abortRef.current = controller;
     },
-    [agentId, sessionId, flushText]
+    [agentId, sessionId, appendText]
   );
 
   const handleCancel = useCallback(() => {
@@ -189,13 +186,10 @@ export default function AgentChatView({ agentId, sessionId }: AgentChatViewProps
 
   const threadMessages = useMemo((): ThreadMessageLike[] => {
     if (!isStreaming) return messages;
-    const parts: ContentPart[] = [];
-    if (streamingText) parts.push({ type: "text", text: streamingText });
-    parts.push(...streamingToolCalls);
-    return parts.length > 0
-      ? [...messages, { role: "assistant" as const, content: parts }]
+    return streamingParts.length > 0
+      ? [...messages, { role: "assistant" as const, content: streamingParts }]
       : messages;
-  }, [messages, isStreaming, streamingText, streamingToolCalls]);
+  }, [messages, isStreaming, streamingParts]);
 
   return (
     <AgentChatThread

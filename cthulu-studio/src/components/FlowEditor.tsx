@@ -1,6 +1,8 @@
-import { useRef, useImperativeHandle, forwardRef, useCallback } from "react";
+import { useRef, useImperativeHandle, forwardRef, useCallback, useEffect } from "react";
 import Editor, { type OnMount, type OnChange } from "@monaco-editor/react";
 import { registerFlowSchema } from "../lib/flow-schema";
+import { applyMonacoTheme } from "../lib/monaco-theme";
+import { useTheme } from "../lib/ThemeContext";
 
 export interface FlowEditorHandle {
   revealNode: (nodeId: string) => void;
@@ -21,37 +23,19 @@ const FlowEditor = forwardRef<FlowEditorHandle, FlowEditorProps>(
     const editorRef = useRef<any>(null);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const monacoRef = useRef<any>(null);
+    const { theme: appTheme } = useTheme();
 
     const handleMount: OnMount = useCallback((editor, monaco) => {
       editorRef.current = editor;
       monacoRef.current = monaco;
 
       registerFlowSchema(monaco);
+      applyMonacoTheme(monaco, appTheme);
+    }, [appTheme]);
 
-      // Define custom dark theme matching our CSS variables
-      monaco.editor.defineTheme("cthulu-dark", {
-        base: "vs-dark",
-        inherit: true,
-        rules: [],
-        colors: {
-          "editor.background": "#0d1117",
-          "editor.foreground": "#e6edf3",
-          "editorLineNumber.foreground": "#8b949e",
-          "editorLineNumber.activeForeground": "#e6edf3",
-          "editor.selectionBackground": "#264f78",
-          "editor.lineHighlightBackground": "#161b22",
-          "editorCursor.foreground": "#58a6ff",
-          "editorIndentGuide.background": "#21262d",
-          "editorWidget.background": "#161b22",
-          "editorWidget.border": "#30363d",
-          "input.background": "#0d1117",
-          "input.border": "#30363d",
-          "list.hoverBackground": "#161b22",
-          "list.activeSelectionBackground": "#264f78",
-        },
-      });
-      monaco.editor.setTheme("cthulu-dark");
-    }, []);
+    useEffect(() => {
+      if (monacoRef.current) applyMonacoTheme(monacoRef.current, appTheme);
+    }, [appTheme]);
 
     const handleChange: OnChange = useCallback(
       (val) => {
