@@ -874,6 +874,8 @@ pub(crate) async fn chat(
             let sid_for_bg = session_id_for_stream.clone();
             let sessions_path = sessions_path.clone();
             let vm_mappings_ref = vm_mappings_ref.clone();
+            let data_dir_for_bg = data_dir.clone();
+            let prompt_for_log = prompt.clone();
 
             tokio::spawn(async move {
                 tracing::info!(
@@ -882,6 +884,25 @@ pub(crate) async fn chat(
                 );
                 let mut session_cost: f64 = 0.0;
                 let mut event_count: u64 = 0;
+
+                // Set up JSONL log file for session history persistence
+                let logs_dir = data_dir_for_bg.join("session_logs");
+                let _ = std::fs::create_dir_all(&logs_dir);
+                let log_path = logs_dir.join(format!("{sid_for_bg}.jsonl"));
+
+                let append_log = |line: &str| {
+                    use std::io::Write;
+                    if let Ok(mut f) = std::fs::OpenOptions::new()
+                        .create(true)
+                        .append(true)
+                        .open(&log_path)
+                    {
+                        let _ = writeln!(f, "{}", line);
+                    }
+                };
+
+                // Log the user prompt that initiated this turn
+                append_log(&format!("user:{}", serde_json::to_string(&json!({"text": prompt_for_log})).unwrap_or_default()));
 
                 loop {
                     let (line, stderr_batch) = {
@@ -902,6 +923,7 @@ pub(crate) async fn chat(
                         tracing::debug!(stderr = %err_line, "claude stderr");
                         let event = format!("stderr:{err_line}");
                         let _ = bc_tx.send(event.clone());
+                        append_log(&event);
                         let mut buffers = chat_event_buffers.lock().await;
                         if let Some(buf) = buffers.get_mut(&proc_key) {
                             buf.push(event);
@@ -933,6 +955,7 @@ pub(crate) async fn chat(
                                 receivers = ?receivers,
                                 "[RECONNECT-DEBUG] Background task broadcast event"
                             );
+                            append_log(&event_str);
                             let mut buffers = chat_event_buffers.lock().await;
                             if let Some(buf) = buffers.get_mut(&proc_key) {
                                 buf.push(event_str);
@@ -991,6 +1014,7 @@ pub(crate) async fn chat(
                 let done_data = serde_json::to_string(&json!({"exit_code": 0})).unwrap();
                 let done_event = format!("done:{done_data}");
                 let _ = bc_tx.send(done_event.clone());
+                append_log(&done_event);
                 {
                     let mut buffers = chat_event_buffers.lock().await;
                     if let Some(buf) = buffers.get_mut(&proc_key) {
