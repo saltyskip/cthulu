@@ -179,10 +179,66 @@ export function WriteToolRenderer(props: ToolCallMessagePartProps) {
   );
 }
 
+/**
+ * Detect consecutive Read calls for the same file.
+ * Returns "hidden" if this part is absorbed by an earlier one,
+ * or "first:N" if this is the first in a group of N.
+ */
+function useReadGroup(toolCallId: string, filePath: string): string {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return useAuiState((s: any) => {
+    const parts = s.message?.parts;
+    if (!Array.isArray(parts)) return "first:1";
+
+    // Find our index
+    let idx = -1;
+    for (let i = 0; i < parts.length; i++) {
+      if (parts[i]?.type === "tool-call" && parts[i].toolCallId === toolCallId) {
+        idx = i;
+        break;
+      }
+    }
+    if (idx < 0) return "first:1";
+
+    // Check if previous part is a same-file Read → we're hidden
+    if (idx > 0) {
+      const prev = parts[idx - 1];
+      if (
+        prev?.type === "tool-call" &&
+        prev.toolName === "Read" &&
+        prev.args?.file_path === filePath
+      ) {
+        return "hidden";
+      }
+    }
+
+    // We're the first — count consecutive same-file Reads after us
+    let count = 1;
+    for (let i = idx + 1; i < parts.length; i++) {
+      const p = parts[i];
+      if (
+        p?.type === "tool-call" &&
+        p.toolName === "Read" &&
+        p.args?.file_path === filePath
+      ) {
+        count++;
+      } else {
+        break;
+      }
+    }
+    return `first:${count}`;
+  });
+}
+
 export function ReadToolRenderer(props: ToolCallMessagePartProps) {
   const args = props.args as { file_path?: string };
   const hasResult = props.result !== undefined;
   const filePath = args.file_path || "unknown";
+
+  const groupInfo = useReadGroup(props.toolCallId, filePath);
+  if (groupInfo === "hidden") return null;
+
+  const count = parseInt(groupInfo.split(":")[1], 10);
   const resultText =
     typeof props.result === "string"
       ? props.result
@@ -194,7 +250,15 @@ export function ReadToolRenderer(props: ToolCallMessagePartProps) {
   const { dir } = basename(filePath);
 
   return (
-    <ToolShell icon={fi.icon} iconColor={fi.color} nerdFont labelNode={<FilePath path={filePath} op="Read" />} dir={dir || undefined} done={hasResult}>
+    <ToolShell
+      icon={fi.icon}
+      iconColor={fi.color}
+      nerdFont
+      labelNode={<FilePath path={filePath} op="Read" />}
+      badge={count > 1 ? `×${count}` : undefined}
+      dir={dir || undefined}
+      done={hasResult}
+    >
       {resultText && <pre>{resultText}</pre>}
     </ToolShell>
   );
