@@ -48,6 +48,9 @@ pub struct InteractSession {
     /// Whether a message is currently being processed.
     #[serde(skip)]
     pub busy: bool,
+    /// When the session became busy (for stale detection). None when idle.
+    #[serde(skip)]
+    pub busy_since: Option<chrono::DateTime<chrono::Utc>>,
     /// Number of messages exchanged in this session.
     pub message_count: u64,
     /// Cumulative cost (parsed from claude result events).
@@ -189,6 +192,7 @@ pub fn load_sessions(path: &Path) -> LoadedSessions {
                     },
                     active_pid: None,
                     busy: false,
+                    busy_since: None,
                     message_count: old.message_count,
                     total_cost: old.total_cost,
                     created_at: chrono::Utc::now().to_rfc3339(),
@@ -241,6 +245,7 @@ pub fn save_sessions(
                         working_dir: s.working_dir.clone(),
                         active_pid: None,
                         busy: false,
+                        busy_since: None,
                         message_count: s.message_count,
                         total_cost: s.total_cost,
                         created_at: s.created_at.clone(),
@@ -323,6 +328,16 @@ pub struct LiveClaudeProcess {
     pub busy: bool,
 }
 
+impl Drop for LiveClaudeProcess {
+    fn drop(&mut self) {
+        if let Err(e) = self.child.start_kill() {
+            tracing::trace!(error = %e, "LiveClaudeProcess kill on drop");
+        } else {
+            tracing::info!("killed LiveClaudeProcess on drop");
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct AppState {
     pub github_client: Option<Arc<dyn GithubClient>>,
@@ -358,6 +373,9 @@ pub struct AppState {
     /// Live broadcast channels for flow-run session streaming.
     /// Key: session_id, Value: sender that broadcasts JSONL lines.
     pub session_streams: Arc<Mutex<HashMap<String, broadcast::Sender<String>>>>,
+    /// In-memory event buffers for agent chat reconnection.
+    /// Key: process_key (agent::{id}::session::{sid}), Value: buffered SSE events for current turn.
+    pub chat_event_buffers: Arc<Mutex<HashMap<String, Vec<String>>>>,
 }
 
 impl AppState {

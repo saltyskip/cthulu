@@ -346,6 +346,7 @@ async fn setup_flow_run_session(
         working_dir: working_dir.to_string_lossy().to_string(),
         active_pid: None,
         busy: true,
+        busy_since: Some(chrono::Utc::now()),
         message_count: 0,
         total_cost: 0.0,
         created_at: chrono::Utc::now().to_rfc3339(),

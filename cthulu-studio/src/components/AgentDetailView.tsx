@@ -7,6 +7,7 @@ import {
   listAgentSessions,
   newAgentSession,
   deleteAgentSession,
+  killSession,
 } from "../api/client";
 import type { InteractSessionInfo } from "../api/client";
 
@@ -28,6 +29,9 @@ export default function AgentDetailView({
   const [activeSessionId, setActiveSessionId] = useState<string>("");
   const [mountedSessions, setMountedSessions] = useState<Set<string>>(new Set());
   const [configWidth, setConfigWidth] = useState(320);
+  const [configCollapsed, setConfigCollapsed] = useState(false);
+  const [interactiveCount, setInteractiveCount] = useState(0);
+  const [maxSessions, setMaxSessions] = useState(5);
   const dragRef = useRef<{ startX: number; startW: number } | null>(null);
 
   // Fetch sessions on mount
@@ -37,6 +41,8 @@ export default function AgentDetailView({
       try {
         const info = await listAgentSessions(agentId);
         if (cancelled) return;
+        setInteractiveCount(info.interactive_count ?? 0);
+        setMaxSessions(info.max_interactive_sessions ?? 5);
         if (info.sessions.length === 0) {
           // Auto-create first session
           const result = await newAgentSession(agentId);
@@ -54,6 +60,7 @@ export default function AgentDetailView({
           ]);
           setActiveSessionId(result.session_id);
           setMountedSessions(new Set([result.session_id]));
+          setInteractiveCount(1);
         } else {
           setSessions(info.sessions);
           const active = info.active_session || info.sessions[0].session_id;
@@ -74,12 +81,13 @@ export default function AgentDetailView({
     const interval = setInterval(async () => {
       try {
         const info = await listAgentSessions(agentId);
+        setInteractiveCount(info.interactive_count ?? 0);
         setSessions((prev) => {
-          // Only update if session count changed or busy state changed
+          // Only update if session count changed, busy state changed, or process_alive changed
           if (prev.length !== info.sessions.length) return info.sessions;
           const changed = prev.some((p) => {
             const match = info.sessions.find((s) => s.session_id === p.session_id);
-            return match && (match.busy !== p.busy || match.kind !== p.kind);
+            return match && (match.busy !== p.busy || match.kind !== p.kind || match.process_alive !== p.process_alive);
           });
           return changed ? info.sessions : prev;
         });
@@ -122,6 +130,21 @@ export default function AgentDetailView({
       console.error("Failed to create session:", e);
     }
   }, [agentId]);
+
+  const handleKillSession = useCallback(
+    async (sessionId: string) => {
+      try {
+        await killSession(agentId, sessionId);
+        // Refresh sessions to get updated state
+        const info = await listAgentSessions(agentId);
+        setSessions(info.sessions);
+        setInteractiveCount(info.interactive_count ?? 0);
+      } catch (e) {
+        console.error("Failed to kill session:", e);
+      }
+    },
+    [agentId]
+  );
 
   const handleDeleteSession = useCallback(
     async (sessionId: string) => {
@@ -189,11 +212,17 @@ export default function AgentDetailView({
           onSelectSession={handleSelectSession}
           onNewSession={handleNewSession}
           onDeleteSession={handleDeleteSession}
+          onKillSession={handleKillSession}
+          interactiveCount={interactiveCount}
+          maxSessions={maxSessions}
         />
         <div className="agent-detail-terminals">
           {[...mountedSessions].map((sessionId) => {
             const session = sessions.find((s) => s.session_id === sessionId);
             const isFlowRun = session?.kind === "flow_run";
+            if (!isFlowRun && sessionId === activeSessionId) {
+              console.log(`[RECONNECT-DEBUG] AgentDetailView: rendering AgentChatView sessionId=${sessionId} busy=${session?.busy}`);
+            }
 
             return (
               <div
@@ -216,6 +245,7 @@ export default function AgentDetailView({
                   <AgentChatView
                     agentId={agentId}
                     sessionId={sessionId}
+                    busy={session?.busy ?? false}
                   />
                 )}
               </div>
@@ -223,18 +253,37 @@ export default function AgentDetailView({
           })}
         </div>
       </div>
-      <div
-        className="agent-detail-divider"
-        onMouseDown={handleDragStart}
-      />
-      <div className="agent-detail-config" style={{ width: configWidth }}>
-        <AgentEditor
-          key={agentId}
-          agentId={agentId}
-          onClose={() => {}}
-          onDeleted={onDeleted}
-        />
-      </div>
+      {configCollapsed ? (
+        <div className="agent-config-collapsed" onClick={() => setConfigCollapsed(false)}>
+          <span className="agent-config-collapsed-icon">◧</span>
+          <span className="agent-config-collapsed-label">Config</span>
+        </div>
+      ) : (
+        <>
+          <div
+            className="agent-detail-divider"
+            onMouseDown={handleDragStart}
+          />
+          <div className="agent-detail-config" style={{ width: configWidth }}>
+            <div className="agent-config-topbar">
+              <span className="agent-config-title">Config</span>
+              <button
+                className="agent-config-collapse-btn"
+                onClick={() => setConfigCollapsed(true)}
+                title="Collapse config"
+              >
+                ◨
+              </button>
+            </div>
+            <AgentEditor
+              key={agentId}
+              agentId={agentId}
+              onClose={() => {}}
+              onDeleted={onDeleted}
+            />
+          </div>
+        </>
+      )}
     </div>
   );
 }

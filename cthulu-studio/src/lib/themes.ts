@@ -201,6 +201,30 @@ export const themes: ThemeDefinition[] = [
       "primary-foreground": "#282a36",
     },
   },
+  {
+    id: "harry-potter",
+    label: "Harry Potter",
+    group: "preset",
+    colorScheme: "dark",
+    shikiTheme: "tokyo-night",
+    vars: {
+      bg: "#0d1117",
+      "bg-secondary": "#161b22",
+      "bg-tertiary": "#1c2333",
+      border: "#2a3040",
+      text: "#e8d5b5",
+      "text-secondary": "#8a7a60",
+      accent: "#d4a03c",
+      success: "#2e8b57",
+      danger: "#8b0000",
+      warning: "#d4a03c",
+      "trigger-color": "#d4a03c",
+      "source-color": "#5b7fb8",
+      "executor-color": "#7c5caa",
+      "sink-color": "#2e8b57",
+      "primary-foreground": "#0d1117",
+    },
+  },
 ];
 
 export function getDefaultThemeId(): string {

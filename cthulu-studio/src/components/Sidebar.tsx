@@ -29,6 +29,7 @@ interface SidebarProps {
   activeView: ActiveView;
   nodeTypes: NodeTypeSchema[];
   onGrab: (nodeType: NodeTypeSchema) => void;
+  onCollapse: () => void;
 }
 
 const typeColors: Record<string, string> = {
@@ -56,6 +57,7 @@ export default function Sidebar({
   activeView,
   nodeTypes,
   onGrab,
+  onCollapse,
 }: SidebarProps) {
   const [showGallery, setShowGallery] = useState(false);
   const [agents, setAgents] = useState<AgentSummary[]>([]);
@@ -182,6 +184,11 @@ export default function Sidebar({
 
   return (
     <div className="unified-sidebar">
+      <div className="sidebar-collapse-bar">
+        <button className="sidebar-collapse-btn" onClick={onCollapse} title="Collapse sidebar">
+          ◨
+        </button>
+      </div>
       {showGallery && (
         <TemplateGallery
           onImport={handleGalleryImport}

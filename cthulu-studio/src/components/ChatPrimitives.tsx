@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { MessagePrimitive, type ToolCallMessagePartProps } from "@assistant-ui/react";
+import { MessagePrimitive, useMessage, type ToolCallMessagePartProps } from "@assistant-ui/react";
 import { MarkdownTextPrimitive } from "@assistant-ui/react-markdown";
 import remarkGfm from "remark-gfm";
 import { SyntaxHighlighter } from "./assistant-ui/shiki-highlighter";
@@ -10,12 +10,26 @@ import {
   ReadToolRenderer,
   BashToolRenderer,
   GlobGrepToolRenderer,
+  AgentToolRenderer,
+  TodoWriteToolRenderer,
+  WebSearchToolRenderer,
+  WebFetchToolRenderer,
 } from "./ToolRenderers";
 import "@assistant-ui/react-ui/styles/markdown.css";
+
+function MessageTimestamp() {
+  const message = useMessage();
+  const createdAt = message?.createdAt;
+  if (!createdAt) return null;
+  const d = new Date(createdAt);
+  const time = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return <span className="fr-msg-time">{time}</span>;
+}
 
 export function CompactAssistantMessage() {
   return (
     <MessagePrimitive.Root className="fr-msg">
+      <MessageTimestamp />
       <MessagePrimitive.Content
         components={{
           Text: CompactMarkdown,
@@ -27,6 +41,10 @@ export function CompactAssistantMessage() {
               Bash: BashToolRenderer,
               Glob: GlobGrepToolRenderer,
               Grep: GlobGrepToolRenderer,
+              Agent: AgentToolRenderer,
+              TodoWrite: TodoWriteToolRenderer,
+              WebSearch: WebSearchToolRenderer,
+              WebFetch: WebFetchToolRenderer,
             },
             Fallback: CompactToolCall,
           },
@@ -40,6 +58,7 @@ export function CompactAssistantMessage() {
 export function CompactUserMessage() {
   return (
     <MessagePrimitive.Root className="fr-msg fr-msg-user">
+      <MessageTimestamp />
       <MessagePrimitive.Content
         components={{ Text: CompactMarkdown }}
       />
