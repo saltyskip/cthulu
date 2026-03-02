@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { createPortal } from "react-dom";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { MessagePrimitive, useMessage, type ToolCallMessagePartProps } from "@assistant-ui/react";
 import { MarkdownTextPrimitive } from "@assistant-ui/react-markdown";
 import remarkGfm from "remark-gfm";
@@ -88,15 +89,24 @@ export function CompactUserMessage() {
 }
 
 function ExternalLink(props: React.AnchorHTMLAttributes<HTMLAnchorElement>) {
+  const handleClick = useCallback(
+    (e: React.MouseEvent<HTMLAnchorElement>) => {
+      e.preventDefault();
+      if (!props.href) return;
+      openUrl(props.href).catch(() => {
+        // Fallback for web dev mode (non-Tauri)
+        window.open(props.href!, "_blank");
+      });
+    },
+    [props.href],
+  );
+
   return (
     <a
       {...props}
       target="_blank"
       rel="noopener noreferrer"
-      onClick={(e) => {
-        e.preventDefault();
-        if (props.href) window.open(props.href, "_blank");
-      }}
+      onClick={handleClick}
     />
   );
 }

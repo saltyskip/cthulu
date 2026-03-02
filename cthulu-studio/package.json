@@ -15,9 +15,11 @@
     "@assistant-ui/react": "^0.12.14",
     "@assistant-ui/react-markdown": "^0.12.5",
     "@assistant-ui/react-ui": "^0.2.1",
+    "@cthulu/brand": "*",
     "@monaco-editor/react": "^4.7.0",
     "@tailwindcss/vite": "^4.2.1",
     "@tauri-apps/plugin-dialog": "^2.6.0",
+    "@tauri-apps/plugin-opener": "^2.5.3",
     "@uiw/react-md-editor": "^4.0.11",
     "@xyflow/react": "^12.10.1",
     "class-variance-authority": "^0.7.1",
@@ -32,8 +34,7 @@
     "remark-gfm": "^4.0.1",
     "tailwind-merge": "^3.5.0",
     "tailwindcss": "^4.2.1",
-    "tw-shimmer": "^0.4.7",
-    "@cthulu/brand": "*"
+    "tw-shimmer": "^0.4.7"
   },
   "devDependencies": {
     "@tauri-apps/api": "^2.10.1",
