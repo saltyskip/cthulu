@@ -2237,6 +2237,157 @@ button:disabled {
   color: var(--text);
 }
 
+/* Split layout: chat left, file preview right */
+.fr-wrap-split {
+  flex-direction: row;
+}
+
+.fr-wrap-split .fr-wrap-chat {
+  flex: 1;
+  min-width: 0;
+}
+
+.fr-wrap-chat {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* File preview panel */
+.fr-preview {
+  width: 420px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid var(--border);
+  background: var(--bg-secondary);
+  overflow: hidden;
+}
+
+.fr-preview-header {
+  display: flex;
+  align-items: center;
+  padding: 0 4px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  background: var(--bg);
+}
+
+.fr-preview-tabs {
+  display: flex;
+  flex: 1;
+  overflow-x: auto;
+  scrollbar-width: none;
+  gap: 0;
+}
+
+.fr-preview-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.fr-preview-tab {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 10px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.fr-preview-tab:hover {
+  color: var(--text);
+}
+
+.fr-preview-tab-active {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+}
+
+.fr-preview-tab-icon {
+  font-size: 10px;
+}
+
+.fr-preview-close {
+  padding: 4px 8px;
+  font-size: 14px;
+  color: var(--text-secondary);
+  background: none;
+  border: none;
+  cursor: pointer;
+  flex-shrink: 0;
+  border-radius: 3px;
+}
+
+.fr-preview-close:hover {
+  color: var(--text);
+  background: var(--bg-tertiary);
+}
+
+.fr-preview-path {
+  padding: 4px 10px;
+  font-size: 10px;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.fr-preview-body {
+  flex: 1;
+  overflow: auto;
+  scrollbar-width: none;
+}
+
+.fr-preview-body::-webkit-scrollbar {
+  display: none;
+}
+
+.fr-preview-diff {
+  font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  padding: 4px 0;
+}
+
+.fr-preview-content {
+  font-size: 11px;
+  padding: 8px 10px;
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-all;
+  color: var(--text-secondary);
+}
+
+.fr-preview-empty {
+  padding: 20px;
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+/* Responsive: hide preview on narrow widths */
+@media (max-width: 900px) {
+  .fr-wrap-split {
+    flex-direction: column;
+  }
+  .fr-preview {
+    width: 100%;
+    max-height: 200px;
+    border-left: none;
+    border-top: 1px solid var(--border);
+  }
+}
+
 /* Top bar: flow name + run meta */
 .fr-bar {
   display: flex;
@@ -2530,6 +2681,16 @@ button:disabled {
   text-overflow: ellipsis;
   white-space: nowrap;
   min-width: 0;
+}
+
+/* Clickable file path in tool calls — opens preview panel */
+.fr-tool-clickable {
+  cursor: pointer;
+}
+
+.fr-tool-clickable:hover .fr-tool-file-name {
+  text-decoration: underline;
+  color: var(--accent);
 }
 
 /* Tool renderer: agent */

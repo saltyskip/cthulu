@@ -13,6 +13,22 @@ import {
 import { startAgentChat, reconnectAgentChat } from "../api/interactStream";
 import { stopAgentChat, getSessionStatus } from "../api/client";
 import { AskUserQuestionToolUI, type TodoItem } from "./ToolRenderers";
+import { createContext, useContext } from "react";
+
+// Context for tool renderers to signal "select this file in the preview panel"
+type FilePreviewContextType = ((toolCallId: string) => void) | null;
+const FilePreviewContext = createContext<FilePreviewContextType>(null);
+export const useFilePreviewSelect = () => useContext(FilePreviewContext);
+
+// File operation extracted from messages for the preview panel
+export interface FileOp {
+  toolCallId: string;
+  filePath: string;
+  type: "edit" | "write";
+  oldString?: string;
+  newString?: string;
+  content?: string;
+}
 
 interface AgentChatViewProps {
   agentId: string;
@@ -377,6 +393,153 @@ export default function AgentChatView({ agentId, sessionId, busy = false }: Agen
   );
 }
 
+/** Extract all Edit/Write file operations from messages. */
+function extractFileOps(messages: ThreadMessageLike[]): FileOp[] {
+  const ops: FileOp[] = [];
+  for (const msg of messages) {
+    const content = msg.content;
+    if (!Array.isArray(content)) continue;
+    for (const part of content) {
+      const p = part as Record<string, unknown>;
+      if (p.type !== "tool-call") continue;
+      const args = p.args as Record<string, unknown> | undefined;
+      if (!args) continue;
+      const toolCallId = (p.toolCallId as string) || "";
+      if (p.toolName === "Edit" && args.file_path) {
+        ops.push({
+          toolCallId,
+          filePath: args.file_path as string,
+          type: "edit",
+          oldString: args.old_string as string | undefined,
+          newString: args.new_string as string | undefined,
+        });
+      } else if (p.toolName === "Write" && args.file_path) {
+        ops.push({
+          toolCallId,
+          filePath: args.file_path as string,
+          type: "write",
+          content: args.content as string | undefined,
+        });
+      }
+    }
+  }
+  return ops;
+}
+
+function basename(filePath: string): string {
+  const parts = filePath.replace(/\\/g, "/").split("/");
+  return parts.pop() || filePath;
+}
+
+function computeDiffLines(oldStr: string, newStr: string) {
+  const oldLines = oldStr.split("\n");
+  const newLines = newStr.split("\n");
+  const m = oldLines.length;
+  const n = newLines.length;
+
+  if (m + n > 500) {
+    const lines: { type: "del" | "add" | "ctx"; text: string }[] = [];
+    oldLines.forEach((l) => lines.push({ type: "del", text: l }));
+    newLines.forEach((l) => lines.push({ type: "add", text: l }));
+    return lines;
+  }
+
+  const dp: number[][] = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      dp[i][j] = oldLines[i - 1] === newLines[j - 1]
+        ? dp[i - 1][j - 1] + 1
+        : Math.max(dp[i - 1][j], dp[i][j - 1]);
+    }
+  }
+
+  const result: { type: "del" | "add" | "ctx"; text: string }[] = [];
+  let i = m, j = n;
+  while (i > 0 || j > 0) {
+    if (i > 0 && j > 0 && oldLines[i - 1] === newLines[j - 1]) {
+      result.push({ type: "ctx", text: oldLines[i - 1] });
+      i--; j--;
+    } else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
+      result.push({ type: "add", text: newLines[j - 1] });
+      j--;
+    } else {
+      result.push({ type: "del", text: oldLines[i - 1] });
+      i--;
+    }
+  }
+  result.reverse();
+  return result;
+}
+
+const FilePreviewPanel = memo(function FilePreviewPanel({
+  fileOps,
+  selectedId,
+  onSelect,
+  onClose,
+}: {
+  fileOps: FileOp[];
+  selectedId: string | null;
+  onSelect: (id: string) => void;
+  onClose: () => void;
+}) {
+  const op = selectedId ? fileOps.find((f) => f.toolCallId === selectedId) : fileOps[fileOps.length - 1];
+  if (!op) return null;
+
+  const diffLines = op.type === "edit" && op.oldString !== undefined && op.newString !== undefined
+    ? computeDiffLines(op.oldString, op.newString)
+    : null;
+
+  // Deduplicate file tabs by path, keeping last operation per file
+  const fileMap = new Map<string, FileOp>();
+  for (const f of fileOps) fileMap.set(f.filePath, f);
+  const tabs = [...fileMap.values()];
+
+  return (
+    <div className="fr-preview">
+      <div className="fr-preview-header">
+        <div className="fr-preview-tabs">
+          {tabs.map((f) => (
+            <button
+              key={f.toolCallId}
+              className={`fr-preview-tab ${f.toolCallId === op.toolCallId ? "fr-preview-tab-active" : ""}`}
+              onClick={() => onSelect(f.toolCallId)}
+              title={f.filePath}
+            >
+              <span className="fr-preview-tab-icon">{f.type === "edit" ? "✎" : "📄"}</span>
+              {basename(f.filePath)}
+            </button>
+          ))}
+        </div>
+        <button className="fr-preview-close" onClick={onClose}>×</button>
+      </div>
+      <div className="fr-preview-path">{op.filePath}</div>
+      <div className="fr-preview-body">
+        {diffLines ? (
+          <div className="fr-preview-diff">
+            {diffLines.map((line, i) => (
+              <div
+                key={i}
+                className={`fr-diff-line ${
+                  line.type === "del" ? "fr-diff-del" : line.type === "add" ? "fr-diff-add" : "fr-diff-ctx"
+                }`}
+              >
+                <span className="fr-diff-prefix">
+                  {line.type === "del" ? "−" : line.type === "add" ? "+" : " "}
+                </span>
+                {line.text}
+              </div>
+            ))}
+          </div>
+        ) : op.content ? (
+          <pre className="fr-preview-content">{op.content}</pre>
+        ) : (
+          <div className="fr-preview-empty">No preview available</div>
+        )}
+      </div>
+    </div>
+  );
+});
+
 /** Scan messages backwards for the most recent TodoWrite tool call and extract its todos. */
 function extractLatestTodos(messages: ThreadMessageLike[]): TodoItem[] | null {
   for (let i = messages.length - 1; i >= 0; i--) {
@@ -465,6 +628,19 @@ function AgentChatThread({
   );
 
   const latestTodos = useMemo(() => extractLatestTodos(messages), [messages]);
+  const fileOps = useMemo(() => extractFileOps(messages), [messages]);
+  const [selectedFileId, setSelectedFileId] = useState<string | null>(null);
+  const [previewOpen, setPreviewOpen] = useState(true);
+
+  // Auto-select latest file op as new ones arrive
+  const prevOpsLenRef = useRef(0);
+  useEffect(() => {
+    if (fileOps.length > prevOpsLenRef.current) {
+      setSelectedFileId(fileOps[fileOps.length - 1].toolCallId);
+      if (!previewOpen && fileOps.length > 0) setPreviewOpen(true);
+    }
+    prevOpsLenRef.current = fileOps.length;
+  }, [fileOps, previewOpen]);
 
   const runtime = useExternalStoreRuntime({
     isRunning: isStreaming,
@@ -475,56 +651,76 @@ function AgentChatThread({
     onAddToolResult: handleAddToolResult,
   });
 
+  const showPreview = previewOpen && fileOps.length > 0;
+
+  const handleFileSelect = useCallback((toolCallId: string) => {
+    setSelectedFileId(toolCallId);
+    if (!previewOpen) setPreviewOpen(true);
+  }, [previewOpen]);
+
   return (
     <AssistantRuntimeProvider runtime={runtime}>
+      <FilePreviewContext.Provider value={handleFileSelect}>
       <AskUserQuestionToolUI />
-      <div className="fr-wrap">
-        <ThreadPrimitive.Root className="fr-thread">
-          <ThreadPrimitive.Viewport className="fr-viewport">
-            <ThreadPrimitive.Messages
-              components={{
-                UserMessage: CompactUserMessage,
-                AssistantMessage: CompactAssistantMessage,
-              }}
-            />
-          </ThreadPrimitive.Viewport>
-        </ThreadPrimitive.Root>
+      <div className={`fr-wrap ${showPreview ? "fr-wrap-split" : ""}`}>
+        <div className="fr-wrap-chat">
+          <ThreadPrimitive.Root className="fr-thread">
+            <ThreadPrimitive.Viewport className="fr-viewport">
+              <ThreadPrimitive.Messages
+                components={{
+                  UserMessage: CompactUserMessage,
+                  AssistantMessage: CompactAssistantMessage,
+                }}
+              />
+            </ThreadPrimitive.Viewport>
+          </ThreadPrimitive.Root>
 
-        {isStreaming && (
-          <div className="fr-busy">
-            <span className="fr-busy-dot" />
-            <span>Thinking…</span>
+          {isStreaming && (
+            <div className="fr-busy">
+              <span className="fr-busy-dot" />
+              <span>Thinking…</span>
+            </div>
+          )}
+
+          {latestTodos && latestTodos.length > 0 && latestTodos.some((t) => t.status !== "completed") && (
+            <StickyTodoPanel todos={latestTodos} />
+          )}
+
+          <div className="ac-footer">
+            <ComposerPrimitive.Root>
+              <ComposerPrimitive.Input
+                placeholder="Send a message..."
+                autoFocus
+              />
+              {isStreaming ? (
+                <button className="ac-btn ac-btn-stop" onClick={onCancel}>
+                  Stop
+                </button>
+              ) : (
+                <ComposerPrimitive.Send className="ac-btn">
+                  Send
+                </ComposerPrimitive.Send>
+              )}
+            </ComposerPrimitive.Root>
           </div>
-        )}
 
-        {latestTodos && latestTodos.length > 0 && latestTodos.some((t) => t.status !== "completed") && (
-          <StickyTodoPanel todos={latestTodos} />
-        )}
-
-        <div className="ac-footer">
-          <ComposerPrimitive.Root>
-            <ComposerPrimitive.Input
-              placeholder="Send a message..."
-              autoFocus
-            />
-            {isStreaming ? (
-              <button className="ac-btn ac-btn-stop" onClick={onCancel}>
-                Stop
-              </button>
-            ) : (
-              <ComposerPrimitive.Send className="ac-btn">
-                Send
-              </ComposerPrimitive.Send>
-            )}
-          </ComposerPrimitive.Root>
+          {resultMeta && !isStreaming && (
+            <div className="fr-result">
+              {resultMeta.turns}t &middot; ${resultMeta.cost.toFixed(4)}
+            </div>
+          )}
         </div>
 
-        {resultMeta && !isStreaming && (
-          <div className="fr-result">
-            {resultMeta.turns}t &middot; ${resultMeta.cost.toFixed(4)}
-          </div>
+        {showPreview && (
+          <FilePreviewPanel
+            fileOps={fileOps}
+            selectedId={selectedFileId}
+            onSelect={setSelectedFileId}
+            onClose={() => setPreviewOpen(false)}
+          />
         )}
       </div>
+      </FilePreviewContext.Provider>
     </AssistantRuntimeProvider>
   );
 }

@@ -4,6 +4,7 @@ import {
   type ToolCallMessagePartProps,
 } from "@assistant-ui/react";
 import { useAuiState } from "@assistant-ui/store";
+import { useFilePreviewSelect } from "./AgentChatView";
 
 // Helpers
 
@@ -132,15 +133,24 @@ export function EditToolRenderer(props: ToolCallMessagePartProps) {
   };
   const hasResult = props.result !== undefined;
   const filePath = args.file_path || "unknown";
+  const selectFile = useFilePreviewSelect();
   const diffLines =
     args.old_string !== undefined && args.new_string !== undefined
       ? computeDiff(args.old_string, args.new_string)
       : null;
 
+  const handleClick = selectFile
+    ? () => selectFile(props.toolCallId)
+    : undefined;
+
   return (
     <ToolShell
       icon="✎"
-      labelNode={<FilePath path={filePath} />}
+      labelNode={
+        <span className={selectFile ? "fr-tool-clickable" : ""} onClick={handleClick}>
+          <FilePath path={filePath} />
+        </span>
+      }
       badge={args.replace_all ? "replace_all" : undefined}
       done={hasResult}
     >
@@ -173,9 +183,22 @@ export function WriteToolRenderer(props: ToolCallMessagePartProps) {
   const args = props.args as { file_path?: string; content?: string };
   const hasResult = props.result !== undefined;
   const filePath = args.file_path || "unknown";
+  const selectFile = useFilePreviewSelect();
+
+  const handleClick = selectFile
+    ? () => selectFile(props.toolCallId)
+    : undefined;
 
   return (
-    <ToolShell icon="📄" labelNode={<FilePath path={filePath} />} done={hasResult}>
+    <ToolShell
+      icon="📄"
+      labelNode={
+        <span className={selectFile ? "fr-tool-clickable" : ""} onClick={handleClick}>
+          <FilePath path={filePath} />
+        </span>
+      }
+      done={hasResult}
+    >
       {args.content && (
         <pre>{args.content}</pre>
       )}
