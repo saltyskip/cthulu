@@ -88,15 +88,18 @@ export function CompactUserMessage() {
   );
 }
 
+const isTauri = "__TAURI_INTERNALS__" in window;
+
 function ExternalLink(props: React.AnchorHTMLAttributes<HTMLAnchorElement>) {
   const handleClick = useCallback(
     (e: React.MouseEvent<HTMLAnchorElement>) => {
-      e.preventDefault();
       if (!props.href) return;
-      openUrl(props.href).catch(() => {
-        // Fallback for web dev mode (non-Tauri)
-        window.open(props.href!, "_blank");
-      });
+      e.preventDefault();
+      if (isTauri) {
+        openUrl(props.href);
+      } else {
+        window.open(props.href, "_blank");
+      }
     },
     [props.href],
   );
