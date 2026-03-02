@@ -1,6 +1,6 @@
 "use client";
 
-import { FC } from "react";
+import { FC, useState, useCallback } from "react";
 import ShikiHighlighter, { type ShikiHighlighterProps } from "react-shiki";
 import type { SyntaxHighlighterProps as AUIProps } from "@assistant-ui/react-markdown";
 import { cn } from "@/lib/utils";
@@ -17,24 +17,13 @@ export type HighlighterProps = Omit<
 } & Pick<AUIProps, "language" | "code"> &
   Partial<Pick<AUIProps, "node" | "components">>;
 
-/**
- * SyntaxHighlighter component, using react-shiki
- * Use it by passing to `defaultComponents` in `markdown-text.tsx`
- *
- * @example
- * const defaultComponents = memoizeMarkdownComponents({
- *   SyntaxHighlighter,
- *   h1: //...
- *   //...other elements...
- * });
- */
 export const SyntaxHighlighter: FC<HighlighterProps> = ({
   code,
   language,
   theme: themeProp,
   className,
-  addDefaultStyles = false, // assistant-ui requires custom base styles
-  showLanguage = false, // assistant-ui/react-markdown handles language labels
+  addDefaultStyles = false,
+  showLanguage = false,
   node: _node,
   components: _components,
   ...props
@@ -42,21 +31,38 @@ export const SyntaxHighlighter: FC<HighlighterProps> = ({
   const { theme: appTheme } = useTheme();
   const shiki = appTheme.shikiTheme;
   const theme = themeProp ?? { dark: shiki as string, light: shiki as string };
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = useCallback(() => {
+    navigator.clipboard.writeText(code.trim()).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  }, [code]);
+
   return (
-    <ShikiHighlighter
-      {...props}
-      language={language}
-      theme={theme}
-      addDefaultStyles={addDefaultStyles}
-      showLanguage={showLanguage}
-      defaultColor="light-dark()"
-      className={cn(
-        "aui-shiki-base [&_pre]:overflow-x-auto [&_pre]:rounded-b-lg [&_pre]:p-4 [&_pre]:border [&_pre]:border-[var(--border)]",
-        className,
-      )}
-    >
-      {code.trim()}
-    </ShikiHighlighter>
+    <div className="fr-code-block">
+      <div className="fr-code-header">
+        {language && <span className="fr-code-lang">{language}</span>}
+        <button className="fr-code-copy" onClick={handleCopy}>
+          {copied ? "Copied" : "Copy"}
+        </button>
+      </div>
+      <ShikiHighlighter
+        {...props}
+        language={language}
+        theme={theme}
+        addDefaultStyles={addDefaultStyles}
+        showLanguage={showLanguage}
+        defaultColor="light-dark()"
+        className={cn(
+          "aui-shiki-base [&_pre]:overflow-x-auto [&_pre]:rounded-b-lg [&_pre]:p-4 [&_pre]:border [&_pre]:border-[var(--border)] [&_pre]:!rounded-t-none [&_pre]:!border-t-0",
+          className,
+        )}
+      >
+        {code.trim()}
+      </ShikiHighlighter>
+    </div>
   );
 };
 

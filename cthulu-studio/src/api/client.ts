@@ -164,6 +164,8 @@ export interface AgentSessionsInfo {
   agent_id: string;
   active_session: string;
   sessions: InteractSessionInfo[];
+  interactive_count?: number;
+  max_interactive_sessions?: number;
 }
 
 export interface FlowRunMeta {
@@ -181,6 +183,7 @@ export interface InteractSessionInfo {
   total_cost: number;
   created_at: string;
   busy: boolean;
+  process_alive?: boolean;
   kind: "interactive" | "flow_run";
   flow_run?: FlowRunMeta;
 }
@@ -213,6 +216,33 @@ export async function stopAgentChat(
   await apiFetch(`/agents/${agentId}/chat/stop`, {
     method: "POST",
     body: sessionId ? JSON.stringify({ session_id: sessionId }) : undefined,
+  });
+}
+
+export interface SessionStatus {
+  session_id: string;
+  busy: boolean;
+  busy_since: string | null;
+  process_alive: boolean;
+  message_count: number;
+  total_cost: number;
+}
+
+export async function getSessionStatus(
+  agentId: string,
+  sessionId: string
+): Promise<SessionStatus> {
+  return apiFetch<SessionStatus>(
+    `/agents/${agentId}/sessions/${sessionId}/status`
+  );
+}
+
+export async function killSession(
+  agentId: string,
+  sessionId: string
+): Promise<void> {
+  await apiFetch(`/agents/${agentId}/sessions/${sessionId}/kill`, {
+    method: "POST",
   });
 }
 
