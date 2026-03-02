@@ -87,12 +87,26 @@ export function CompactUserMessage() {
   );
 }
 
+function ExternalLink(props: React.AnchorHTMLAttributes<HTMLAnchorElement>) {
+  return (
+    <a
+      {...props}
+      target="_blank"
+      rel="noopener noreferrer"
+      onClick={(e) => {
+        e.preventDefault();
+        if (props.href) window.open(props.href, "_blank");
+      }}
+    />
+  );
+}
+
 export function CompactMarkdown() {
   return (
     <div className="fr-md">
       <MarkdownTextPrimitive
         remarkPlugins={[remarkGfm]}
-        components={{ SyntaxHighlighter }}
+        components={{ SyntaxHighlighter, a: ExternalLink }}
       />
     </div>
   );
