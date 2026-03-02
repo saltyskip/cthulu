@@ -55,6 +55,12 @@ function replayLogLines(lines: string[]): ThreadMessageLike[] {
 
   const flushAssistant = () => {
     if (currentParts.length > 0) {
+      // Mark any unresolved tool calls as completed (tool_result may not be in the log)
+      for (const part of currentParts) {
+        if (part.type === "tool-call" && !(part as ToolCallPart).result) {
+          (part as ToolCallPart).result = "done";
+        }
+      }
       messages.push({ role: "assistant" as const, content: [...currentParts] });
       currentParts = [];
     }
@@ -114,8 +120,8 @@ function replayLogLines(lines: string[]): ThreadMessageLike[] {
     } else if (eventType === "result") {
       try {
         const data = JSON.parse(payload);
-        const hasText = currentParts.some((p) => p.type === "text");
-        if (data.text && !hasText) {
+        // Always add result text — it's the final assistant response for this turn
+        if (data.text) {
           currentParts.push({ type: "text", text: data.text });
         }
       } catch { /* skip */ }
