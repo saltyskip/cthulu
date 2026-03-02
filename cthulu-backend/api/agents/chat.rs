@@ -393,12 +393,20 @@ pub(crate) async fn kill_session(
 }
 
 #[derive(Deserialize)]
+pub(crate) struct ImageAttachment {
+    pub media_type: String,
+    pub data: String, // base64-encoded
+}
+
+#[derive(Deserialize)]
 pub(crate) struct ChatRequest {
     pub prompt: String,
     pub session_id: Option<String>,
     /// Optional flow context for .skills/ generation (flow_id + node_id).
     pub flow_id: Option<String>,
     pub node_id: Option<String>,
+    /// Optional image attachments (base64-encoded).
+    pub images: Option<Vec<ImageAttachment>>,
 }
 
 #[derive(Deserialize)]
@@ -417,7 +425,8 @@ pub(crate) async fn chat(
     })?;
 
     let prompt = body.prompt;
-    if prompt.trim().is_empty() {
+    let images = body.images.unwrap_or_default();
+    if prompt.trim().is_empty() && images.is_empty() {
         return Err((
             StatusCode::BAD_REQUEST,
             Json(json!({ "error": "prompt is required" })),
@@ -780,11 +789,31 @@ pub(crate) async fn chat(
         {
             let mut pool = live_processes.lock().await;
             if let Some(proc) = pool.get_mut(&proc_key_for_stream) {
+                // Build content: plain string when no images, content block array when images present
+                let content = if images.is_empty() {
+                    json!(prompt)
+                } else {
+                    let mut blocks: Vec<Value> = Vec::new();
+                    if !prompt.trim().is_empty() {
+                        blocks.push(json!({ "type": "text", "text": prompt }));
+                    }
+                    for img in &images {
+                        blocks.push(json!({
+                            "type": "image",
+                            "source": {
+                                "type": "base64",
+                                "media_type": img.media_type,
+                                "data": img.data,
+                            }
+                        }));
+                    }
+                    json!(blocks)
+                };
                 let input_msg = serde_json::to_string(&json!({
                     "type": "user",
                     "message": {
                         "role": "user",
-                        "content": prompt,
+                        "content": content,
                     }
                 })).unwrap();
                 let write_result = proc.stdin.write_all(format!("{input_msg}\n").as_bytes()).await;

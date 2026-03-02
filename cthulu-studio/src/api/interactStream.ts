@@ -11,6 +11,11 @@ export interface InteractSSEEvent {
  * Hits POST /api/agents/{agentId}/chat.
  * Returns an AbortController to cancel the stream.
  */
+export interface ImageData {
+  media_type: string;
+  data: string; // base64
+}
+
 export function startAgentChat(
   agentId: string,
   prompt: string,
@@ -18,20 +23,24 @@ export function startAgentChat(
   onEvent: (event: InteractSSEEvent) => void,
   onDone: () => void,
   onError: (err: string) => void,
-  flowContext?: { flow_id: string; node_id: string }
+  flowContext?: { flow_id: string; node_id: string },
+  images?: ImageData[],
 ): AbortController {
   const controller = new AbortController();
   const url = `${getServerUrl()}/api/agents/${agentId}/chat`;
 
-  log("http", `POST /agents/${agentId}/chat (stream, session=${sessionId ?? "active"})`);
+  log("http", `POST /agents/${agentId}/chat (stream, session=${sessionId ?? "active"}${images?.length ? `, ${images.length} images` : ""})`);
 
-  const body: Record<string, string | undefined> = { prompt };
+  const body: Record<string, unknown> = { prompt };
   if (sessionId) {
     body.session_id = sessionId;
   }
   if (flowContext) {
     body.flow_id = flowContext.flow_id;
     body.node_id = flowContext.node_id;
+  }
+  if (images && images.length > 0) {
+    body.images = images;
   }
 
   fetch(url, {
