@@ -61,9 +61,42 @@ function loadMessages(sessionId: string): ThreadMessageLike[] {
 
 function saveMessages(sessionId: string, messages: ThreadMessageLike[]) {
   try {
-    const toSave = messages.slice(-MAX_PERSISTED_MESSAGES);
+    // Strip base64 image data before persisting — too large for sessionStorage.
+    // Replace with a placeholder that renders as "[image]" on reload.
+    const toSave = messages.slice(-MAX_PERSISTED_MESSAGES).map((msg) => {
+      if (!Array.isArray(msg.content)) return msg;
+      const hasImage = msg.content.some((p: Record<string, unknown>) => p.type === "image");
+      if (!hasImage) return msg;
+      return {
+        ...msg,
+        content: msg.content.map((p: Record<string, unknown>) =>
+          p.type === "image" ? { type: "text" as const, text: "[image]" } : p
+        ),
+      };
+    });
     sessionStorage.setItem(STORAGE_PREFIX + sessionId, JSON.stringify(toSave));
   } catch { /* storage full, silently ignore */ }
+}
+
+export interface ImageAttachment {
+  id: string;
+  file: File;
+  preview: string; // object URL for thumbnail
+  media_type: string;
+  data?: string; // base64 data, filled on send
+}
+
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result as string;
+      // Strip data URL prefix: "data:image/png;base64,..."
+      resolve(result.split(",")[1]);
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
 }
 
 export default function AgentChatView({ agentId, sessionId, busy = false }: AgentChatViewProps) {
@@ -72,11 +105,40 @@ export default function AgentChatView({ agentId, sessionId, busy = false }: Agen
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamingParts, setStreamingParts] = useState<ContentPart[]>([]);
   const [resultMeta, setResultMeta] = useState<{ cost: number; turns: number } | null>(null);
+  const [attachments, setAttachments] = useState<ImageAttachment[]>([]);
   const abortRef = useRef<AbortController | null>(null);
   const rafRef = useRef<number | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   // Mutable mirror of streamingParts — SSE callbacks read/write this,
   // then flush to React state via rAF or direct setState.
   const partsRef = useRef<ContentPart[]>([]);
+
+  const addFiles = useCallback((files: FileList | File[]) => {
+    const imageFiles = Array.from(files).filter((f) => f.type.startsWith("image/"));
+    if (imageFiles.length === 0) return;
+    const newAttachments: ImageAttachment[] = imageFiles.map((f) => ({
+      id: `img-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      file: f,
+      preview: URL.createObjectURL(f),
+      media_type: f.type,
+    }));
+    setAttachments((prev) => [...prev, ...newAttachments]);
+  }, []);
+
+  const removeAttachment = useCallback((id: string) => {
+    setAttachments((prev) => {
+      const removed = prev.find((a) => a.id === id);
+      if (removed) URL.revokeObjectURL(removed.preview);
+      return prev.filter((a) => a.id !== id);
+    });
+  }, []);
+
+  // Cleanup object URLs on unmount
+  useEffect(() => {
+    return () => {
+      attachments.forEach((a) => URL.revokeObjectURL(a.preview));
+    };
+  }, []);
 
   // Cleanup on unmount: abort any in-flight stream and cancel pending rAF.
   // Prevents dangling network requests and setState-on-unmounted-component.
@@ -256,9 +318,27 @@ export default function AgentChatView({ agentId, sessionId, busy = false }: Agen
           .join("\n");
       }
 
-      if (!text.trim()) return;
+      if (!text.trim() && attachments.length === 0) return;
 
-      setMessages((prev) => [...prev, { role: "user" as const, content: text, createdAt: new Date() }]);
+      // Convert attachments to base64
+      let images: { media_type: string; data: string }[] | undefined;
+      if (attachments.length > 0) {
+        images = await Promise.all(
+          attachments.map(async (a) => ({
+            media_type: a.media_type,
+            data: await fileToBase64(a.file),
+          }))
+        );
+        // Clean up previews and clear attachments
+        attachments.forEach((a) => URL.revokeObjectURL(a.preview));
+        setAttachments([]);
+      }
+
+      const userContent: (Record<string, unknown>)[] = [{ type: "text", text }];
+      if (images) {
+        images.forEach((img) => userContent.push({ type: "image", image: `data:${img.media_type};base64,${img.data}` }));
+      }
+      setMessages((prev) => [...prev, { role: "user" as const, content: userContent, createdAt: new Date() }]);
       setIsStreaming(true);
       setStreamingParts([]);
       partsRef.current = [];
@@ -361,12 +441,14 @@ export default function AgentChatView({ agentId, sessionId, busy = false }: Agen
           setStreamingParts([]);
           partsRef.current = [];
           setIsStreaming(false);
-        }
+        },
+        undefined, // flowContext
+        images,
       );
 
       abortRef.current = controller;
     },
-    [agentId, sessionId, appendText]
+    [agentId, sessionId, appendText, attachments]
   );
 
   const handleCancel = useCallback(() => {
@@ -389,6 +471,10 @@ export default function AgentChatView({ agentId, sessionId, busy = false }: Agen
       resultMeta={resultMeta}
       onNew={handleSend}
       onCancel={handleCancel}
+      attachments={attachments}
+      onAddFiles={addFiles}
+      onRemoveAttachment={removeAttachment}
+      fileInputRef={fileInputRef}
     />
   );
 }
@@ -627,13 +713,22 @@ function AgentChatThread({
   resultMeta,
   onNew,
   onCancel,
+  attachments,
+  onAddFiles,
+  onRemoveAttachment,
+  fileInputRef,
 }: {
   messages: ThreadMessageLike[];
   isStreaming: boolean;
   resultMeta: { cost: number; turns: number } | null;
   onNew: (message: { content: unknown; role?: string }) => Promise<void>;
   onCancel: () => void;
+  attachments: ImageAttachment[];
+  onAddFiles: (files: FileList | File[]) => void;
+  onRemoveAttachment: (id: string) => void;
+  fileInputRef: React.RefObject<HTMLInputElement | null>;
 }) {
+  const [dragOver, setDragOver] = useState(false);
   // Stable references prevent useExternalStoreRuntime from flushing its
   // internal converter cache on every render — without this, the runtime
   // re-converts ALL messages each frame, which can delay tool-call rendering.
@@ -715,11 +810,45 @@ function AgentChatThread({
     if (!previewOpen) setPreviewOpen(true);
   }, [previewOpen]);
 
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.dataTransfer.types.includes("Files")) setDragOver(true);
+  }, []);
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOver(false);
+  }, []);
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOver(false);
+    if (e.dataTransfer.files.length > 0) onAddFiles(e.dataTransfer.files);
+  }, [onAddFiles]);
+
+  const handlePaste = useCallback((e: React.ClipboardEvent) => {
+    const files = e.clipboardData.files;
+    if (files.length > 0) {
+      const imageFiles = Array.from(files).filter((f) => f.type.startsWith("image/"));
+      if (imageFiles.length > 0) {
+        onAddFiles(imageFiles);
+      }
+    }
+  }, [onAddFiles]);
+
   return (
     <AssistantRuntimeProvider runtime={runtime}>
       <FilePreviewContext.Provider value={handleFileSelect}>
       <AskUserQuestionToolUI />
-      <div className={`fr-wrap ${hasFiles ? "fr-wrap-split" : ""}`}>
+      <div
+        className={`fr-wrap ${hasFiles ? "fr-wrap-split" : ""} ${dragOver ? "fr-drag-over" : ""}`}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
+      >
         <div className="fr-wrap-chat">
           <ThreadPrimitive.Root className="fr-thread">
             <ThreadPrimitive.Viewport className="fr-viewport">
@@ -743,8 +872,39 @@ function AgentChatThread({
             <StickyTodoPanel todos={latestTodos} />
           )}
 
-          <div className="ac-footer">
+          {attachments.length > 0 && (
+            <div className="fr-attachments">
+              {attachments.map((a) => (
+                <div key={a.id} className="fr-attachment">
+                  <img src={a.preview} alt={a.file.name} className="fr-attachment-thumb" />
+                  <span className="fr-attachment-name">{a.file.name}</span>
+                  <button className="fr-attachment-remove" onClick={() => onRemoveAttachment(a.id)}>×</button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div className="ac-footer" onPaste={handlePaste}>
             <ComposerPrimitive.Root>
+              <button
+                className="ac-btn ac-btn-attach"
+                onClick={() => fileInputRef.current?.click()}
+                title="Attach image"
+                type="button"
+              >
+                📎
+              </button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                multiple
+                style={{ display: "none" }}
+                onChange={(e) => {
+                  if (e.target.files) onAddFiles(e.target.files);
+                  e.target.value = "";
+                }}
+              />
               <ComposerPrimitive.Input
                 placeholder="Send a message..."
                 autoFocus

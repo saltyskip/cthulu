@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { createPortal } from "react-dom";
 import { MessagePrimitive, useMessage, type ToolCallMessagePartProps } from "@assistant-ui/react";
 import { MarkdownTextPrimitive } from "@assistant-ui/react-markdown";
 import remarkGfm from "remark-gfm";
@@ -55,12 +56,32 @@ export function CompactAssistantMessage() {
   );
 }
 
+function InlineImage({ image }: { image: string }) {
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <>
+      <img
+        src={image}
+        alt="attachment"
+        className="fr-msg-image"
+        onClick={() => setExpanded(true)}
+      />
+      {expanded && createPortal(
+        <div className="fr-lightbox" onClick={() => setExpanded(false)}>
+          <img src={image} alt="attachment expanded" className="fr-lightbox-img" />
+        </div>,
+        document.body
+      )}
+    </>
+  );
+}
+
 export function CompactUserMessage() {
   return (
     <MessagePrimitive.Root className="fr-msg fr-msg-user">
       <MessageTimestamp />
       <MessagePrimitive.Content
-        components={{ Text: CompactMarkdown }}
+        components={{ Text: CompactMarkdown, Image: InlineImage }}
       />
     </MessagePrimitive.Root>
   );

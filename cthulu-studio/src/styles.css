@@ -2683,6 +2683,35 @@ button:disabled {
   font-style: italic;
 }
 
+.fr-msg-image {
+  max-width: 300px;
+  max-height: 200px;
+  border-radius: 6px;
+  margin: 4px 0;
+  border: 1px solid var(--border);
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+.fr-msg-image:hover {
+  opacity: 0.8;
+}
+
+.fr-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 99999;
+  background: var(--bg, #0a0e14);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: zoom-out;
+}
+.fr-lightbox-img {
+  max-width: 90vw;
+  max-height: 90vh;
+  border-radius: 8px;
+}
+
 /* Markdown: dense, inherits monospace */
 .fr-md {
   line-height: 1.6;
@@ -3396,6 +3425,94 @@ button:disabled {
 .ac-btn:disabled { opacity: 0.4; cursor: default; }
 .ac-btn-stop { border-color: var(--danger); color: var(--danger); }
 .ac-btn-stop:hover { background: color-mix(in srgb, var(--danger) 10%, var(--bg-secondary)); }
+
+.ac-btn-attach {
+  font-size: 14px;
+  padding: 4px 6px;
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+
+.ac-btn-attach:hover { color: var(--text); }
+
+/* ── Drag-over overlay ── */
+.fr-drag-over {
+  position: relative;
+}
+
+.fr-drag-over::after {
+  content: "Drop image here";
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg));
+  border: 2px dashed var(--accent);
+  border-radius: 4px;
+  color: var(--accent);
+  font-size: 14px;
+  font-weight: 600;
+  z-index: 50;
+  pointer-events: none;
+}
+
+/* ── Attachment previews ── */
+.fr-attachments {
+  display: flex;
+  gap: 6px;
+  padding: 6px 12px 0;
+  flex-wrap: wrap;
+  max-width: 720px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.fr-attachment {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.fr-attachment-thumb {
+  width: 32px;
+  height: 32px;
+  object-fit: cover;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.fr-attachment-name {
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fr-attachment-remove {
+  padding: 0 4px;
+  font-size: 14px;
+  color: var(--text-secondary);
+  background: none;
+  border: none;
+  cursor: pointer;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.fr-attachment-remove:hover {
+  color: var(--danger);
+  background: var(--bg-tertiary);
+}
 
 /* ── Sidebar agent meta ───────────────────────────────────────────── */
 
