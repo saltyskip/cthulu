@@ -102,11 +102,22 @@ export default function AgentChatThread({
   );
 
   const rawTodos = useMemo(() => extractLatestTodos(messages), [messages]);
-  // When the session is done, mark all remaining todos as completed
+  // Track whether todos were auto-resolved by a done event.
+  // Persists across isDone resets; only clears when a new TodoWrite arrives.
+  const todosResolvedRef = useRef(false);
+  const prevRawTodosRef = useRef(rawTodos);
+  if (rawTodos !== prevRawTodosRef.current) {
+    // New TodoWrite arrived — reset resolved flag
+    todosResolvedRef.current = false;
+    prevRawTodosRef.current = rawTodos;
+  }
+  if (isDone && !todosResolvedRef.current) {
+    todosResolvedRef.current = true;
+  }
   const latestTodos = useMemo(() => {
-    if (!rawTodos || !isDone) return rawTodos;
+    if (!rawTodos || !todosResolvedRef.current) return rawTodos;
     return rawTodos.map((t) => t.status === "completed" ? t : { ...t, status: "completed" });
-  }, [rawTodos, isDone]);
+  }, [rawTodos, todosResolvedRef.current]);
   const fileOps = useMemo(() => extractFileOps(messages), [messages]);
   const plans = useMemo(() => extractPlans(messages), [messages]);
   const [selectedFileId, setSelectedFileId] = useState<string | null>(null);
