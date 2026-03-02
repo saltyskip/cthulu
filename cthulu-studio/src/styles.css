@@ -214,6 +214,58 @@ button:disabled {
   flex-shrink: 0;
 }
 
+.sidebar-collapse-bar {
+  display: flex;
+  justify-content: flex-end;
+  padding: 4px 6px 0;
+  flex-shrink: 0;
+}
+
+.sidebar-collapse-btn {
+  padding: 2px 6px;
+  font-size: 14px;
+  color: var(--text-secondary);
+  background: none;
+  border: none;
+  cursor: pointer;
+  border-radius: 3px;
+}
+
+.sidebar-collapse-btn:hover {
+  color: var(--text);
+  background: var(--bg-tertiary);
+}
+
+.sidebar-collapsed {
+  width: 36px;
+  min-width: 36px;
+  flex: 0 0 36px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  border-right: 1px solid var(--border);
+  background: var(--bg-secondary);
+  cursor: pointer;
+  padding-top: 8px;
+  gap: 6px;
+}
+
+.sidebar-collapsed:hover {
+  background: var(--bg-tertiary);
+}
+
+.sidebar-collapsed-icon {
+  font-size: 14px;
+  color: var(--text-secondary);
+}
+
+.sidebar-collapsed-label {
+  writing-mode: vertical-rl;
+  font-size: 10px;
+  color: var(--text-secondary);
+  letter-spacing: 0.5px;
+}
+
 .sidebar-section {
   border-bottom: 1px solid var(--border);
 }
@@ -698,6 +750,69 @@ button:disabled {
   flex-shrink: 0;
   overflow-y: auto;
   border-left: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+}
+
+.agent-config-topbar {
+  display: flex;
+  align-items: center;
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  background: var(--bg);
+  font-size: 11px;
+}
+
+.agent-config-title {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.agent-config-collapse-btn {
+  margin-left: auto;
+  padding: 2px 6px;
+  font-size: 14px;
+  color: var(--text-secondary);
+  background: none;
+  border: none;
+  cursor: pointer;
+  border-radius: 3px;
+}
+
+.agent-config-collapse-btn:hover {
+  color: var(--text);
+  background: var(--bg-tertiary);
+}
+
+.agent-config-collapsed {
+  width: 36px;
+  min-width: 36px;
+  flex: 0 0 36px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  border-left: 1px solid var(--border);
+  background: var(--bg);
+  cursor: pointer;
+  padding-top: 8px;
+  gap: 6px;
+}
+
+.agent-config-collapsed:hover {
+  background: var(--bg-secondary);
+}
+
+.agent-config-collapsed-icon {
+  font-size: 14px;
+  color: var(--text-secondary);
+}
+
+.agent-config-collapsed-label {
+  writing-mode: vertical-rl;
+  font-size: 10px;
+  color: var(--text-secondary);
+  letter-spacing: 0.5px;
 }
 
 /* ── Session Tabs ── */
@@ -2244,7 +2359,7 @@ button:disabled {
 
 .fr-wrap-split .fr-wrap-chat {
   flex: 1;
-  min-width: 0;
+  min-width: 300px;
 }
 
 .fr-wrap-chat {
@@ -2255,15 +2370,58 @@ button:disabled {
   overflow: hidden;
 }
 
-/* File preview panel */
+/* File preview panel — width controlled via inline style */
 .fr-preview {
-  width: 480px;
-  flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  border-left: 1px solid var(--border);
   background: var(--bg-secondary);
   overflow: hidden;
+  min-width: 240px;
+}
+
+/* Resizable divider between chat and preview */
+.fr-preview-divider {
+  width: 4px;
+  flex-shrink: 0;
+  cursor: col-resize;
+  background: var(--border);
+  transition: background 0.15s;
+}
+
+.fr-preview-divider:hover,
+.fr-preview-divider:active {
+  background: var(--accent);
+}
+
+/* Collapsed preview: just a thin clickable strip */
+.fr-preview-collapsed {
+  width: 36px;
+  min-width: 36px;
+  flex: 0 0 36px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  border-left: 1px solid var(--border);
+  background: var(--bg);
+  cursor: pointer;
+  padding-top: 8px;
+  gap: 6px;
+}
+
+.fr-preview-collapsed:hover {
+  background: var(--bg-secondary);
+}
+
+.fr-preview-collapsed-icon {
+  font-size: 14px;
+  color: var(--text-secondary);
+}
+
+.fr-preview-collapsed-label {
+  writing-mode: vertical-rl;
+  font-size: 10px;
+  color: var(--text-secondary);
+  letter-spacing: 0.5px;
 }
 
 .fr-preview-topbar {
@@ -2433,16 +2591,26 @@ button:disabled {
   font-size: 11px;
 }
 
-/* Responsive: hide preview on narrow widths */
+/* Responsive: stack vertically on narrow widths */
 @media (max-width: 1000px) {
   .fr-wrap-split {
     flex-direction: column;
   }
+  .fr-wrap-split .fr-wrap-chat {
+    min-width: 0;
+  }
   .fr-preview {
-    width: 100%;
+    min-width: 0 !important;
+    width: 100% !important;
+    flex: none !important;
     max-height: 250px;
-    border-left: none;
     border-top: 1px solid var(--border);
+  }
+  .fr-preview-divider {
+    display: none;
+  }
+  .fr-preview-collapsed {
+    display: none;
   }
   .fr-preview-tree {
     width: 120px;
@@ -2943,7 +3111,8 @@ button:disabled {
 }
 
 .fr-diff-line {
-  white-space: pre;
+  white-space: pre-wrap;
+  word-break: break-all;
   padding: 0 6px;
 }
 

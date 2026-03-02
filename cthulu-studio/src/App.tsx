@@ -39,6 +39,7 @@ export default function App() {
   const [nodeRunStatus, setNodeRunStatus] = useState<Record<string, "running" | "completed" | "failed">>({});
   const [runLogOpen, setRunLogOpen] = useState(false);
   const [activeView, setActiveView] = useState<ActiveView>("flow-editor");
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   // --- Central flow state (extracted hook) ---
   const activeFlowIdRef = useRef(activeFlowId);
@@ -334,27 +335,35 @@ export default function App() {
         onReconnect={handleReconnect}
       />
       <div className="app-layout">
-        <Sidebar
-          flows={flows}
-          activeFlowId={activeFlowId}
-          onSelectFlow={selectFlow}
-          onCreateFlow={createFlow}
-          onImportTemplate={handleImportTemplate}
-          onToggleEnabled={handleToggleFlowEnabled}
-          selectedAgentId={selectedAgentId}
-          onSelectAgent={handleSelectAgent}
-          onShowAgentGrid={handleShowAgentGrid}
-          agentListKey={agentListKey}
-          onAgentCreated={(id) => {
-            handleSelectAgent(id);
-          }}
-          selectedPromptId={selectedPromptId}
-          onSelectPrompt={handleSelectPrompt}
-          promptListKey={promptListKey}
-          activeView={activeView}
-          nodeTypes={nodeTypes}
-          onGrab={handleGrab}
-        />
+        {sidebarCollapsed ? (
+          <div className="sidebar-collapsed" onClick={() => setSidebarCollapsed(false)}>
+            <span className="sidebar-collapsed-icon">◧</span>
+            <span className="sidebar-collapsed-label">Nav</span>
+          </div>
+        ) : (
+          <Sidebar
+            flows={flows}
+            activeFlowId={activeFlowId}
+            onSelectFlow={selectFlow}
+            onCreateFlow={createFlow}
+            onImportTemplate={handleImportTemplate}
+            onToggleEnabled={handleToggleFlowEnabled}
+            selectedAgentId={selectedAgentId}
+            onSelectAgent={handleSelectAgent}
+            onShowAgentGrid={handleShowAgentGrid}
+            agentListKey={agentListKey}
+            onAgentCreated={(id) => {
+              handleSelectAgent(id);
+            }}
+            selectedPromptId={selectedPromptId}
+            onSelectPrompt={handleSelectPrompt}
+            promptListKey={promptListKey}
+            activeView={activeView}
+            nodeTypes={nodeTypes}
+            onGrab={handleGrab}
+            onCollapse={() => setSidebarCollapsed(true)}
+          />
+        )}
 
         <div style={{ display: activeView === "flow-editor" ? "contents" : "none" }}>
           <FlowWorkspaceView

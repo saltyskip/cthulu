@@ -29,6 +29,7 @@ export default function AgentDetailView({
   const [activeSessionId, setActiveSessionId] = useState<string>("");
   const [mountedSessions, setMountedSessions] = useState<Set<string>>(new Set());
   const [configWidth, setConfigWidth] = useState(320);
+  const [configCollapsed, setConfigCollapsed] = useState(false);
   const [interactiveCount, setInteractiveCount] = useState(0);
   const [maxSessions, setMaxSessions] = useState(5);
   const dragRef = useRef<{ startX: number; startW: number } | null>(null);
@@ -252,18 +253,37 @@ export default function AgentDetailView({
           })}
         </div>
       </div>
-      <div
-        className="agent-detail-divider"
-        onMouseDown={handleDragStart}
-      />
-      <div className="agent-detail-config" style={{ width: configWidth }}>
-        <AgentEditor
-          key={agentId}
-          agentId={agentId}
-          onClose={() => {}}
-          onDeleted={onDeleted}
-        />
-      </div>
+      {configCollapsed ? (
+        <div className="agent-config-collapsed" onClick={() => setConfigCollapsed(false)}>
+          <span className="agent-config-collapsed-icon">◧</span>
+          <span className="agent-config-collapsed-label">Config</span>
+        </div>
+      ) : (
+        <>
+          <div
+            className="agent-detail-divider"
+            onMouseDown={handleDragStart}
+          />
+          <div className="agent-detail-config" style={{ width: configWidth }}>
+            <div className="agent-config-topbar">
+              <span className="agent-config-title">Config</span>
+              <button
+                className="agent-config-collapse-btn"
+                onClick={() => setConfigCollapsed(true)}
+                title="Collapse config"
+              >
+                ◨
+              </button>
+            </div>
+            <AgentEditor
+              key={agentId}
+              agentId={agentId}
+              onClose={() => {}}
+              onDeleted={onDeleted}
+            />
+          </div>
+        </>
+      )}
     </div>
   );
 }

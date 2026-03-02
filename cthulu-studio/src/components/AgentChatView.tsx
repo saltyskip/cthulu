@@ -476,11 +476,13 @@ const FilePreviewPanel = memo(function FilePreviewPanel({
   selectedId,
   onSelect,
   onClose,
+  width,
 }: {
   fileOps: FileOp[];
   selectedId: string | null;
   onSelect: (id: string) => void;
   onClose: () => void;
+  width: number;
 }) {
   const op = selectedId ? fileOps.find((f) => f.toolCallId === selectedId) : fileOps[fileOps.length - 1];
   if (!op) return null;
@@ -506,11 +508,11 @@ const FilePreviewPanel = memo(function FilePreviewPanel({
   }
 
   return (
-    <div className="fr-preview">
+    <div className="fr-preview" style={{ width, flex: `0 0 ${width}px` }}>
       <div className="fr-preview-topbar">
         <span className="fr-preview-title">Files</span>
         <span className="fr-preview-count">{uniqueFiles.length}</span>
-        <button className="fr-preview-close" onClick={onClose}>×</button>
+        <button className="fr-preview-close" onClick={onClose} title="Collapse panel">◨</button>
       </div>
       <div className="fr-preview-split">
         <div className="fr-preview-tree">
@@ -657,6 +659,8 @@ function AgentChatThread({
   const fileOps = useMemo(() => extractFileOps(messages), [messages]);
   const [selectedFileId, setSelectedFileId] = useState<string | null>(null);
   const [previewOpen, setPreviewOpen] = useState(true);
+  const [previewWidth, setPreviewWidth] = useState(480);
+  const dragRef = useRef<{ startX: number; startW: number } | null>(null);
 
   // Auto-select latest file op as new ones arrive
   const prevOpsLenRef = useRef(0);
@@ -668,6 +672,33 @@ function AgentChatThread({
     prevOpsLenRef.current = fileOps.length;
   }, [fileOps, previewOpen]);
 
+  const handleDividerDrag = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    dragRef.current = { startX: e.clientX, startW: previewWidth };
+
+    const onMove = (ev: MouseEvent) => {
+      if (!dragRef.current) return;
+      // Dragging left = wider preview (preview is on right)
+      const delta = dragRef.current.startX - ev.clientX;
+      const maxW = Math.max(240, window.innerWidth - 300); // leave at least 300px for chat
+      const newW = Math.min(maxW, Math.max(240, dragRef.current.startW + delta));
+      setPreviewWidth(newW);
+    };
+
+    const onUp = () => {
+      dragRef.current = null;
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  }, [previewWidth]);
+
   const runtime = useExternalStoreRuntime({
     isRunning: isStreaming,
     messages,
@@ -677,7 +708,7 @@ function AgentChatThread({
     onAddToolResult: handleAddToolResult,
   });
 
-  const showPreview = previewOpen && fileOps.length > 0;
+  const hasFiles = fileOps.length > 0;
 
   const handleFileSelect = useCallback((toolCallId: string) => {
     setSelectedFileId(toolCallId);
@@ -688,7 +719,7 @@ function AgentChatThread({
     <AssistantRuntimeProvider runtime={runtime}>
       <FilePreviewContext.Provider value={handleFileSelect}>
       <AskUserQuestionToolUI />
-      <div className={`fr-wrap ${showPreview ? "fr-wrap-split" : ""}`}>
+      <div className={`fr-wrap ${hasFiles ? "fr-wrap-split" : ""}`}>
         <div className="fr-wrap-chat">
           <ThreadPrimitive.Root className="fr-thread">
             <ThreadPrimitive.Viewport className="fr-viewport">
@@ -737,13 +768,24 @@ function AgentChatThread({
           )}
         </div>
 
-        {showPreview && (
-          <FilePreviewPanel
-            fileOps={fileOps}
-            selectedId={selectedFileId}
-            onSelect={setSelectedFileId}
-            onClose={() => setPreviewOpen(false)}
-          />
+        {hasFiles && previewOpen && (
+          <>
+            <div className="fr-preview-divider" onMouseDown={handleDividerDrag} />
+            <FilePreviewPanel
+              fileOps={fileOps}
+              selectedId={selectedFileId}
+              onSelect={setSelectedFileId}
+              onClose={() => setPreviewOpen(false)}
+              width={previewWidth}
+            />
+          </>
+        )}
+
+        {hasFiles && !previewOpen && (
+          <div className="fr-preview-collapsed" onClick={() => setPreviewOpen(true)}>
+            <span className="fr-preview-collapsed-icon">◧</span>
+            <span className="fr-preview-collapsed-label">Files ({fileOps.length})</span>
+          </div>
         )}
       </div>
       </FilePreviewContext.Provider>
