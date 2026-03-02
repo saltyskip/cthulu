@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { createPortal } from "react-dom";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { MessagePrimitive, useMessage, type ToolCallMessagePartProps } from "@assistant-ui/react";
 import { MarkdownTextPrimitive } from "@assistant-ui/react-markdown";
 import remarkGfm from "remark-gfm";
@@ -87,12 +88,38 @@ export function CompactUserMessage() {
   );
 }
 
+const isTauri = "__TAURI_INTERNALS__" in window;
+
+function ExternalLink(props: React.AnchorHTMLAttributes<HTMLAnchorElement>) {
+  const handleClick = useCallback(
+    (e: React.MouseEvent<HTMLAnchorElement>) => {
+      if (!props.href) return;
+      e.preventDefault();
+      if (isTauri) {
+        openUrl(props.href);
+      } else {
+        window.open(props.href, "_blank");
+      }
+    },
+    [props.href],
+  );
+
+  return (
+    <a
+      {...props}
+      target="_blank"
+      rel="noopener noreferrer"
+      onClick={handleClick}
+    />
+  );
+}
+
 export function CompactMarkdown() {
   return (
     <div className="fr-md">
       <MarkdownTextPrimitive
         remarkPlugins={[remarkGfm]}
-        components={{ SyntaxHighlighter }}
+        components={{ SyntaxHighlighter, a: ExternalLink }}
       />
     </div>
   );
