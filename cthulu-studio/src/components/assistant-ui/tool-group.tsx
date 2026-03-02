@@ -31,11 +31,11 @@ const toolGroupVariants = cva("aui-tool-group-root group/tool-group w-full", {
   variants: {
     variant: {
       outline: "rounded-lg border py-3",
-      ghost: "",
+      ghost: "pl-3",
       muted: "rounded-lg border border-muted-foreground/30 bg-muted/30 py-3",
     },
   },
-  defaultVariants: { variant: "outline" },
+  defaultVariants: { variant: "ghost" },
 });
 
 export type ToolGroupRootProps = Omit<
@@ -81,7 +81,7 @@ function ToolGroupRoot({
     <Collapsible
       ref={collapsibleRef}
       data-slot="tool-group-root"
-      data-variant={variant ?? "outline"}
+      data-variant={variant ?? "ghost"}
       open={isOpen}
       onOpenChange={handleOpenChange}
       className={cn(
@@ -116,9 +116,9 @@ function ToolGroupTrigger({
     <CollapsibleTrigger
       data-slot="tool-group-trigger"
       className={cn(
-        "aui-tool-group-trigger group/trigger flex items-center gap-2 text-sm transition-colors",
-        "group-data-[variant=outline]/tool-group-root:w-full group-data-[variant=outline]/tool-group-root:px-4",
-        "group-data-[variant=muted]/tool-group-root:w-full group-data-[variant=muted]/tool-group-root:px-4",
+        "aui-tool-group-trigger group/trigger flex w-full items-center gap-2 text-sm transition-colors",
+        "group-data-[variant=outline]/tool-group-root:px-4",
+        "group-data-[variant=muted]/tool-group-root:px-4",
         className,
       )}
       {...props}
@@ -128,6 +128,9 @@ function ToolGroupTrigger({
           data-slot="tool-group-trigger-loader"
           className="aui-tool-group-trigger-loader size-4 shrink-0 animate-spin"
         />
+      )}
+      {!active && (
+        <span className="fr-tool-group-icon">{"\uf0ad"}</span>
       )}
       <span
         data-slot="tool-group-trigger-label"
@@ -151,7 +154,7 @@ function ToolGroupTrigger({
       <ChevronDownIcon
         data-slot="tool-group-trigger-chevron"
         className={cn(
-          "aui-tool-group-trigger-chevron size-4 shrink-0",
+          "aui-tool-group-trigger-chevron ml-auto size-4 shrink-0",
           "transition-transform duration-(--animation-duration) ease-out",
           "group-data-[state=closed]/trigger:-rotate-90",
           "group-data-[state=open]/trigger:rotate-0",

@@ -72,9 +72,9 @@ function ToolShell({
         {dir && <span className="fr-tool-file-dir">{dir}</span>}
         {error && <span className="fr-tool-err">✗</span>}
         {done && !error && <span className="fr-tool-done">✓</span>}
-        {hasBody && (
-          <span className="fr-tool-caret">{open ? "▾" : "▸"}</span>
-        )}
+        <span className="fr-tool-caret" style={hasBody ? undefined : { visibility: "hidden" }}>
+          {open ? "▾" : "▸"}
+        </span>
       </div>
       {open && children && (
         <div className="fr-tool-detail">{children}</div>
