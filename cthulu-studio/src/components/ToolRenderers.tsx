@@ -255,6 +255,101 @@ export function GlobGrepToolRenderer(props: ToolCallMessagePartProps) {
   );
 }
 
+export function AgentToolRenderer(props: ToolCallMessagePartProps) {
+  const args = props.args as {
+    description?: string;
+    prompt?: string;
+    subagent_type?: string;
+    model?: string;
+    run_in_background?: boolean;
+  };
+  const hasResult = props.result !== undefined;
+  const description = args.description || "Subagent task";
+  const agentType = args.subagent_type || "general-purpose";
+  const resultText =
+    typeof props.result === "string"
+      ? props.result
+      : props.result !== undefined
+        ? JSON.stringify(props.result, null, 2)
+        : null;
+
+  const typeLabel =
+    agentType === "Explore" ? "Explore" :
+    agentType === "Plan" ? "Plan" :
+    agentType === "general-purpose" ? "General" : agentType;
+
+  return (
+    <ToolShell
+      icon="⚡"
+      label={description}
+      badge={typeLabel}
+      done={hasResult}
+    >
+      {args.prompt && (
+        <div className="fr-agent-prompt">{args.prompt.length > 300 ? args.prompt.slice(0, 297) + "..." : args.prompt}</div>
+      )}
+      {(args.model || args.run_in_background) && (
+        <div className="fr-agent-meta">
+          {args.model && <span className="fr-tool-badge">{args.model}</span>}
+          {args.run_in_background && <span className="fr-tool-badge">background</span>}
+        </div>
+      )}
+      {resultText && (
+        <>
+          <div className="fr-tool-sep" />
+          <pre className="fr-tool-result">{resultText}</pre>
+        </>
+      )}
+    </ToolShell>
+  );
+}
+
+// TodoWrite is rendered as a sticky footer panel in AgentChatThread,
+// so the inline version is intentionally hidden.
+export function TodoWriteToolRenderer(_props: ToolCallMessagePartProps) {
+  return null;
+}
+
+// Shared todo types used by the sticky panel
+export interface TodoItem {
+  content: string;
+  status: string;
+  activeForm?: string;
+}
+
+export function WebSearchToolRenderer(props: ToolCallMessagePartProps) {
+  const args = props.args as { query?: string };
+  const hasResult = props.result !== undefined;
+  const query = args.query || "";
+
+  return (
+    <ToolShell icon="🌐" label={query || "Web Search"} done={hasResult}>
+      {hasResult && (
+        <pre className="fr-tool-result">
+          {typeof props.result === "string" ? props.result : JSON.stringify(props.result, null, 2)}
+        </pre>
+      )}
+    </ToolShell>
+  );
+}
+
+export function WebFetchToolRenderer(props: ToolCallMessagePartProps) {
+  const args = props.args as { url?: string; prompt?: string };
+  const hasResult = props.result !== undefined;
+  const url = args.url || "";
+  const truncatedUrl = url.length > 80 ? url.slice(0, 77) + "..." : url;
+
+  return (
+    <ToolShell icon="🌐" labelNode={<span className="fr-tool-cmd">{truncatedUrl}</span>} badge={args.prompt ? "+" : undefined} done={hasResult}>
+      {hasResult && (
+        <pre className="fr-tool-result">
+          {typeof props.result === "string" ? props.result : JSON.stringify(props.result, null, 2)}
+        </pre>
+      )}
+    </ToolShell>
+  );
+}
+
 // AskUserQuestion types
 interface AskOption {
   label: string;

@@ -162,6 +162,7 @@ async fn handle_terminal(socket: WebSocket, state: AppState, agent_id: String, q
                         working_dir: agent.working_dir.clone().unwrap_or_else(|| ".".into()),
                         active_pid: None,
                         busy: false,
+                        busy_since: None,
                         message_count: 0,
                         total_cost: 0.0,
                         created_at: chrono::Utc::now().to_rfc3339(),

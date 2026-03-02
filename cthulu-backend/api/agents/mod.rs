@@ -27,8 +27,20 @@ pub fn router() -> Router<AppState> {
             delete(chat::delete_session),
         )
         .route(
+            "/agents/{id}/sessions/{session_id}/status",
+            get(chat::session_status),
+        )
+        .route(
+            "/agents/{id}/sessions/{session_id}/kill",
+            post(chat::kill_session),
+        )
+        .route(
             "/agents/{id}/sessions/{session_id}/stream",
             get(chat::stream_session_log),
+        )
+        .route(
+            "/agents/{id}/sessions/{session_id}/chat/stream",
+            get(chat::stream_agent_chat),
         )
         .route(
             "/agents/{id}/sessions/{session_id}/log",
