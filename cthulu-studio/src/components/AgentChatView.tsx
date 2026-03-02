@@ -47,36 +47,6 @@ interface ToolCallPart {
 }
 type ContentPart = TextPart | ToolCallPart;
 
-// Persist/restore chat messages in sessionStorage so they survive HMR and reloads.
-const STORAGE_PREFIX = "cthulu_chat_";
-const MAX_PERSISTED_MESSAGES = 200;
-
-function loadMessages(sessionId: string): ThreadMessageLike[] {
-  try {
-    const raw = sessionStorage.getItem(STORAGE_PREFIX + sessionId);
-    if (raw) return JSON.parse(raw);
-  } catch { /* corrupt data, start fresh */ }
-  return [];
-}
-
-function saveMessages(sessionId: string, messages: ThreadMessageLike[]) {
-  try {
-    // Strip base64 image data before persisting — too large for sessionStorage.
-    // Replace with a placeholder that renders as "[image]" on reload.
-    const toSave = messages.slice(-MAX_PERSISTED_MESSAGES).map((msg) => {
-      if (!Array.isArray(msg.content)) return msg;
-      const hasImage = msg.content.some((p: Record<string, unknown>) => p.type === "image");
-      if (!hasImage) return msg;
-      return {
-        ...msg,
-        content: msg.content.map((p: Record<string, unknown>) =>
-          p.type === "image" ? { type: "text" as const, text: "[image]" } : p
-        ),
-      };
-    });
-    sessionStorage.setItem(STORAGE_PREFIX + sessionId, JSON.stringify(toSave));
-  } catch { /* storage full, silently ignore */ }
-}
 
 /** Replay JSONL log lines into ThreadMessageLike[] messages. */
 function replayLogLines(lines: string[]): ThreadMessageLike[] {
@@ -183,7 +153,7 @@ function fileToBase64(file: File): Promise<string> {
 
 export default function AgentChatView({ agentId, sessionId, busy = false }: AgentChatViewProps) {
   console.log(`[RECONNECT-DEBUG] AgentChatView RENDER agentId=${agentId} sessionId=${sessionId} busy=${busy}`);
-  const [messages, setMessages] = useState<ThreadMessageLike[]>(() => loadMessages(sessionId));
+  const [messages, setMessages] = useState<ThreadMessageLike[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamingParts, setStreamingParts] = useState<ContentPart[]>([]);
   const [resultMeta, setResultMeta] = useState<{ cost: number; turns: number } | null>(null);
@@ -231,16 +201,7 @@ export default function AgentChatView({ agentId, sessionId, busy = false }: Agen
     };
   }, []);
 
-  // Persist messages whenever they change and we're not mid-stream.
-  // This catches all state transitions (send, done, error) in one place.
-  useEffect(() => {
-    if (!isStreaming && messages.length > 0) {
-      saveMessages(sessionId, messages);
-    }
-  }, [messages, isStreaming, sessionId]);
-
   // Restore chat history from backend JSONL log on mount.
-  // Falls back to sessionStorage (already loaded in initial state).
   useEffect(() => {
     let cancelled = false;
     getSessionLog(agentId, sessionId)
@@ -251,7 +212,7 @@ export default function AgentChatView({ agentId, sessionId, busy = false }: Agen
           setMessages(restored);
         }
       })
-      .catch(() => { /* backend unavailable, keep sessionStorage data */ });
+      .catch(() => { /* backend unavailable, start empty */ });
     return () => { cancelled = true; };
   }, [agentId, sessionId]);
 
