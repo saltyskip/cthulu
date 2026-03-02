@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useMemo } from "react";
+import { useState, useRef, useCallback, useMemo, useEffect } from "react";
 import {
   AssistantRuntimeProvider,
   useExternalStoreRuntime,
@@ -12,6 +12,7 @@ import {
 } from "./ChatPrimitives";
 import { startAgentChat } from "../api/interactStream";
 import { stopAgentChat } from "../api/client";
+import { AskUserQuestionToolUI } from "./ToolRenderers";
 
 interface AgentChatViewProps {
   agentId: string;
@@ -39,6 +40,15 @@ export default function AgentChatView({ agentId, sessionId }: AgentChatViewProps
   // Mutable mirror of streamingParts — SSE callbacks read/write this,
   // then flush to React state via rAF or direct setState.
   const partsRef = useRef<ContentPart[]>([]);
+
+  // Cleanup on unmount: abort any in-flight stream and cancel pending rAF.
+  // Prevents dangling network requests and setState-on-unmounted-component.
+  useEffect(() => {
+    return () => {
+      if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
+      abortRef.current?.abort();
+    };
+  }, []);
 
   const flushParts = useCallback(() => {
     rafRef.current = null;
@@ -100,10 +110,11 @@ export default function AgentChatView({ agentId, sessionId }: AgentChatViewProps
               } else if (typeof data.input === "object" && data.input) {
                 parsedArgs = data.input;
               }
+              const toolName = data.tool || data.name || "unknown";
               partsRef.current = [...partsRef.current, {
                 type: "tool-call" as const,
                 toolCallId: data.id || `tool-${Date.now()}-${partsRef.current.length}`,
-                toolName: data.tool || data.name || "unknown",
+                toolName,
                 args: parsedArgs,
               }];
               setStreamingParts([...partsRef.current]);
@@ -215,20 +226,39 @@ function AgentChatThread({
   onNew: (message: { content: unknown; role?: string }) => Promise<void>;
   onCancel: () => void;
 }) {
+  // Stable references prevent useExternalStoreRuntime from flushing its
+  // internal converter cache on every render — without this, the runtime
+  // re-converts ALL messages each frame, which can delay tool-call rendering.
+  const convertMessage = useCallback((msg: ThreadMessageLike) => msg, []);
+  const handleNew = useCallback(
+    async (message: { content: unknown; role?: string }) => { await onNew(message); },
+    [onNew],
+  );
+  const handleCancel = useCallback(async () => { onCancel(); }, [onCancel]);
+  const handleAddToolResult = useCallback(
+    async (options: { result: unknown }) => {
+      // When a tool renderer (e.g. AskUserQuestion) submits a result,
+      // send it as a user message to the Claude process.
+      const answer = typeof options.result === "object" && options.result !== null
+        ? (options.result as Record<string, unknown>).answer ?? JSON.stringify(options.result)
+        : String(options.result);
+      await onNew({ content: answer as string });
+    },
+    [onNew],
+  );
+
   const runtime = useExternalStoreRuntime({
     isRunning: isStreaming,
     messages,
-    convertMessage: (msg) => msg,
-    onNew: async (message) => {
-      await onNew(message);
-    },
-    onCancel: async () => {
-      onCancel();
-    },
+    convertMessage,
+    onNew: handleNew,
+    onCancel: handleCancel,
+    onAddToolResult: handleAddToolResult,
   });
 
   return (
     <AssistantRuntimeProvider runtime={runtime}>
+      <AskUserQuestionToolUI />
       <div className="fr-wrap">
         <ThreadPrimitive.Root className="fr-thread">
           <ThreadPrimitive.Viewport className="fr-viewport">
@@ -240,6 +270,13 @@ function AgentChatThread({
             />
           </ThreadPrimitive.Viewport>
         </ThreadPrimitive.Root>
+
+        {isStreaming && (
+          <div className="fr-busy">
+            <span className="fr-busy-dot" />
+            <span>Thinking…</span>
+          </div>
+        )}
 
         <div className="ac-footer">
           <ComposerPrimitive.Root>

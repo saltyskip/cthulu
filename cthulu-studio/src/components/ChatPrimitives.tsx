@@ -1,8 +1,16 @@
 import { useState } from "react";
 import { MessagePrimitive, type ToolCallMessagePartProps } from "@assistant-ui/react";
 import { MarkdownTextPrimitive } from "@assistant-ui/react-markdown";
+import remarkGfm from "remark-gfm";
 import { SyntaxHighlighter } from "./assistant-ui/shiki-highlighter";
 import { ToolGroup } from "./assistant-ui/tool-group";
+import {
+  EditToolRenderer,
+  WriteToolRenderer,
+  ReadToolRenderer,
+  BashToolRenderer,
+  GlobGrepToolRenderer,
+} from "./ToolRenderers";
 import "@assistant-ui/react-ui/styles/markdown.css";
 
 export function CompactAssistantMessage() {
@@ -11,7 +19,17 @@ export function CompactAssistantMessage() {
       <MessagePrimitive.Content
         components={{
           Text: CompactMarkdown,
-          tools: { Fallback: CompactToolCall },
+          tools: {
+            by_name: {
+              Edit: EditToolRenderer,
+              Write: WriteToolRenderer,
+              Read: ReadToolRenderer,
+              Bash: BashToolRenderer,
+              Glob: GlobGrepToolRenderer,
+              Grep: GlobGrepToolRenderer,
+            },
+            Fallback: CompactToolCall,
+          },
           ToolGroup,
         }}
       />
@@ -32,7 +50,10 @@ export function CompactUserMessage() {
 export function CompactMarkdown() {
   return (
     <div className="fr-md">
-      <MarkdownTextPrimitive components={{ SyntaxHighlighter }} />
+      <MarkdownTextPrimitive
+        remarkPlugins={[remarkGfm]}
+        components={{ SyntaxHighlighter }}
+      />
     </div>
   );
 }

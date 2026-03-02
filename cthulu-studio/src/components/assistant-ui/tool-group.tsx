@@ -1,22 +1,29 @@
 "use client";
 
 import {
+  Children,
   memo,
   useCallback,
+  useMemo,
   useRef,
   useState,
   type FC,
   type PropsWithChildren,
+  type ReactNode,
 } from "react";
 import { ChevronDownIcon, LoaderIcon } from "lucide-react";
 import { cva, type VariantProps } from "class-variance-authority";
 import { useScrollLock } from "@assistant-ui/react";
+import { useAuiState } from "@assistant-ui/store";
 import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
+
+// Tool names that should render outside the collapsed group
+const BREAKOUT_TOOLS = new Set(["AskUserQuestion"]);
 
 const ANIMATION_DURATION = 200;
 
@@ -199,13 +206,45 @@ type ToolGroupComponent = FC<
 const ToolGroupImpl: FC<
   PropsWithChildren<{ startIndex: number; endIndex: number }>
 > = ({ children, startIndex, endIndex }) => {
-  const toolCount = endIndex - startIndex + 1;
+  // Read message parts to find which indices are breakout tools.
+  // Returns a stable string like "01001" to avoid infinite re-renders.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const breakoutKey = useAuiState((s: any) => {
+    let key = "";
+    for (let i = startIndex; i <= endIndex; i++) {
+      const part = s.message?.parts?.[i];
+      key += part?.type === "tool-call" && BREAKOUT_TOOLS.has(part.toolName ?? "")
+        ? "1"
+        : "0";
+    }
+    return key;
+  });
+
+  // Split children into grouped (collapsible) and breakout (rendered directly)
+  const childArray = Children.toArray(children);
+  const { grouped, breakout } = useMemo(() => {
+    const grouped: ReactNode[] = [];
+    const breakout: ReactNode[] = [];
+    childArray.forEach((child, i) => {
+      if (breakoutKey[i] === "1") {
+        breakout.push(child);
+      } else {
+        grouped.push(child);
+      }
+    });
+    return { grouped, breakout };
+  }, [childArray, breakoutKey]);
 
   return (
-    <ToolGroupRoot>
-      <ToolGroupTrigger count={toolCount} />
-      <ToolGroupContent>{children}</ToolGroupContent>
-    </ToolGroupRoot>
+    <>
+      {grouped.length > 0 && (
+        <ToolGroupRoot>
+          <ToolGroupTrigger count={grouped.length} />
+          <ToolGroupContent>{grouped}</ToolGroupContent>
+        </ToolGroupRoot>
+      )}
+      {breakout}
+    </>
   );
 };
 
