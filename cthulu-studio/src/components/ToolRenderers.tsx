@@ -6,6 +6,7 @@ import {
 import { useAuiState } from "@assistant-ui/store";
 import { useFilePreviewSelect } from "./chat/FilePreviewContext";
 import { computeDiffLines } from "../utils/diff";
+import { fileIcon } from "../utils/fileIcons";
 
 // Helpers
 
@@ -16,30 +17,36 @@ function basename(filePath: string): { dir: string; name: string } {
   return { dir, name };
 }
 
-function FilePath({ path }: { path: string }) {
-  const { dir, name } = basename(path);
+function FilePath({ path, op }: { path: string; op?: string }) {
+  const { name } = basename(path);
   return (
-    <span className="fr-tool-file">
-      <span className="fr-tool-file-dir">{dir}</span>
+    <span className="fr-tool-file" title={path}>
       <span className="fr-tool-file-name">{name}</span>
+      {op && <span className="fr-tool-file-op">{op}</span>}
     </span>
   );
 }
 
 function ToolShell({
   icon,
+  iconColor,
+  nerdFont = false,
   label,
   labelNode,
   badge,
+  dir,
   done,
   error,
   children,
   defaultOpen = false,
 }: {
   icon: string;
+  iconColor?: string;
+  nerdFont?: boolean;
   label?: string;
   labelNode?: React.ReactNode;
   badge?: string;
+  dir?: string;
   done?: boolean;
   error?: boolean;
   children?: React.ReactNode;
@@ -55,14 +62,19 @@ function ToolShell({
         onClick={() => hasBody && setOpen((v) => !v)}
         style={{ cursor: hasBody ? "pointer" : "default" }}
       >
+        <span
+          className={`fr-tool-icon ${nerdFont ? "fr-tool-icon-nerd" : ""}`}
+          style={iconColor ? { color: iconColor } : undefined}
+        >{icon}</span>
+        {labelNode ?? <span className="fr-tool-name">{label}</span>}
+        {badge && <span className="fr-tool-badge">{badge}</span>}
+        <span className="fr-tool-spacer" />
+        {dir && <span className="fr-tool-file-dir">{dir}</span>}
+        {error && <span className="fr-tool-err">✗</span>}
+        {done && !error && <span className="fr-tool-done">✓</span>}
         {hasBody && (
           <span className="fr-tool-caret">{open ? "▾" : "▸"}</span>
         )}
-        <span className="fr-tool-icon">{icon}</span>
-        {labelNode ?? <span className="fr-tool-name">{label}</span>}
-        {badge && <span className="fr-tool-badge">{badge}</span>}
-        {error && <span className="fr-tool-err">✗</span>}
-        {done && !error && <span className="fr-tool-done">✓</span>}
       </div>
       {open && children && (
         <div className="fr-tool-detail">{children}</div>
@@ -92,15 +104,21 @@ export function EditToolRenderer(props: ToolCallMessagePartProps) {
     ? () => selectFile(props.toolCallId)
     : undefined;
 
+  const fi = fileIcon(filePath);
+  const { dir } = basename(filePath);
+
   return (
     <ToolShell
-      icon="✎"
+      icon={fi.icon}
+      iconColor={fi.color}
+      nerdFont
       labelNode={
         <span className={selectFile ? "fr-tool-clickable" : ""} onClick={handleClick}>
-          <FilePath path={filePath} />
+          <FilePath path={filePath} op="Edit" />
         </span>
       }
       badge={args.replace_all ? "replace_all" : undefined}
+      dir={dir || undefined}
       done={hasResult}
     >
       {diffLines && (
@@ -138,14 +156,20 @@ export function WriteToolRenderer(props: ToolCallMessagePartProps) {
     ? () => selectFile(props.toolCallId)
     : undefined;
 
+  const fi = fileIcon(filePath);
+  const { dir } = basename(filePath);
+
   return (
     <ToolShell
-      icon="📄"
+      icon={fi.icon}
+      iconColor={fi.color}
+      nerdFont
       labelNode={
         <span className={selectFile ? "fr-tool-clickable" : ""} onClick={handleClick}>
-          <FilePath path={filePath} />
+          <FilePath path={filePath} op="Write" />
         </span>
       }
+      dir={dir || undefined}
       done={hasResult}
     >
       {args.content && (
@@ -166,8 +190,11 @@ export function ReadToolRenderer(props: ToolCallMessagePartProps) {
         ? JSON.stringify(props.result, null, 2)
         : null;
 
+  const fi = fileIcon(filePath);
+  const { dir } = basename(filePath);
+
   return (
-    <ToolShell icon="📖" labelNode={<FilePath path={filePath} />} done={hasResult}>
+    <ToolShell icon={fi.icon} iconColor={fi.color} nerdFont labelNode={<FilePath path={filePath} op="Read" />} dir={dir || undefined} done={hasResult}>
       {resultText && <pre>{resultText}</pre>}
     </ToolShell>
   );
@@ -194,7 +221,9 @@ export function BashToolRenderer(props: ToolCallMessagePartProps) {
 
   return (
     <ToolShell
-      icon="$"
+      icon={"\ue795"}
+      nerdFont
+      iconColor="#89e051"
       labelNode={<span className="fr-tool-cmd">{truncated}</span>}
       done={hasResult}
       error={isError}
@@ -217,7 +246,8 @@ export function GlobGrepToolRenderer(props: ToolCallMessagePartProps) {
 
   return (
     <ToolShell
-      icon="🔍"
+      icon={"\uf002"}
+      nerdFont
       label={props.toolName}
       badge={pattern}
       done={hasResult}
@@ -252,7 +282,8 @@ export function AgentToolRenderer(props: ToolCallMessagePartProps) {
 
   return (
     <ToolShell
-      icon="⚡"
+      icon={"\uf544"}
+      nerdFont
       label={description}
       badge={typeLabel}
       done={hasResult}
@@ -295,7 +326,7 @@ export function WebSearchToolRenderer(props: ToolCallMessagePartProps) {
   const query = args.query || "";
 
   return (
-    <ToolShell icon="🌐" label={query || "Web Search"} done={hasResult}>
+    <ToolShell icon={"\uf0ac"} nerdFont label={query || "Web Search"} done={hasResult}>
       {hasResult && (
         <pre className="fr-tool-result">
           {typeof props.result === "string" ? props.result : JSON.stringify(props.result, null, 2)}
@@ -312,7 +343,7 @@ export function WebFetchToolRenderer(props: ToolCallMessagePartProps) {
   const truncatedUrl = url.length > 80 ? url.slice(0, 77) + "..." : url;
 
   return (
-    <ToolShell icon="🌐" labelNode={<span className="fr-tool-cmd">{truncatedUrl}</span>} badge={args.prompt ? "+" : undefined} done={hasResult}>
+    <ToolShell icon={"\uf0ac"} nerdFont labelNode={<span className="fr-tool-cmd">{truncatedUrl}</span>} badge={args.prompt ? "+" : undefined} done={hasResult}>
       {hasResult && (
         <pre className="fr-tool-result">
           {typeof props.result === "string" ? props.result : JSON.stringify(props.result, null, 2)}

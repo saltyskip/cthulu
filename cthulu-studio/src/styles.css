@@ -2915,7 +2915,9 @@ button:disabled {
 .fr-tool-caret {
   color: var(--text-secondary);
   font-size: 9px;
-  width: 10px;
+  width: 12px;
+  text-align: center;
+  flex-shrink: 0;
 }
 
 .fr-tool-name {
@@ -2923,10 +2925,13 @@ button:disabled {
   font-weight: 600;
 }
 
+.fr-tool-spacer {
+  flex: 1;
+}
+
 .fr-tool-done {
   color: var(--success);
   font-size: 10px;
-  margin-left: auto;
 }
 
 .fr-tool-detail {
@@ -2962,11 +2967,22 @@ button:disabled {
   text-overflow: ellipsis;
   white-space: nowrap;
   min-width: 0;
+  display: inline-flex;
+  gap: 6px;
+}
+
+.fr-tool-file-op {
+  color: var(--text-secondary);
+  font-size: 9px;
+  font-weight: 500;
+  text-transform: lowercase;
 }
 
 .fr-tool-file-dir {
   color: var(--text-secondary);
-  opacity: 0.7;
+  opacity: 0.5;
+  font-size: 10px;
+  font-weight: 400;
 }
 
 .fr-tool-file-name {
@@ -2978,8 +2994,13 @@ button:disabled {
 .fr-tool-icon {
   font-size: 11px;
   flex-shrink: 0;
-  width: 14px;
+  width: 16px;
   text-align: center;
+}
+
+.fr-tool-icon-nerd {
+  font-family: "Symbols Nerd Font Mono", monospace;
+  font-size: 13px;
 }
 
 /* Tool renderer: badge */
