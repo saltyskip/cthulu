@@ -2891,11 +2891,34 @@ button:disabled {
 }
 
 /* Tool calls: compact, one-line with expand */
+/* Tool group accent bar — uses theme --accent color */
+.aui-tool-group-root {
+  border-left: 2px solid color-mix(in srgb, var(--accent) 40%, transparent);
+}
+
+.aui-tool-group-trigger {
+  color: var(--accent);
+  width: 100%;
+  padding-right: 6px;
+}
+
+.aui-tool-group-trigger-chevron {
+  color: var(--accent);
+  opacity: 0.6;
+  margin-left: auto;
+  width: 12px;
+  height: 12px;
+}
+
+.fr-tool-group-icon {
+  font-family: "Symbols Nerd Font Mono", monospace;
+  font-size: 13px;
+  color: var(--accent);
+  opacity: 0.7;
+}
+
 .fr-tool {
   margin: 2px 0;
-  border-left: 2px solid var(--executor-color, var(--accent));
-  background: var(--bg-secondary);
-  border-radius: 0 3px 3px 0;
 }
 
 .fr-tool-row {
@@ -2913,7 +2936,8 @@ button:disabled {
 }
 
 .fr-tool-caret {
-  color: var(--text-secondary);
+  color: var(--accent);
+  opacity: 0.6;
   font-size: 9px;
   width: 12px;
   text-align: center;
@@ -2938,7 +2962,6 @@ button:disabled {
   padding: 4px 8px 4px 16px;
   max-height: 200px;
   overflow-y: auto;
-  border-top: 1px solid var(--border);
 }
 
 .fr-tool-detail pre {
