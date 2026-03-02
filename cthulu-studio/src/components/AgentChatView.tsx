@@ -15,6 +15,7 @@ export default function AgentChatView({ agentId, sessionId }: AgentChatViewProps
       messages={chat.messages}
       isStreaming={chat.isStreaming}
       resultMeta={chat.resultMeta}
+      isDone={chat.isDone}
       onNew={chat.handleSend}
       onCancel={chat.handleCancel}
       attachments={chat.attachments}

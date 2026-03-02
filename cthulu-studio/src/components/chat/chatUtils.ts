@@ -1,6 +1,8 @@
 import type { ThreadMessageLike } from "@assistant-ui/react";
-import type { FileOp } from "./FilePreviewContext";
+import type { FileOp, PlanOp } from "./FilePreviewContext";
 import type { TodoItem } from "../ToolRenderers";
+
+const PLAN_PATH_RE = /\.claude\/plans\/.*\.md$/;
 
 /** Extract all Edit/Write file operations from messages. */
 export function extractFileOps(messages: ThreadMessageLike[]): FileOp[] {
@@ -22,11 +24,34 @@ export function extractFileOps(messages: ThreadMessageLike[]): FileOp[] {
           oldString: args.old_string as string | undefined,
           newString: args.new_string as string | undefined,
         });
-      } else if (p.toolName === "Write" && args.file_path) {
+      } else if (p.toolName === "Write" && args.file_path && !PLAN_PATH_RE.test(args.file_path as string)) {
         ops.push({
           toolCallId,
           filePath: args.file_path as string,
           type: "write",
+          content: args.content as string | undefined,
+        });
+      }
+    }
+  }
+  return ops;
+}
+
+/** Extract plan files (Write calls to .claude/plans/*.md) from messages. */
+export function extractPlans(messages: ThreadMessageLike[]): PlanOp[] {
+  const ops: PlanOp[] = [];
+  for (const msg of messages) {
+    const content = msg.content;
+    if (!Array.isArray(content)) continue;
+    for (const part of content) {
+      const p = part as Record<string, unknown>;
+      if (p.type !== "tool-call") continue;
+      const args = p.args as Record<string, unknown> | undefined;
+      if (!args) continue;
+      if (p.toolName === "Write" && args.file_path && PLAN_PATH_RE.test(args.file_path as string)) {
+        ops.push({
+          toolCallId: (p.toolCallId as string) || "",
+          filePath: args.file_path as string,
           content: args.content as string | undefined,
         });
       }

@@ -1,6 +1,14 @@
 @import "tailwindcss";
 @import "tw-shimmer";
 
+@font-face {
+  font-family: "Symbols Nerd Font Mono";
+  src: url("./assets/fonts/SymbolsNerdFontMono-Regular.ttf") format("truetype");
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+}
+
 * {
   margin: 0;
   padding: 0;
@@ -2476,7 +2484,8 @@ button:disabled {
 
 /* File tree sidebar */
 .fr-preview-tree {
-  width: 150px;
+  width: 180px;
+  min-width: 160px;
   flex-shrink: 0;
   overflow-y: auto;
   scrollbar-width: none;
@@ -2534,8 +2543,56 @@ button:disabled {
 }
 
 .fr-tree-icon {
-  font-size: 10px;
+  font-family: "Symbols Nerd Font Mono", monospace;
+  font-size: 14px;
   flex-shrink: 0;
+  width: 18px;
+  text-align: center;
+}
+
+.fr-tree-section {
+  margin-bottom: 4px;
+}
+
+.fr-tree-section-label {
+  padding: 6px 10px 2px;
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-secondary);
+}
+
+/* Markdown preview for plans */
+.fr-preview-markdown {
+  padding: 16px 20px;
+  overflow-y: auto;
+  flex: 1;
+  font-size: 13px;
+  line-height: 1.6;
+  max-width: 720px;
+  margin: 0 auto;
+}
+
+.fr-preview-markdown h1 { font-size: 1.4em; margin: 0.6em 0 0.3em; }
+.fr-preview-markdown h2 { font-size: 1.2em; margin: 0.5em 0 0.25em; }
+.fr-preview-markdown h3 { font-size: 1.05em; margin: 0.4em 0 0.2em; }
+.fr-preview-markdown ul,
+.fr-preview-markdown ol { padding-left: 1.5em; margin: 0.3em 0; }
+.fr-preview-markdown li { margin: 0.15em 0; }
+.fr-preview-markdown p { margin: 0.4em 0; }
+.fr-preview-markdown code {
+  background: var(--bg-secondary);
+  padding: 0.15em 0.35em;
+  border-radius: 3px;
+  font-size: 0.9em;
+}
+.fr-preview-markdown pre {
+  margin: 0.5em 0;
+}
+.fr-preview-markdown pre code {
+  background: none;
+  padding: 0;
 }
 
 /* Preview main area (diff / content) */
@@ -2584,6 +2641,18 @@ button:disabled {
   color: var(--text-secondary);
 }
 
+.fr-preview-shiki {
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.fr-preview-shiki pre {
+  margin: 0;
+  padding: 8px 10px;
+  background: transparent !important;
+  overflow-x: auto;
+}
+
 .fr-preview-empty {
   padding: 20px;
   text-align: center;
@@ -2613,7 +2682,8 @@ button:disabled {
     display: none;
   }
   .fr-preview-tree {
-    width: 120px;
+    width: 140px;
+    min-width: 120px;
   }
 }
 
