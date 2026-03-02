@@ -13,7 +13,11 @@ import { fileIcon } from "../utils/fileIcons";
 function basename(filePath: string): { dir: string; name: string } {
   const parts = filePath.replace(/\\/g, "/").split("/");
   const name = parts.pop() || filePath;
-  const dir = parts.length > 0 ? parts.join("/") + "/" : "";
+  // Show last 2 directory segments to keep it short
+  const tail = parts.length > 2 ? parts.slice(-2) : parts;
+  const dir = tail.length > 0
+    ? (parts.length > 2 ? "…/" : "") + tail.join("/") + "/"
+    : "";
   return { dir, name };
 }
 
