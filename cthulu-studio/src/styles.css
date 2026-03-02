@@ -3269,18 +3269,18 @@ button:disabled {
 
 .fr-diff-del {
   background: color-mix(in srgb, var(--danger) 12%, transparent);
-  color: var(--danger);
 }
+.fr-diff-del > .fr-diff-prefix { color: var(--danger); }
 
 .fr-diff-add {
   background: color-mix(in srgb, var(--success) 12%, transparent);
-  color: var(--success);
 }
+.fr-diff-add > .fr-diff-prefix { color: var(--success); }
 
 .fr-diff-ctx {
-  color: var(--text-secondary);
   opacity: 0.6;
 }
+.fr-diff-ctx > .fr-diff-prefix { color: var(--text-secondary); }
 
 /* AskUserQuestion renderer */
 .fr-ask {
