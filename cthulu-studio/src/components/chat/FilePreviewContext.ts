@@ -14,3 +14,10 @@ export interface FileOp {
   newString?: string;
   content?: string;
 }
+
+// Plan file extracted from messages (Write to .claude/plans/*.md)
+export interface PlanOp {
+  toolCallId: string;
+  filePath: string;
+  content?: string;
+}
