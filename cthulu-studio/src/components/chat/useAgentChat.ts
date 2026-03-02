@@ -101,6 +101,7 @@ export function useAgentChat(agentId: string, sessionId: string) {
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamingParts, setStreamingParts] = useState<ContentPart[]>([]);
   const [resultMeta, setResultMeta] = useState<{ cost: number; turns: number } | null>(null);
+  const [isDone, setIsDone] = useState(false);
   const [attachments, setAttachments] = useState<ImageAttachment[]>([]);
   const abortRef = useRef<AbortController | null>(null);
   const rafRef = useRef<number | null>(null);
@@ -214,6 +215,7 @@ export function useAgentChat(agentId: string, sessionId: string) {
     setStreamingParts([]);
     partsRef.current = [];
     setIsStreaming(false);
+    setIsDone(true);
   }, []);
 
   const resetStreaming = useCallback(() => {
@@ -301,6 +303,8 @@ export function useAgentChat(agentId: string, sessionId: string) {
       }
       setMessages((prev) => [...prev, { role: "user" as const, content: userContent as ThreadMessageLike["content"], createdAt: new Date() }]);
       setIsStreaming(true);
+      setIsDone(false);
+      setResultMeta(null);
       setStreamingParts([]);
       partsRef.current = [];
 
@@ -361,6 +365,7 @@ export function useAgentChat(agentId: string, sessionId: string) {
     messages: threadMessages,
     isStreaming,
     resultMeta,
+    isDone,
     attachments,
     fileInputRef,
     handleSend,

@@ -12,7 +12,7 @@ import {
 } from "../ChatPrimitives";
 import { AskUserQuestionToolUI } from "../ToolRenderers";
 import { FilePreviewContext } from "./FilePreviewContext";
-import { extractFileOps, extractLatestTodos } from "./chatUtils";
+import { extractFileOps, extractPlans, extractLatestTodos } from "./chatUtils";
 import FilePreviewPanel from "./FilePreviewPanel";
 import StickyTodoPanel from "./StickyTodoPanel";
 import type { ImageAttachment, DebugEvent } from "./useAgentChat";
@@ -50,6 +50,7 @@ interface AgentChatThreadProps {
   messages: ThreadMessageLike[];
   isStreaming: boolean;
   resultMeta: { cost: number; turns: number } | null;
+  isDone: boolean;
   onNew: (message: { content: unknown; role?: string }) => Promise<void>;
   onCancel: () => void;
   attachments: ImageAttachment[];
@@ -66,6 +67,7 @@ export default function AgentChatThread({
   messages,
   isStreaming,
   resultMeta,
+  isDone,
   onNew,
   onCancel,
   attachments,
@@ -99,22 +101,48 @@ export default function AgentChatThread({
     [onNew],
   );
 
-  const latestTodos = useMemo(() => extractLatestTodos(messages), [messages]);
+  const rawTodos = useMemo(() => extractLatestTodos(messages), [messages]);
+  // Track whether todos were auto-resolved by a done event.
+  // Persists across isDone resets; only clears when a new TodoWrite arrives.
+  const todosResolvedRef = useRef(false);
+  const prevRawTodosRef = useRef(rawTodos);
+  if (rawTodos !== prevRawTodosRef.current) {
+    // New TodoWrite arrived — reset resolved flag
+    todosResolvedRef.current = false;
+    prevRawTodosRef.current = rawTodos;
+  }
+  if (isDone && !todosResolvedRef.current) {
+    todosResolvedRef.current = true;
+  }
+  const latestTodos = useMemo(() => {
+    if (!rawTodos || !todosResolvedRef.current) return rawTodos;
+    return rawTodos.map((t) => t.status === "completed" ? t : { ...t, status: "completed" });
+  }, [rawTodos, todosResolvedRef.current]);
   const fileOps = useMemo(() => extractFileOps(messages), [messages]);
+  const plans = useMemo(() => extractPlans(messages), [messages]);
   const [selectedFileId, setSelectedFileId] = useState<string | null>(null);
   const [previewOpen, setPreviewOpen] = useState(true);
   const [previewWidth, setPreviewWidth] = useState(480);
   const dragRef = useRef<{ startX: number; startW: number } | null>(null);
 
-  // Auto-select latest file op as new ones arrive
+  // Auto-select latest artifact (file op or plan) as new ones arrive
   const prevOpsLenRef = useRef(0);
+  const prevPlansLenRef = useRef(0);
   useEffect(() => {
-    if (fileOps.length > prevOpsLenRef.current) {
-      setSelectedFileId(fileOps[fileOps.length - 1].toolCallId);
-      if (!previewOpen && fileOps.length > 0) setPreviewOpen(true);
+    const totalPrev = prevOpsLenRef.current + prevPlansLenRef.current;
+    const totalNow = fileOps.length + plans.length;
+    if (totalNow > totalPrev) {
+      // Select the most recently added artifact
+      if (plans.length > prevPlansLenRef.current) {
+        setSelectedFileId(plans[plans.length - 1].toolCallId);
+      } else if (fileOps.length > prevOpsLenRef.current) {
+        setSelectedFileId(fileOps[fileOps.length - 1].toolCallId);
+      }
+      if (!previewOpen) setPreviewOpen(true);
     }
     prevOpsLenRef.current = fileOps.length;
-  }, [fileOps, previewOpen]);
+    prevPlansLenRef.current = plans.length;
+  }, [fileOps, plans, previewOpen]);
 
   const handleDividerDrag = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -151,9 +179,9 @@ export default function AgentChatThread({
     onAddToolResult: handleAddToolResult,
   });
 
-  const hasFiles = fileOps.length > 0;
-  const showRightPanel = hasFiles || debugMode;
-  const [rightTab, setRightTab] = useState<"files" | "debug">("files");
+  const hasArtifacts = fileOps.length > 0 || plans.length > 0;
+  const showRightPanel = hasArtifacts || debugMode;
+  const [rightTab, setRightTab] = useState<"artifacts" | "debug">("artifacts");
 
   // Auto-switch to debug tab when toggled on
   const prevDebugRef = useRef(debugMode);
@@ -165,7 +193,7 @@ export default function AgentChatThread({
   const handleFileSelect = useCallback((toolCallId: string) => {
     setSelectedFileId(toolCallId);
     if (!previewOpen) setPreviewOpen(true);
-    setRightTab("files");
+    setRightTab("artifacts");
   }, [previewOpen]);
 
   // Keyboard shortcut: Cmd/Ctrl+Shift+D to toggle debug mode
@@ -249,11 +277,13 @@ export default function AgentChatThread({
             <StickyTodoPanel todos={latestTodos} />
           )}
 
-          {resultMeta && !isStreaming && (
+          {isDone && !isStreaming && (
             <div className="fr-done-banner">
               <span className="fr-done-check">✓</span>
               <span className="fr-done-text">Done</span>
-              <span className="fr-done-meta">{resultMeta.turns} turn{resultMeta.turns !== 1 ? "s" : ""} · ${resultMeta.cost.toFixed(4)}</span>
+              {resultMeta && (
+                <span className="fr-done-meta">{resultMeta.turns} turn{resultMeta.turns !== 1 ? "s" : ""} · ${resultMeta.cost.toFixed(4)}</span>
+              )}
             </div>
           )}
 
@@ -320,12 +350,12 @@ export default function AgentChatThread({
             <div className="fr-preview-divider" onMouseDown={handleDividerDrag} />
             <div className="fr-preview" style={{ width: previewWidth, flex: `0 0 ${previewWidth}px` }}>
               <div className="fr-preview-topbar">
-                {hasFiles && (
+                {hasArtifacts && (
                   <button
-                    className={`fr-tab ${rightTab === "files" ? "fr-tab-active" : ""}`}
-                    onClick={() => setRightTab("files")}
+                    className={`fr-tab ${rightTab === "artifacts" ? "fr-tab-active" : ""}`}
+                    onClick={() => setRightTab("artifacts")}
                   >
-                    Files <span className="fr-tab-count">{fileOps.length}</span>
+                    Artifacts <span className="fr-tab-count">{fileOps.length + plans.length}</span>
                   </button>
                 )}
                 {debugMode && (
@@ -343,9 +373,10 @@ export default function AgentChatThread({
                 <button className="fr-preview-close" onClick={() => setPreviewOpen(false)} title="Collapse panel">◨</button>
               </div>
 
-              {rightTab === "files" && hasFiles && (
+              {rightTab === "artifacts" && hasArtifacts && (
                 <FilePreviewPanel
                   fileOps={fileOps}
+                  plans={plans}
                   selectedId={selectedFileId}
                   onSelect={setSelectedFileId}
                 />
@@ -369,7 +400,7 @@ export default function AgentChatThread({
           <div className="fr-preview-collapsed" onClick={() => setPreviewOpen(true)}>
             <span className="fr-preview-collapsed-icon">◧</span>
             <span className="fr-preview-collapsed-label">
-              {rightTab === "debug" ? "Debug" : `Files (${fileOps.length})`}
+              {rightTab === "debug" ? "Debug" : `Artifacts (${fileOps.length + plans.length})`}
             </span>
           </div>
         )}
