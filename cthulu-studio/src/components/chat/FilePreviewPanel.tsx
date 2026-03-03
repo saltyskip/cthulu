@@ -1,4 +1,4 @@
-import { memo, useMemo } from "react";
+import { memo, useState, useMemo } from "react";
 import ShikiHighlighter from "react-shiki";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -9,63 +9,26 @@ import { fileIcon } from "../../utils/fileIcons";
 import { langFromPath } from "../../utils/langFromPath";
 import { SyntaxHighlighter } from "../assistant-ui/shiki-highlighter";
 import { useShikiTokens, type Token } from "./useShikiTokens";
+import { groupFileOpsByPath, type FileGroup } from "./chatUtils";
 
 function basename(filePath: string): string {
   return filePath.replace(/\\/g, "/").split("/").pop() || filePath;
 }
 
-// Selected item can be a file op or a plan op
-type SelectedItem =
-  | { kind: "file"; op: FileOp }
-  | { kind: "plan"; op: PlanOp };
+/** Render a single diff (Edit op) with Shiki-highlighted tokens. */
+function DiffSection({ op, shikiTheme }: { op: FileOp; shikiTheme: string | Record<string, unknown> }) {
+  const lang = useMemo(() => langFromPath(op.filePath), [op.filePath]);
+  const diffLines = useMemo(
+    () =>
+      op.oldString !== undefined && op.newString !== undefined
+        ? computeDiffLines(op.oldString, op.newString)
+        : null,
+    [op.oldString, op.newString],
+  );
 
-const FilePreviewPanel = memo(function FilePreviewPanel({
-  fileOps,
-  plans,
-  selectedId,
-  onSelect,
-}: {
-  fileOps: FileOp[];
-  plans: PlanOp[];
-  selectedId: string | null;
-  onSelect: (id: string) => void;
-}) {
-  const { theme: appTheme } = useTheme();
-  const shikiTheme = appTheme.shikiTheme;
-  const theme = { dark: shikiTheme as string, light: shikiTheme as string };
+  const oldTokens = useShikiTokens(op.oldString, lang, shikiTheme);
+  const newTokens = useShikiTokens(op.newString, lang, shikiTheme);
 
-  // Find selected item across both plans and files
-  const selected: SelectedItem | null = useMemo(() => {
-    if (selectedId) {
-      const plan = plans.find((p) => p.toolCallId === selectedId);
-      if (plan) return { kind: "plan", op: plan };
-      const file = fileOps.find((f) => f.toolCallId === selectedId);
-      if (file) return { kind: "file", op: file };
-    }
-    // Default to latest item overall
-    const lastFile = fileOps[fileOps.length - 1];
-    const lastPlan = plans[plans.length - 1];
-    if (!lastFile && !lastPlan) return null;
-    if (!lastFile) return { kind: "plan", op: lastPlan };
-    if (!lastPlan) return { kind: "file", op: lastFile };
-    // Both exist — pick whichever has the later toolCallId (proxy for recency)
-    return { kind: "file", op: lastFile };
-  }, [selectedId, fileOps, plans]);
-
-  const fileOp = selected?.kind === "file" ? selected.op : null;
-  const planOp = selected?.kind === "plan" ? selected.op : null;
-
-  const lang = useMemo(() => fileOp ? langFromPath(fileOp.filePath) : undefined, [fileOp?.filePath]);
-
-  const diffLines = fileOp && fileOp.type === "edit" && fileOp.oldString !== undefined && fileOp.newString !== undefined
-    ? computeDiffLines(fileOp.oldString, fileOp.newString)
-    : null;
-
-  // Tokenize old and new strings for syntax-highlighted diffs
-  const oldTokens = useShikiTokens(fileOp?.oldString, lang, shikiTheme);
-  const newTokens = useShikiTokens(fileOp?.newString, lang, shikiTheme);
-
-  // Build a mapping from diff line index → tokenized line
   const diffTokenMap = useMemo(() => {
     if (!diffLines) return null;
     const map: (Token[] | null)[] = [];
@@ -79,7 +42,6 @@ const FilePreviewPanel = memo(function FilePreviewPanel({
         map.push(newTokens?.[newIdx] ?? null);
         newIdx++;
       } else {
-        // ctx — advance both
         map.push(newTokens?.[newIdx] ?? oldTokens?.[oldIdx] ?? null);
         oldIdx++;
         newIdx++;
@@ -88,29 +50,95 @@ const FilePreviewPanel = memo(function FilePreviewPanel({
     return map;
   }, [diffLines, oldTokens, newTokens]);
 
-  if (!selected) return null;
+  if (!diffLines) return null;
 
-  // Build unique file list grouped by directory
-  const fileMap = new Map<string, FileOp>();
-  for (const f of fileOps) fileMap.set(f.filePath, f);
-  const uniqueFiles = [...fileMap.values()];
+  return (
+    <div className="fr-preview-diff">
+      {diffLines.map((line, i) => {
+        const tokens = diffTokenMap?.[i];
+        return (
+          <div
+            key={i}
+            className={`fr-diff-line ${
+              line.type === "del" ? "fr-diff-del" : line.type === "add" ? "fr-diff-add" : "fr-diff-ctx"
+            }`}
+          >
+            <span className="fr-diff-prefix">
+              {line.type === "del" ? "−" : line.type === "add" ? "+" : " "}
+            </span>
+            {tokens
+              ? tokens.map((t, j) => (
+                  <span key={j} style={t.color ? { color: t.color } : undefined}>
+                    {t.content}
+                  </span>
+                ))
+              : line.text}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
-  const groups = new Map<string, FileOp[]>();
-  for (const f of uniqueFiles) {
-    const parts = f.filePath.replace(/\\/g, "/").split("/");
-    const name = parts.pop() || f.filePath;
-    const dir = parts.length > 0 ? parts.slice(-2).join("/") : "";
-    const existing = groups.get(dir) || [];
-    existing.push({ ...f, filePath: name }); // store basename for display
-    groups.set(dir, existing);
-  }
+const FilePreviewPanel = memo(function FilePreviewPanel({
+  fileOps,
+  plans,
+  selectedPath,
+  onSelectPath,
+}: {
+  fileOps: FileOp[];
+  plans: PlanOp[];
+  selectedPath: string | null;
+  onSelectPath: (path: string) => void;
+}) {
+  const { theme: appTheme } = useTheme();
+  const shikiTheme = appTheme.shikiTheme;
+  const theme = { dark: shikiTheme as string, light: shikiTheme as string };
+
+  // Group file ops by path with stats
+  const fileGroups = useMemo(() => groupFileOpsByPath(fileOps), [fileOps]);
 
   // Deduplicate plans by filePath (keep latest)
-  const planMap = new Map<string, PlanOp>();
-  for (const p of plans) planMap.set(p.filePath, p);
-  const uniquePlans = [...planMap.values()];
+  const uniquePlans = useMemo(() => {
+    const planMap = new Map<string, PlanOp>();
+    for (const p of plans) planMap.set(p.filePath, p);
+    return [...planMap.values()];
+  }, [plans]);
 
-  const activeId = selected.kind === "file" ? selected.op.toolCallId : selected.op.toolCallId;
+  // Resolve selected item
+  const isPlan = selectedPath?.startsWith("plan:") ?? false;
+  const selectedPlanId = isPlan ? selectedPath!.slice(5) : null;
+  const selectedFilePath = isPlan ? null : selectedPath;
+
+  const selectedPlan = selectedPlanId
+    ? uniquePlans.find((p) => p.toolCallId === selectedPlanId) ?? null
+    : null;
+  const selectedGroup = selectedFilePath
+    ? fileGroups.find((g) => g.filePath === selectedFilePath) ?? null
+    : null;
+
+  // Fallback: select latest if nothing selected
+  const effectivePlan = selectedPlan;
+  const effectiveGroup = selectedGroup ?? (!isPlan && !selectedPath ? fileGroups[fileGroups.length - 1] ?? null : null);
+
+  // Group files by directory for display
+  const dirGroups = useMemo(() => {
+    const groups = new Map<string, FileGroup[]>();
+    for (const g of fileGroups) {
+      const parts = g.filePath.replace(/\\/g, "/").split("/");
+      parts.pop(); // remove filename
+      const dir = parts.length > 0 ? parts.slice(-2).join("/") : "";
+      const existing = groups.get(dir) || [];
+      existing.push(g);
+      groups.set(dir, existing);
+    }
+    return groups;
+  }, [fileGroups]);
+
+  const hasContent = fileGroups.length > 0 || uniquePlans.length > 0;
+  if (!hasContent) return null;
+
+  const activePath = effectivePlan ? `plan:${effectivePlan.toolCallId}` : effectiveGroup?.filePath ?? null;
 
   return (
     <div className="fr-preview-split">
@@ -120,13 +148,14 @@ const FilePreviewPanel = memo(function FilePreviewPanel({
           <div className="fr-tree-section">
             <div className="fr-tree-section-label">Plans</div>
             {uniquePlans.map((p) => {
-              const isActive = p.toolCallId === activeId;
+              const planKey = `plan:${p.toolCallId}`;
+              const isActive = activePath === planKey;
               const icon = fileIcon(p.filePath);
               return (
                 <button
                   key={p.toolCallId}
                   className={`fr-tree-file ${isActive ? "fr-tree-file-active" : ""}`}
-                  onClick={() => onSelect(p.toolCallId)}
+                  onClick={() => onSelectPath(planKey)}
                 >
                   <span className="fr-tree-icon" style={{ color: icon.color }}>{icon.icon}</span>
                   {basename(p.filePath)}
@@ -137,24 +166,30 @@ const FilePreviewPanel = memo(function FilePreviewPanel({
         )}
 
         {/* Files section */}
-        {uniqueFiles.length > 0 && (
+        {fileGroups.length > 0 && (
           <div className="fr-tree-section">
             {uniquePlans.length > 0 && <div className="fr-tree-section-label">Files</div>}
-            {[...groups.entries()].map(([dir, files]) => (
+            {[...dirGroups.entries()].map(([dir, groups]) => (
               <div key={dir} className="fr-tree-group">
                 {dir && <div className="fr-tree-dir">{dir}</div>}
-                {files.map((f) => {
-                  const original = uniqueFiles.find((o) => o.filePath.endsWith(f.filePath) && o.toolCallId === f.toolCallId);
-                  const isActive = original?.toolCallId === activeId;
-                  const icon = fileIcon(f.filePath);
+                {groups.map((g) => {
+                  const isActive = activePath === g.filePath;
+                  const icon = fileIcon(g.filePath);
                   return (
                     <button
-                      key={f.toolCallId}
+                      key={g.filePath}
                       className={`fr-tree-file ${isActive ? "fr-tree-file-active" : ""}`}
-                      onClick={() => onSelect(f.toolCallId)}
+                      onClick={() => onSelectPath(g.filePath)}
                     >
                       <span className="fr-tree-icon" style={{ color: icon.color }}>{icon.icon}</span>
-                      {f.filePath}
+                      <span className="fr-tree-name">{basename(g.filePath)}</span>
+                      <span className="fr-tree-stats">
+                        {g.linesAdded > 0 && <span className="fr-tree-added">+{g.linesAdded}</span>}
+                        {g.linesRemoved > 0 && <span className="fr-tree-removed">-{g.linesRemoved}</span>}
+                      </span>
+                      {g.ops.length > 1 && (
+                        <span className="fr-tree-count">×{g.ops.length}</span>
+                      )}
                     </button>
                   );
                 })}
@@ -165,55 +200,66 @@ const FilePreviewPanel = memo(function FilePreviewPanel({
       </div>
 
       <div className="fr-preview-main">
-        <div className="fr-preview-path">{selected.kind === "file" ? selected.op.filePath : basename(selected.op.filePath)}</div>
-        <div className="fr-preview-body">
-          {planOp ? (
-            // Render plan as formatted markdown
-            <div className="fr-preview-markdown fr-md">
-              <Markdown
-                remarkPlugins={[remarkGfm]}
-                components={{
-                  code({ className, children, ...props }) {
-                    const match = /language-(\w+)/.exec(className || "");
-                    const code = String(children).replace(/\n$/, "");
-                    if (match) {
-                      return (
-                        <SyntaxHighlighter language={match[1]} code={code} />
-                      );
-                    }
-                    return <code className={className} {...props}>{children}</code>;
-                  },
-                }}
-              >
-                {planOp.content || ""}
-              </Markdown>
+        {effectivePlan ? (
+          <>
+            <div className="fr-preview-path">{basename(effectivePlan.filePath)}</div>
+            <div className="fr-preview-body">
+              <div className="fr-preview-markdown fr-md">
+                <Markdown
+                  remarkPlugins={[remarkGfm]}
+                  components={{
+                    code({ className, children, ...props }) {
+                      const match = /language-(\w+)/.exec(className || "");
+                      const code = String(children).replace(/\n$/, "");
+                      if (match) {
+                        return <SyntaxHighlighter language={match[1]} code={code} />;
+                      }
+                      return <code className={className} {...props}>{children}</code>;
+                    },
+                  }}
+                >
+                  {effectivePlan.content || ""}
+                </Markdown>
+              </div>
             </div>
-          ) : fileOp && diffLines ? (
-            <div className="fr-preview-diff">
-              {diffLines.map((line, i) => {
-                const tokens = diffTokenMap?.[i];
-                return (
-                  <div
-                    key={i}
-                    className={`fr-diff-line ${
-                      line.type === "del" ? "fr-diff-del" : line.type === "add" ? "fr-diff-add" : "fr-diff-ctx"
-                    }`}
-                  >
-                    <span className="fr-diff-prefix">
-                      {line.type === "del" ? "−" : line.type === "add" ? "+" : " "}
-                    </span>
-                    {tokens
-                      ? tokens.map((t, j) => (
-                          <span key={j} style={t.color ? { color: t.color } : undefined}>
-                            {t.content}
-                          </span>
-                        ))
-                      : line.text}
-                  </div>
-                );
-              })}
+          </>
+        ) : effectiveGroup ? (
+          <>
+            <div className="fr-preview-path">{effectiveGroup.filePath}</div>
+            <div className="fr-preview-body">
+              <FileGroupDiffs group={effectiveGroup} shikiTheme={shikiTheme} theme={theme} />
             </div>
-          ) : fileOp?.content ? (
+          </>
+        ) : (
+          <div className="fr-preview-body">
+            <div className="fr-preview-empty">No preview available</div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+});
+
+/** Render all ops for a file group — stacked diffs with dividers. */
+function FileGroupDiffs({
+  group,
+  shikiTheme,
+  theme,
+}: {
+  group: FileGroup;
+  shikiTheme: string | Record<string, unknown>;
+  theme: { dark: string; light: string };
+}) {
+  const lang = useMemo(() => langFromPath(group.filePath), [group.filePath]);
+
+  return (
+    <>
+      {group.ops.map((op, i) => (
+        <div key={op.toolCallId}>
+          {i > 0 && <div className="fr-diff-divider">···</div>}
+          {op.type === "edit" ? (
+            <DiffSection op={op} shikiTheme={shikiTheme} />
+          ) : op.content ? (
             lang ? (
               <ShikiHighlighter
                 language={lang}
@@ -223,18 +269,18 @@ const FilePreviewPanel = memo(function FilePreviewPanel({
                 defaultColor="light-dark()"
                 className="fr-preview-shiki"
               >
-                {fileOp.content}
+                {op.content}
               </ShikiHighlighter>
             ) : (
-              <pre className="fr-preview-content">{fileOp.content}</pre>
+              <pre className="fr-preview-content">{op.content}</pre>
             )
           ) : (
-            <div className="fr-preview-empty">No preview available</div>
+            <div className="fr-preview-empty">No content available</div>
           )}
         </div>
-      </div>
-    </div>
+      ))}
+    </>
   );
-});
+}
 
 export default FilePreviewPanel;

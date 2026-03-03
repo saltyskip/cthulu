@@ -1,6 +1,7 @@
 import type { ThreadMessageLike } from "@assistant-ui/react";
 import type { FileOp, PlanOp } from "./FilePreviewContext";
 import type { TodoItem } from "../ToolRenderers";
+import { computeDiffLines } from "../../utils/diff";
 
 const PLAN_PATH_RE = /\.claude\/plans\/.*\.md$/;
 
@@ -83,6 +84,38 @@ export function extractLatestTodos(messages: ThreadMessageLike[]): TodoItem[] | 
     }
   }
   return null;
+}
+
+/** Group file ops by path with line count stats. */
+export interface FileGroup {
+  filePath: string;
+  ops: FileOp[];
+  linesAdded: number;
+  linesRemoved: number;
+}
+
+export function groupFileOpsByPath(fileOps: FileOp[]): FileGroup[] {
+  const map = new Map<string, FileGroup>();
+  const order: string[] = [];
+  for (const op of fileOps) {
+    let group = map.get(op.filePath);
+    if (!group) {
+      group = { filePath: op.filePath, ops: [], linesAdded: 0, linesRemoved: 0 };
+      map.set(op.filePath, group);
+      order.push(op.filePath);
+    }
+    group.ops.push(op);
+    if (op.type === "edit" && op.oldString !== undefined && op.newString !== undefined) {
+      const lines = computeDiffLines(op.oldString, op.newString);
+      for (const l of lines) {
+        if (l.type === "add") group.linesAdded++;
+        else if (l.type === "del") group.linesRemoved++;
+      }
+    } else if (op.type === "write" && op.content) {
+      group.linesAdded += op.content.split("\n").length;
+    }
+  }
+  return order.map((p) => map.get(p)!);
 }
 
 /** Convert a File to base64 string (without the data URL prefix). */

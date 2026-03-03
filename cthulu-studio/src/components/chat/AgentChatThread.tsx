@@ -12,7 +12,7 @@ import {
 } from "../ChatPrimitives";
 import { AskUserQuestionToolUI } from "../ToolRenderers";
 import { FilePreviewContext } from "./FilePreviewContext";
-import { extractFileOps, extractPlans, extractLatestTodos } from "./chatUtils";
+import { extractFileOps, extractPlans, extractLatestTodos, groupFileOpsByPath } from "./chatUtils";
 import FilePreviewPanel from "./FilePreviewPanel";
 import StickyTodoPanel from "./StickyTodoPanel";
 import type { ImageAttachment, DebugEvent } from "./useAgentChat";
@@ -120,7 +120,7 @@ export default function AgentChatThread({
   }, [rawTodos, todosResolvedRef.current]);
   const fileOps = useMemo(() => extractFileOps(messages), [messages]);
   const plans = useMemo(() => extractPlans(messages), [messages]);
-  const [selectedFileId, setSelectedFileId] = useState<string | null>(null);
+  const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [previewOpen, setPreviewOpen] = useState(true);
   const [previewWidth, setPreviewWidth] = useState(480);
   const dragRef = useRef<{ startX: number; startW: number } | null>(null);
@@ -134,9 +134,9 @@ export default function AgentChatThread({
     if (totalNow > totalPrev) {
       // Select the most recently added artifact
       if (plans.length > prevPlansLenRef.current) {
-        setSelectedFileId(plans[plans.length - 1].toolCallId);
+        setSelectedPath(`plan:${plans[plans.length - 1].toolCallId}`);
       } else if (fileOps.length > prevOpsLenRef.current) {
-        setSelectedFileId(fileOps[fileOps.length - 1].toolCallId);
+        setSelectedPath(fileOps[fileOps.length - 1].filePath);
       }
       if (!previewOpen) setPreviewOpen(true);
     }
@@ -179,6 +179,8 @@ export default function AgentChatThread({
     onAddToolResult: handleAddToolResult,
   });
 
+  const uniqueFileCount = useMemo(() => groupFileOpsByPath(fileOps).length, [fileOps]);
+  const artifactCount = uniqueFileCount + plans.length;
   const hasArtifacts = fileOps.length > 0 || plans.length > 0;
   const showRightPanel = hasArtifacts || debugMode;
   const [rightTab, setRightTab] = useState<"artifacts" | "debug">("artifacts");
@@ -191,10 +193,17 @@ export default function AgentChatThread({
   }, [debugMode]);
 
   const handleFileSelect = useCallback((toolCallId: string) => {
-    setSelectedFileId(toolCallId);
+    // Resolve toolCallId → filePath for the scoreboard selection model
+    const op = fileOps.find((f) => f.toolCallId === toolCallId);
+    if (op) {
+      setSelectedPath(op.filePath);
+    } else {
+      const plan = plans.find((p) => p.toolCallId === toolCallId);
+      if (plan) setSelectedPath(`plan:${plan.toolCallId}`);
+    }
     if (!previewOpen) setPreviewOpen(true);
     setRightTab("artifacts");
-  }, [previewOpen]);
+  }, [previewOpen, fileOps, plans]);
 
   // Keyboard shortcut: Cmd/Ctrl+Shift+D to toggle debug mode
   useEffect(() => {
@@ -355,7 +364,7 @@ export default function AgentChatThread({
                     className={`fr-tab ${rightTab === "artifacts" ? "fr-tab-active" : ""}`}
                     onClick={() => setRightTab("artifacts")}
                   >
-                    Artifacts <span className="fr-tab-count">{fileOps.length + plans.length}</span>
+                    Artifacts <span className="fr-tab-count">{artifactCount}</span>
                   </button>
                 )}
                 {debugMode && (
@@ -377,8 +386,8 @@ export default function AgentChatThread({
                 <FilePreviewPanel
                   fileOps={fileOps}
                   plans={plans}
-                  selectedId={selectedFileId}
-                  onSelect={setSelectedFileId}
+                  selectedPath={selectedPath}
+                  onSelectPath={setSelectedPath}
                 />
               )}
 
@@ -400,7 +409,7 @@ export default function AgentChatThread({
           <div className="fr-preview-collapsed" onClick={() => setPreviewOpen(true)}>
             <span className="fr-preview-collapsed-icon">◧</span>
             <span className="fr-preview-collapsed-label">
-              {rightTab === "debug" ? "Debug" : `Artifacts (${fileOps.length + plans.length})`}
+              {rightTab === "debug" ? "Debug" : `Artifacts (${artifactCount})`}
             </span>
           </div>
         )}
