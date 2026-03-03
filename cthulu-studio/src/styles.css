@@ -4383,3 +4383,51 @@ button:disabled {
 .mcp-step-desc-mt {
   margin-top: 8px;
 }
+
+/* ── Workflow Assistant Command Feedback ── */
+.workflow-cmd-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-secondary);
+  background: var(--bg-secondary);
+  border-top: 1px solid var(--border);
+  transition: opacity 0.3s ease;
+}
+
+.workflow-cmd-status.success {
+  color: var(--accent);
+}
+
+.workflow-cmd-status.error {
+  color: var(--danger);
+}
+
+.workflow-cmd-status .cmd-icon {
+  font-size: 13px;
+}
+
+/* Node highlight when added by assistant */
+.react-flow__node.workflow-highlight {
+  animation: workflow-node-pulse 1.5s ease-out;
+}
+
+@keyframes workflow-node-pulse {
+  0% { box-shadow: 0 0 0 0 var(--accent); }
+  50% { box-shadow: 0 0 12px 4px var(--accent); }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+
+/* Workflow assistant hint in terminal tab */
+.workflow-cmd-hint {
+  padding: 6px 12px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-secondary);
+  opacity: 0.6;
+  border-bottom: 1px solid var(--border);
+  text-align: center;
+}

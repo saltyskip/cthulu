@@ -24,6 +24,8 @@ interface FlowWorkspaceViewProps {
   onRunEventsClear: () => void;
   runLogOpen: boolean;
   onRunLogClose: () => void;
+  /** Text description of the current flow state for the studio-assistant */
+  workflowContext?: string;
 }
 
 const MIN_EDITOR_WIDTH = 280;
@@ -49,6 +51,7 @@ export default function FlowWorkspaceView({
   onRunEventsClear,
   runLogOpen,
   onRunLogClose,
+  workflowContext,
 }: FlowWorkspaceViewProps) {
   const [editorWidth, setEditorWidth] = useState(DEFAULT_EDITOR_WIDTH);
   const [bottomHeight, setBottomHeight] = useState(DEFAULT_BOTTOM_HEIGHT);
@@ -292,27 +295,29 @@ export default function FlowWorkspaceView({
                   onClose={handleBottomClose}
                 />
               )}
-              {bottomTab === "terminal" && studioSessionId && (
-                <AgentChatView
-                  key={`workspace-chat:${STUDIO_ASSISTANT_ID}`}
-                  agentId={STUDIO_ASSISTANT_ID}
-                  sessionId={studioSessionId}
-                  onAssistantComplete={handleAssistantComplete}
-                />
+              {bottomTab === "terminal" && (
+                <>
+                  {flowId && (
+                    <div className="workflow-cmd-hint">
+                      {workflowContext || "No flow is currently open."}{" "}
+                      Try: &quot;Create a crypto news pipeline with RSS feeds running daily to Slack&quot;
+                    </div>
+                  )}
+                  {studioSessionId && (
+                    <AgentChatView
+                      key={`workspace-chat:${STUDIO_ASSISTANT_ID}`}
+                      agentId={STUDIO_ASSISTANT_ID}
+                      sessionId={studioSessionId}
+                      onAssistantComplete={handleAssistantComplete}
+                    />
+                  )}
+                </>
               )}
             </div>
             {commandStatus && (
-              <div
-                style={{
-                  padding: "4px 12px",
-                  fontSize: 12,
-                  fontFamily: '"SF Mono", "Fira Code", "Cascadia Code", monospace',
-                  color: commandStatus.success ? "var(--accent)" : "var(--text-secondary)",
-                  borderTop: "1px solid var(--border)",
-                  background: "var(--bg-secondary)",
-                }}
-              >
-                {commandStatus.success ? "\u2713" : "\u2717"} {commandStatus.message}
+              <div className={`workflow-cmd-status ${commandStatus.success ? "success" : "error"}`}>
+                <span className="cmd-icon">{commandStatus.success ? "\u2713" : "\u2717"}</span>
+                {commandStatus.message}
               </div>
             )}
           </div>

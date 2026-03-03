@@ -21,6 +21,28 @@ import {
 import { Button } from "@/components/ui/button";
 import { useFlowDispatch } from "./hooks/useFlowDispatch";
 
+/**
+ * Build a short text description of the current flow for the studio-assistant.
+ * This gives the assistant context about what the user is working on.
+ */
+function buildWorkflowContext(flow: Flow | null): string {
+  if (!flow) return "No flow is currently open.";
+  const nodesByType = flow.nodes.reduce((acc, n) => {
+    acc[n.node_type] = (acc[n.node_type] || 0) + 1;
+    return acc;
+  }, {} as Record<string, number>);
+
+  const nodeSummary = Object.entries(nodesByType)
+    .map(([t, c]) => `${c} ${t}`)
+    .join(", ");
+
+  return (
+    `Current flow: "${flow.name}" (${flow.nodes.length} nodes, ${flow.edges.length} edges). ` +
+    (nodeSummary ? `Nodes: ${nodeSummary}. ` : "") +
+    `Flow is ${flow.enabled ? "enabled" : "disabled"}.`
+  );
+}
+
 export default function App() {
   const [flows, setFlows] = useState<FlowSummary[]>([]);
   const [activeFlowId, setActiveFlowId] = useState<string | null>(null);
@@ -66,6 +88,11 @@ export default function App() {
     if (!canonicalFlow || !activeFlowId) return null;
     return { id: canonicalFlow.id, name: canonicalFlow.name, description: canonicalFlow.description, enabled: canonicalFlow.enabled };
   }, [canonicalFlow, activeFlowId]);
+
+  const workflowContext = useMemo(
+    () => buildWorkflowContext(canonicalFlow),
+    [canonicalFlow],
+  );
 
   const canvasRef = useRef<CanvasHandle>(null);
 
@@ -384,6 +411,7 @@ export default function App() {
             onRunEventsClear={() => setRunEvents([])}
             runLogOpen={runLogOpen}
             onRunLogClose={() => setRunLogOpen(false)}
+            workflowContext={workflowContext}
           />
         </div>
         {activeView === "agent-grid" && (
