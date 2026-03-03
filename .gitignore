@@ -9,6 +9,9 @@
 sessions.yaml
 sessions.yaml.tmp
 
+# Logs (local dev output, not tracked)
+logs/
+
 # Nx / Node
 .nx/
 node_modules/

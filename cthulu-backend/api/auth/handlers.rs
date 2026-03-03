@@ -12,12 +12,67 @@ use crate::api::AppState;
 
 use super::repository;
 
-/// Returns whether a token is currently loaded.
+/// Returns whether a token is currently loaded, plus expiry and account info
+/// extracted from the macOS Keychain credentials blob.
 pub(crate) async fn token_status(State(state): State<AppState>) -> impl IntoResponse {
     let token = state.oauth_token.read().await;
     let has_token = token.is_some();
     drop(token);
-    Json(json!({ "has_token": has_token }))
+
+    // Try to read richer info from the Keychain blob
+    let creds = repository::read_full_credentials()
+        .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok());
+
+    let oauth = creds.as_ref().and_then(|v| v.get("claudeAiOauth"));
+
+    let expires_at = oauth
+        .and_then(|o| o.get("expiresAt"))
+        .and_then(|v| v.as_i64())
+        .map(|ms| {
+            // expiresAt is milliseconds since epoch
+            let secs = ms / 1000;
+            let dt = chrono::DateTime::<chrono::Utc>::from_timestamp(secs, 0)
+                .unwrap_or_default();
+            dt.to_rfc3339()
+        });
+
+    let is_expired = oauth
+        .and_then(|o| o.get("expiresAt"))
+        .and_then(|v| v.as_i64())
+        .map(|ms| {
+            let now_ms = chrono::Utc::now().timestamp_millis();
+            ms < now_ms
+        })
+        .unwrap_or(false);
+
+    let subscription_type = oauth
+        .and_then(|o| o.get("subscriptionType"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown")
+        .to_string();
+
+    let rate_limit_tier = oauth
+        .and_then(|o| o.get("rateLimitTier"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown")
+        .to_string();
+
+    let status = if !has_token {
+        "missing"
+    } else if is_expired {
+        "expired"
+    } else {
+        "valid"
+    };
+
+    Json(json!({
+        "has_token": has_token,
+        "status": status,
+        "expires_at": expires_at,
+        "is_expired": is_expired,
+        "subscription_type": subscription_type,
+        "rate_limit_tier": rate_limit_tier
+    }))
 }
 
 /// Re-reads the OAuth token from the macOS Keychain or CLAUDE_CODE_OAUTH_TOKEN env,
