@@ -1,0 +1,110 @@
+ INFO cthulu::flows::file_repository Loaded flow, flow_id=3fcb5224-9cd1-4b77-8a1a-10d4fada856f, name=New Flow
+ INFO cthulu::flows::file_repository Loaded flow, flow_id=8c3d52fe-d68d-4fa6-acad-5c961b6e00df, name=MCP Test Flow
+ INFO cthulu::flows::file_repository Loaded flow, flow_id=dcadb244-1325-4a69-9a3c-2f2db8b595df, name=social-listening-brief
+ INFO cthulu::flows::file_repository Loaded flow, flow_id=927ba2cd-8ac9-448c-b921-6b9c90b29a16, name=test
+ INFO cthulu::flows::file_repository Loaded flow, flow_id=04c1c03e-2c33-4c39-a5e1-d71601bf0997, name=orangerock-newsletter
+ INFO cthulu::flows::file_repository Loaded flow, flow_id=08c513b4-1575-4445-898c-f5ca81f5d208, name=market-brief
+ INFO cthulu::flows::file_repository Loaded flow, flow_id=2affead1-9fa9-45f1-b821-55bbb17c2c67, name=market-brief
+ INFO cthulu::flows::file_repository Loaded flow, flow_id=95576b71-81fd-4160-b988-f0a6efd5d9d8, name=pr-review
+ INFO cthulu::flows::file_repository Loaded flow, flow_id=0848a05a-fc10-4052-a8f0-1c9733cabdb0, name=orangerock-market-brief
+ INFO cthulu::flows::file_repository Loaded flow, flow_id=bd759106-6e7b-47a1-94ea-bb145d73f45d, name=dev-changelog
+ INFO cthulu::flows::file_repository Loaded flow, flow_id=569b1819-1808-4141-9e0e-629662b3093a, name=crypto-news-asia
+ INFO cthulu::flows::file_repository Loaded flow, flow_id=39485f4b-17fd-43f1-9461-c806be47ebb1, name=Daily Rust News Brief
+ INFO cthulu::flows::file_repository Loaded flow, flow_id=9619d4d7-4a29-4fee-9909-29da02c63b5e, name=vm-test
+ INFO cthulu::flows::file_repository Loaded flow, flow_id=4fa64f73-d38c-4a17-8741-fcefcced65e5, name=product-updates
+ INFO cthulu::flows::file_repository Loaded all flows, count=14
+ INFO cthulu::flows::file_repository Loaded runs, flow_id=0848a05a-fc10-4052-a8f0-1c9733cabdb0, count=1
+ INFO cthulu::flows::file_repository Loaded runs, flow_id=04c1c03e-2c33-4c39-a5e1-d71601bf0997, count=1
+ INFO cthulu::flows::file_repository Loaded runs, flow_id=9619d4d7-4a29-4fee-9909-29da02c63b5e, count=6
+ INFO cthulu::flows::file_repository Loaded runs, flow_id=bd759106-6e7b-47a1-94ea-bb145d73f45d, count=1
+ INFO cthulu::flows::file_repository Loaded runs, flow_id=4fa64f73-d38c-4a17-8741-fcefcced65e5, count=19
+ INFO cthulu::flows::file_repository Loaded runs, flow_id=569b1819-1808-4141-9e0e-629662b3093a, count=1
+ INFO cthulu::flows::file_repository Loaded runs, flow_id=95576b71-81fd-4160-b988-f0a6efd5d9d8, count=1
+ INFO cthulu::prompts::file_repository Loaded saved prompts, count=2
+ INFO cthulu::agents::file_repository loaded agents, count=9
+ INFO cthulu::api loaded persisted sessions, sessions=10, vms=1
+ INFO cthulu OAuth token loaded from macOS Keychain
+ INFO cthulu initializing VmManager sandbox provider, api_url=, tier=nano
+ INFO cthulu static directory, path=/Users/pan/Desktop/projects/bcom_projects/cthulu/static
+ INFO cthulu::watcher file change watcher started, flows=/Users/pan/.cthulu/flows, agents=/Users/pan/.cthulu/agents, prompts=/Users/pan/.cthulu/prompts
+Listening on http://0.0.0.0:8081
+ INFO cthulu shutdown signal received
+ INFO cthulu shutting down: killing child processes
+ INFO cthulu::flows::file_repository Loaded flow, flow_id=3fcb5224-9cd1-4b77-8a1a-10d4fada856f, name=New Flow
+ INFO cthulu::flows::file_repository Loaded flow, flow_id=8c3d52fe-d68d-4fa6-acad-5c961b6e00df, name=MCP Test Flow
+ INFO cthulu::flows::file_repository Loaded flow, flow_id=dcadb244-1325-4a69-9a3c-2f2db8b595df, name=social-listening-brief
+ INFO cthulu::flows::file_repository Loaded flow, flow_id=927ba2cd-8ac9-448c-b921-6b9c90b29a16, name=test
+ INFO cthulu::flows::file_repository Loaded flow, flow_id=04c1c03e-2c33-4c39-a5e1-d71601bf0997, name=orangerock-newsletter
+ INFO cthulu::flows::file_repository Loaded flow, flow_id=08c513b4-1575-4445-898c-f5ca81f5d208, name=market-brief
+ INFO cthulu::flows::file_repository Loaded flow, flow_id=2affead1-9fa9-45f1-b821-55bbb17c2c67, name=market-brief
+ INFO cthulu::flows::file_repository Loaded flow, flow_id=95576b71-81fd-4160-b988-f0a6efd5d9d8, name=pr-review
+ INFO cthulu::flows::file_repository Loaded flow, flow_id=0848a05a-fc10-4052-a8f0-1c9733cabdb0, name=orangerock-market-brief
+ INFO cthulu::flows::file_repository Loaded flow, flow_id=bd759106-6e7b-47a1-94ea-bb145d73f45d, name=dev-changelog
+ INFO cthulu::flows::file_repository Loaded flow, flow_id=569b1819-1808-4141-9e0e-629662b3093a, name=crypto-news-asia
+ INFO cthulu::flows::file_repository Loaded flow, flow_id=39485f4b-17fd-43f1-9461-c806be47ebb1, name=Daily Rust News Brief
+ INFO cthulu::flows::file_repository Loaded flow, flow_id=9619d4d7-4a29-4fee-9909-29da02c63b5e, name=vm-test
+ INFO cthulu::flows::file_repository Loaded flow, flow_id=4fa64f73-d38c-4a17-8741-fcefcced65e5, name=product-updates
+ INFO cthulu::flows::file_repository Loaded all flows, count=14
+ INFO cthulu::flows::file_repository Loaded runs, flow_id=0848a05a-fc10-4052-a8f0-1c9733cabdb0, count=1
+ INFO cthulu::flows::file_repository Loaded runs, flow_id=04c1c03e-2c33-4c39-a5e1-d71601bf0997, count=1
+ INFO cthulu::flows::file_repository Loaded runs, flow_id=9619d4d7-4a29-4fee-9909-29da02c63b5e, count=6
+ INFO cthulu::flows::file_repository Loaded runs, flow_id=bd759106-6e7b-47a1-94ea-bb145d73f45d, count=1
+ INFO cthulu::flows::file_repository Loaded runs, flow_id=4fa64f73-d38c-4a17-8741-fcefcced65e5, count=19
+ INFO cthulu::flows::file_repository Loaded runs, flow_id=569b1819-1808-4141-9e0e-629662b3093a, count=1
+ INFO cthulu::flows::file_repository Loaded runs, flow_id=95576b71-81fd-4160-b988-f0a6efd5d9d8, count=1
+ INFO cthulu::prompts::file_repository Loaded saved prompts, count=2
+ INFO cthulu::agents::file_repository loaded agents, count=9
+ INFO cthulu::api loaded persisted sessions, sessions=10, vms=1
+ INFO cthulu OAuth token loaded from macOS Keychain
+ INFO cthulu initializing VmManager sandbox provider, api_url=, tier=nano
+ INFO cthulu static directory, path=/Users/pan/Desktop/projects/bcom_projects/cthulu/static
+ INFO cthulu::watcher file change watcher started, flows=/Users/pan/.cthulu/flows, agents=/Users/pan/.cthulu/agents, prompts=/Users/pan/.cthulu/prompts
+Listening on http://0.0.0.0:8081
+ INFO cthulu::api::agents::chat spawning persistent claude for agent chat, key=agent::studio-assistant::session::d97beeec-79b6-4118-89cd-adedc5ec7fc2, session_id=d97beeec-79b6-4118-89cd-adedc5ec7fc2, is_new=false
+ INFO cthulu::api::agents::chat [RECONNECT-DEBUG] Created broadcast channel and inserted into session_streams, proc_key=agent::studio-assistant::session::d97beeec-79b6-4118-89cd-adedc5ec7fc2, total_streams=1
+ INFO cthulu::api::agents::chat [RECONNECT-DEBUG] Created event buffer, proc_key=agent::studio-assistant::session::d97beeec-79b6-4118-89cd-adedc5ec7fc2
+ INFO cthulu::api::agents::chat [RECONNECT-DEBUG] Background reader task STARTED, proc_key=agent::studio-assistant::session::d97beeec-79b6-4118-89cd-adedc5ec7fc2
+ INFO cthulu::api::agents::chat [RECONNECT-DEBUG] Background reader task DONE, sending done event, proc_key=agent::studio-assistant::session::d97beeec-79b6-4118-89cd-adedc5ec7fc2, event_count=2
+ INFO cthulu::api::agents::chat [RECONNECT-DEBUG] Waiting 5s before cleanup..., proc_key=agent::studio-assistant::session::d97beeec-79b6-4118-89cd-adedc5ec7fc2
+ INFO cthulu::api::agents::chat [RECONNECT-DEBUG] Cleaned up broadcast channel, proc_key=agent::studio-assistant::session::d97beeec-79b6-4118-89cd-adedc5ec7fc2, remaining_streams=0
+ INFO cthulu::api::agents::chat [RECONNECT-DEBUG] Cleaned up event buffer. Background task EXIT., proc_key=agent::studio-assistant::session::d97beeec-79b6-4118-89cd-adedc5ec7fc2
+ INFO cthulu::api killed LiveClaudeProcess on drop
+kill: 308: No such process
+ INFO cthulu::flows::file_repository Loaded flow, flow_id=3fcb5224-9cd1-4b77-8a1a-10d4fada856f, name=New Flow
+ INFO cthulu::flows::file_repository Loaded flow, flow_id=8c3d52fe-d68d-4fa6-acad-5c961b6e00df, name=MCP Test Flow
+ INFO cthulu::flows::file_repository Loaded flow, flow_id=dcadb244-1325-4a69-9a3c-2f2db8b595df, name=social-listening-brief
+ INFO cthulu::flows::file_repository Loaded flow, flow_id=927ba2cd-8ac9-448c-b921-6b9c90b29a16, name=test
+ INFO cthulu::flows::file_repository Loaded flow, flow_id=04c1c03e-2c33-4c39-a5e1-d71601bf0997, name=orangerock-newsletter
+ INFO cthulu::flows::file_repository Loaded flow, flow_id=08c513b4-1575-4445-898c-f5ca81f5d208, name=market-brief
+ INFO cthulu::flows::file_repository Loaded flow, flow_id=2affead1-9fa9-45f1-b821-55bbb17c2c67, name=market-brief
+ INFO cthulu::flows::file_repository Loaded flow, flow_id=95576b71-81fd-4160-b988-f0a6efd5d9d8, name=pr-review
+ INFO cthulu::flows::file_repository Loaded flow, flow_id=0848a05a-fc10-4052-a8f0-1c9733cabdb0, name=orangerock-market-brief
+ INFO cthulu::flows::file_repository Loaded flow, flow_id=bd759106-6e7b-47a1-94ea-bb145d73f45d, name=dev-changelog
+ INFO cthulu::flows::file_repository Loaded flow, flow_id=569b1819-1808-4141-9e0e-629662b3093a, name=crypto-news-asia
+ INFO cthulu::flows::file_repository Loaded flow, flow_id=39485f4b-17fd-43f1-9461-c806be47ebb1, name=Daily Rust News Brief
+ INFO cthulu::flows::file_repository Loaded flow, flow_id=9619d4d7-4a29-4fee-9909-29da02c63b5e, name=vm-test
+ INFO cthulu::flows::file_repository Loaded flow, flow_id=4fa64f73-d38c-4a17-8741-fcefcced65e5, name=product-updates
+ INFO cthulu::flows::file_repository Loaded all flows, count=14
+ INFO cthulu::flows::file_repository Loaded runs, flow_id=0848a05a-fc10-4052-a8f0-1c9733cabdb0, count=1
+ INFO cthulu::flows::file_repository Loaded runs, flow_id=04c1c03e-2c33-4c39-a5e1-d71601bf0997, count=1
+ INFO cthulu::flows::file_repository Loaded runs, flow_id=9619d4d7-4a29-4fee-9909-29da02c63b5e, count=6
+ INFO cthulu::flows::file_repository Loaded runs, flow_id=bd759106-6e7b-47a1-94ea-bb145d73f45d, count=1
+ INFO cthulu::flows::file_repository Loaded runs, flow_id=4fa64f73-d38c-4a17-8741-fcefcced65e5, count=19
+ INFO cthulu::flows::file_repository Loaded runs, flow_id=569b1819-1808-4141-9e0e-629662b3093a, count=1
+ INFO cthulu::flows::file_repository Loaded runs, flow_id=95576b71-81fd-4160-b988-f0a6efd5d9d8, count=1
+ INFO cthulu::prompts::file_repository Loaded saved prompts, count=2
+ INFO cthulu::agents::file_repository loaded agents, count=9
+ INFO cthulu::api loaded persisted sessions, sessions=10, vms=1
+ INFO cthulu OAuth token loaded from macOS Keychain
+ INFO cthulu initializing VmManager sandbox provider, api_url=, tier=nano
+ INFO cthulu static directory, path=/Users/pan/Desktop/projects/bcom_projects/cthulu/static
+ INFO cthulu::watcher file change watcher started, flows=/Users/pan/.cthulu/flows, agents=/Users/pan/.cthulu/agents, prompts=/Users/pan/.cthulu/prompts
+Listening on http://0.0.0.0:8081
+ INFO cthulu::api::agents::chat spawning persistent claude for agent chat, key=agent::studio-assistant::session::d97beeec-79b6-4118-89cd-adedc5ec7fc2, session_id=d97beeec-79b6-4118-89cd-adedc5ec7fc2, is_new=false
+ INFO cthulu::api::agents::chat [RECONNECT-DEBUG] Created broadcast channel and inserted into session_streams, proc_key=agent::studio-assistant::session::d97beeec-79b6-4118-89cd-adedc5ec7fc2, total_streams=1
+ INFO cthulu::api::agents::chat [RECONNECT-DEBUG] Created event buffer, proc_key=agent::studio-assistant::session::d97beeec-79b6-4118-89cd-adedc5ec7fc2
+ INFO cthulu::api::agents::chat [RECONNECT-DEBUG] Background reader task STARTED, proc_key=agent::studio-assistant::session::d97beeec-79b6-4118-89cd-adedc5ec7fc2
+ INFO cthulu::api::agents::chat [RECONNECT-DEBUG] Background reader task DONE, sending done event, proc_key=agent::studio-assistant::session::d97beeec-79b6-4118-89cd-adedc5ec7fc2, event_count=1
+ INFO cthulu::api::agents::chat [RECONNECT-DEBUG] Waiting 5s before cleanup..., proc_key=agent::studio-assistant::session::d97beeec-79b6-4118-89cd-adedc5ec7fc2
+ INFO cthulu::api::agents::chat [RECONNECT-DEBUG] Cleaned up broadcast channel, proc_key=agent::studio-assistant::session::d97beeec-79b6-4118-89cd-adedc5ec7fc2, remaining_streams=0
+ INFO cthulu::api::agents::chat [RECONNECT-DEBUG] Cleaned up event buffer. Background task EXIT., proc_key=agent::studio-assistant::session::d97beeec-79b6-4118-89cd-adedc5ec7fc2

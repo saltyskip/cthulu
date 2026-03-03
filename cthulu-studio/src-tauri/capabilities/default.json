@@ -5,6 +5,14 @@
   "permissions": [
     "dialog:default",
     "dialog:allow-open",
-    "opener:default"
+    "opener:default",
+    "http:default",
+    {
+      "identifier": "http:allow-fetch",
+      "allow": [
+        { "url": "http://localhost:8081/**" },
+        { "url": "ws://localhost:8081/**" }
+      ]
+    }
   ]
 }
