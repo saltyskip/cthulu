@@ -112,6 +112,32 @@ pub(crate) async fn import_template(
     }
 }
 
+/// DELETE /api/templates/{category}/{slug}
+/// Deletes the template YAML file from disk.
+pub(crate) async fn delete_template(
+    State(state): State<AppState>,
+    Path((category, slug)): Path<(String, String)>,
+) -> impl IntoResponse {
+    let repo = TemplateRepository::new(state.flow_repo.clone(), state.static_dir.clone());
+
+    match repo.delete_template(&category, &slug) {
+        Ok(_) => {
+            tracing::info!(template = %format!("{category}/{slug}"), "deleted template");
+            (StatusCode::OK, Json(json!({ "ok": true }))).into_response()
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "error": format!("template not found: {category}/{slug}") })),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": e.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
 // ── Body types ─────────────────────────────────────────────────────────────
 
 #[derive(Deserialize)]

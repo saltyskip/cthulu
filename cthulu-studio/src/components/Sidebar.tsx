@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback } from "react";
 import { STUDIO_ASSISTANT_ID, type FlowSummary, type Flow, type NodeTypeSchema, type AgentSummary, type SavedPrompt, type ActiveView } from "../types/flow";
 import { listAgents, createAgent, deleteAgent, listPrompts, savePrompt, deletePrompt as deletePromptApi, listAgentSessions } from "../api/client";
-import { Switch } from "@/components/ui/switch";
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
+import { Trash2 } from "lucide-react";
 import TemplateGallery from "./TemplateGallery";
 
 interface SidebarProps {
@@ -13,6 +13,7 @@ interface SidebarProps {
   onCreateFlow: () => void;
   onImportTemplate: (flow: Flow) => void;
   onToggleEnabled: (flowId: string) => void;
+  onDeleteFlow: (flowId: string) => void;
   // Agent list
   selectedAgentId: string | null;
   onSelectAgent: (id: string) => void;
@@ -45,6 +46,7 @@ export default function Sidebar({
   onCreateFlow,
   onImportTemplate,
   onToggleEnabled,
+  onDeleteFlow,
   selectedAgentId,
   onSelectAgent,
   onShowAgentGrid,
@@ -225,12 +227,25 @@ export default function Sidebar({
               >
                 <div className="sidebar-item-row">
                   <div className="sidebar-item-name">{flow.name}</div>
-                  <Switch
-                    checked={flow.enabled}
-                    onCheckedChange={() => onToggleEnabled(flow.id)}
-                    onClick={(e) => e.stopPropagation()}
-                    className="data-[state=checked]:bg-[var(--success)]"
-                  />
+                  <div className="sidebar-item-actions">
+                    <button
+                      className={`toggle-switch ${flow.enabled ? "toggle-on" : "toggle-off"}`}
+                      onClick={(e) => { e.stopPropagation(); onToggleEnabled(flow.id); }}
+                      title={flow.enabled ? "Disable workflow" : "Enable workflow"}
+                    >
+                      <span className="toggle-thumb" />
+                    </button>
+                    <button
+                      className="ghost sidebar-delete-btn"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onDeleteFlow(flow.id);
+                      }}
+                      title="Delete workflow"
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  </div>
                 </div>
                 <div className="sidebar-item-meta">{flow.node_count} nodes</div>
               </div>

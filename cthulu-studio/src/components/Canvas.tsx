@@ -33,6 +33,7 @@ const rfNodeTypes: NodeTypes = {
 };
 
 const EDGE_STYLE = { strokeWidth: 2 };
+const EDGE_PATH_OPTIONS = { borderRadius: 8 };
 
 function toRFNodes(flow: Flow): RFNode[] {
   return flow.nodes.map((n) => ({
@@ -55,6 +56,7 @@ function toRFEdges(flow: Flow): RFEdge[] {
     type: "smoothstep",
     animated: true,
     style: EDGE_STYLE,
+    pathOptions: EDGE_PATH_OPTIONS,
   }));
 }
 
@@ -169,6 +171,7 @@ const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas(
       type: "smoothstep",
       animated: true,
       style: EDGE_STYLE,
+      pathOptions: EDGE_PATH_OPTIONS,
     })));
   }, [setNodes, setEdges]);
 

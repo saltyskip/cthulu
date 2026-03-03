@@ -391,6 +391,30 @@ button:disabled {
   color: var(--danger);
 }
 
+.sidebar-item-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.sidebar-item-actions .toggle-switch {
+  width: 32px;
+  height: 18px;
+  border-radius: 9px;
+}
+
+.sidebar-item-actions .toggle-switch .toggle-thumb {
+  width: 14px;
+  height: 14px;
+  top: 1px;
+  left: 1px;
+}
+
+.sidebar-item-actions .toggle-switch.toggle-on .toggle-thumb {
+  transform: translateX(14px);
+}
+
 .sidebar-palette-section {
   border-bottom: none;
 }
@@ -502,6 +526,46 @@ button:disabled {
   min-height: 0;
 }
 
+.flow-editor-wrapper {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.flow-editor-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 8px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.flow-editor-format-btn {
+  font-size: 11px;
+  font-weight: 500;
+  padding: 3px 10px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.flow-editor-format-btn:hover {
+  color: var(--text);
+  background: var(--bg-tertiary);
+}
+
+.flow-editor-format-btn.active {
+  color: var(--text);
+  background: var(--bg-tertiary);
+  border-color: var(--border);
+}
+
 .flow-workspace-divider {
   flex-shrink: 0;
   transition: background 0.15s;
@@ -527,35 +591,45 @@ button:disabled {
   background: var(--accent);
 }
 
+/* ── VS Code-style bottom panel ── */
+
 .flow-workspace-bottom {
   flex-shrink: 0;
   border-top: 1px solid var(--border);
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  background: var(--bg);
 }
 
 .flow-workspace-bottom-tabs {
   display: flex;
-  align-items: center;
-  gap: 0;
+  align-items: stretch;
+  gap: 4px;
   padding: 0 8px;
   background: var(--bg-secondary);
   border-bottom: 1px solid var(--border);
-  height: 32px;
+  height: 35px;
   flex-shrink: 0;
 }
 
 .flow-workspace-tab {
+  display: flex;
+  align-items: center;
+  gap: 5px;
   font-size: 11px;
   font-weight: 500;
-  padding: 6px 12px;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  padding: 0 12px;
   color: var(--text-secondary);
   background: transparent;
   border: none;
-  border-bottom: 2px solid transparent;
+  border-top: 2px solid transparent;
   cursor: pointer;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  transition: color 0.1s;
+  position: relative;
 }
 
 .flow-workspace-tab:hover {
@@ -564,21 +638,36 @@ button:disabled {
 
 .flow-workspace-tab.active {
   color: var(--text);
-  border-bottom-color: var(--accent);
+  border-top-color: var(--accent);
 }
 
-.flow-workspace-tab-close {
-  font-size: 16px;
+.flow-workspace-tab-badge {
+  font-size: 9px;
+  font-weight: 700;
+  background: var(--accent);
+  color: var(--primary-foreground);
+  border-radius: 8px;
+  padding: 1px 5px;
+  min-width: 16px;
+  text-align: center;
+  line-height: 14px;
+}
+
+.flow-workspace-tab-action {
+  display: flex;
+  align-items: center;
   padding: 0 6px;
   color: var(--text-secondary);
   background: transparent;
   border: none;
   cursor: pointer;
-  line-height: 1;
+  border-radius: 4px;
+  transition: color 0.1s, background 0.1s;
 }
 
-.flow-workspace-tab-close:hover {
+.flow-workspace-tab-action:hover {
   color: var(--text);
+  background: var(--bg-tertiary);
 }
 
 .flow-workspace-bottom-content {
@@ -589,15 +678,49 @@ button:disabled {
   overflow: hidden;
 }
 
+/* Status-bar style toggle (when panel is closed) */
+
 .flow-workspace-bottom-toggle {
   display: flex;
   align-items: center;
   gap: 0;
-  padding: 0 8px;
+  padding: 0 4px;
   background: var(--bg-secondary);
   border-top: 1px solid var(--border);
-  height: 28px;
+  height: 24px;
   flex-shrink: 0;
+}
+
+.flow-workspace-toggle-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  padding: 0 8px;
+  height: 100%;
+  color: var(--text-secondary);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  transition: color 0.1s, background 0.1s;
+}
+
+.flow-workspace-toggle-btn:hover {
+  color: var(--text);
+  background: var(--bg-tertiary);
+}
+
+.flow-workspace-toggle-badge {
+  font-size: 9px;
+  font-weight: 700;
+  background: var(--accent);
+  color: var(--primary-foreground);
+  border-radius: 8px;
+  padding: 0 4px;
+  min-width: 14px;
+  text-align: center;
+  line-height: 14px;
 }
 
 /* ── Agent Grid ── */
@@ -1184,9 +1307,225 @@ button:disabled {
 }
 
 /* Console (used by RunLog) */
+/* ── VS Code-style Output / Run Log panel ── */
+
+.run-log-panel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
+  font-size: 12px;
+  position: relative;
+}
+
+.run-log-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 8px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  gap: 8px;
+}
+
+.run-log-filters {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.run-log-filter-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  padding: 2px 8px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  transition: all 0.1s;
+}
+
+.run-log-filter-btn:hover {
+  color: var(--text);
+  background: var(--bg-tertiary);
+}
+
+.run-log-filter-btn.active {
+  color: var(--text);
+  background: var(--bg-tertiary);
+  border-color: var(--border);
+}
+
+.run-log-filter-btn--error.active {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 40%, transparent);
+  background: color-mix(in srgb, var(--danger) 8%, var(--bg-tertiary));
+}
+
+.run-log-filter-btn--info.active {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg-tertiary));
+}
+
+.run-log-filter-count {
+  font-size: 9px;
+  font-weight: 700;
+  opacity: 0.6;
+  font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
+}
+
+.run-log-actions {
+  display: flex;
+  gap: 2px;
+}
+
+.run-log-action-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: color 0.1s, background 0.1s;
+}
+
+.run-log-action-btn:hover {
+  color: var(--text);
+  background: var(--bg-tertiary);
+}
+
+.run-log-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 0;
+}
+
+.run-log-empty {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 20px 16px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.run-log-empty-icon {
+  color: var(--accent);
+  font-weight: 700;
+  font-size: 14px;
+}
+
+/* Run group header */
+.run-log-group-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 12px;
+  font-size: 11px;
+  cursor: pointer;
+  background: color-mix(in srgb, var(--bg-secondary) 60%, var(--bg));
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 50%, transparent);
+  user-select: none;
+  transition: background 0.1s;
+}
+
+.run-log-group-header:hover {
+  background: var(--bg-tertiary);
+}
+
+.run-log-chevron {
+  font-size: 8px;
+  color: var(--text-secondary);
+  width: 10px;
+  flex-shrink: 0;
+  opacity: 0.7;
+}
+
+.run-log-ts {
+  color: var(--text-secondary);
+  opacity: 0.5;
+  flex-shrink: 0;
+  font-size: 10px;
+  font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
+}
+
+.run-log-status {
+  flex-shrink: 0;
+  font-weight: 700;
+  font-size: 10px;
+  letter-spacing: 0.5px;
+  font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
+}
+
+.run-log-run-id {
+  color: var(--text-secondary);
+  opacity: 0.4;
+  font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
+  font-size: 10px;
+}
+
+.run-log-summary {
+  color: var(--text-secondary);
+  font-size: 11px;
+  margin-left: 4px;
+  opacity: 0.7;
+}
+
+/* Individual log lines */
+.run-log-line {
+  display: flex;
+  gap: 8px;
+  padding: 0 12px;
+  font-size: 12px;
+  line-height: 20px;
+  align-items: baseline;
+  border-left: 2px solid transparent;
+  transition: background 0.05s;
+}
+
+.run-log-line:hover {
+  background: color-mix(in srgb, var(--text) 3%, transparent);
+}
+
+.run-log-line--error {
+  background: color-mix(in srgb, var(--danger) 5%, transparent);
+  border-left-color: var(--danger);
+}
+
+.run-log-line--success {
+  border-left-color: var(--success);
+}
+
+.run-log-label {
+  flex-shrink: 0;
+  font-weight: 600;
+  font-size: 10px;
+  width: 40px;
+  letter-spacing: 0.3px;
+  font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
+}
+
+.run-log-msg {
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* Legacy console classes kept for compatibility */
 .console-panel {
   background: var(--bg);
-  border-top: 1px solid var(--border);
   display: flex;
   flex-direction: column;
   font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
@@ -1237,14 +1576,6 @@ button:disabled {
   background: color-mix(in srgb, var(--text) 2%, transparent);
 }
 
-.console-entry.console-error {
-  background: color-mix(in srgb, var(--danger) 6%, transparent);
-}
-
-.console-entry.console-warn {
-  background: color-mix(in srgb, var(--warning) 6%, transparent);
-}
-
 .console-time {
   color: var(--text-secondary);
   opacity: 0.6;
@@ -1252,86 +1583,10 @@ button:disabled {
   font-size: 10px;
 }
 
-.console-level {
-  flex-shrink: 0;
-  font-weight: 600;
-  font-size: 10px;
-  width: 32px;
-}
-
 .console-message {
   color: var(--text);
   white-space: pre-wrap;
   word-break: break-all;
-}
-
-.console-detail {
-  color: var(--text-secondary);
-  opacity: 0.7;
-  white-space: pre-wrap;
-  word-break: break-all;
-}
-
-/* Adjust app layout when console is open */
-/* Run Log */
-.run-log-panel {
-  /* height controlled by bottom panel */
-}
-
-.run-log-group-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 3px 12px;
-  font-size: 11px;
-  cursor: pointer;
-  background: var(--bg-secondary);
-  border-bottom: 1px solid var(--border);
-  user-select: none;
-}
-
-.run-log-group-header:hover {
-  background: var(--bg-tertiary);
-}
-
-.run-log-chevron {
-  font-size: 9px;
-  color: var(--text-secondary);
-  width: 10px;
-  flex-shrink: 0;
-}
-
-.run-log-badge {
-  flex-shrink: 0;
-  font-weight: 600;
-  font-size: 10px;
-  width: 40px;
-  font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
-}
-
-.run-log-run-id {
-  color: var(--text-secondary);
-  opacity: 0.6;
-  font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
-  font-size: 10px;
-}
-
-.run-log-summary {
-  color: var(--text-secondary);
-  font-size: 11px;
-  margin-left: 4px;
-}
-
-.run-log-entry.run-log-failed {
-  background: color-mix(in srgb, var(--danger) 6%, transparent);
-}
-
-.run-log-entry.run-log-completed {
-  background: color-mix(in srgb, var(--success) 4%, transparent);
-}
-
-.console-toggle-active {
-  color: var(--accent) !important;
 }
 
 /* Drag ghost */
@@ -1593,6 +1848,50 @@ button:disabled {
   background: var(--bg-tertiary);
 }
 
+/* Search bar */
+.tg-search-bar {
+  position: relative;
+  padding: 0 16px 8px;
+}
+
+.tg-search-input {
+  width: 100%;
+  padding: 8px 32px 8px 12px;
+  font-size: 13px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-secondary);
+  color: var(--text);
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.tg-search-input::placeholder {
+  color: var(--text-secondary);
+}
+
+.tg-search-input:focus {
+  border-color: var(--accent);
+}
+
+.tg-search-clear {
+  position: absolute;
+  right: 24px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 2px 4px;
+  line-height: 1;
+}
+
+.tg-search-clear:hover {
+  color: var(--text);
+}
+
 /* Category tabs */
 .tg-tabs {
   display: flex;
@@ -1834,24 +2133,64 @@ button:disabled {
 }
 
 /* YAML inline viewer */
-.tg-yaml-block {
-  background: var(--bg-tertiary);
+/* YAML preview panel — sticky panel below grid */
+.tg-yaml-panel {
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 8px;
+  background: var(--bg-tertiary);
+  margin: 12px 0 0;
   overflow: hidden;
-  max-height: 200px;
+}
+
+.tg-yaml-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border);
+}
+
+.tg-yaml-panel-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.tg-yaml-panel-close {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 14px;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+}
+
+.tg-yaml-panel-close:hover {
+  color: var(--text);
+}
+
+.tg-yaml-block {
+  overflow: hidden;
+  max-height: 300px;
   overflow-y: auto;
 }
 
 .tg-yaml-pre {
   font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
-  font-size: 9.5px;
+  font-size: 10px;
   line-height: 1.5;
   color: var(--text-secondary);
   padding: 10px 12px;
   margin: 0;
   white-space: pre-wrap;
   word-break: break-all;
+}
+
+.tg-card.yaml-active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
 }
 
 /* Card footer: YAML toggle, GH link, Use button */
@@ -1895,6 +2234,24 @@ button:disabled {
 .tg-btn-gh:hover {
   color: var(--text);
   background: var(--bg-secondary);
+}
+
+.tg-btn-delete {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  font-size: 11px;
+  padding: 3px 7px;
+  border-radius: 5px;
+  cursor: pointer;
+  line-height: 1;
+  transition: color 0.15s, background 0.15s, border-color 0.15s;
+}
+
+.tg-btn-delete:hover {
+  color: var(--danger);
+  border-color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 10%, var(--bg-tertiary));
 }
 
 .tg-btn-use {
@@ -4382,4 +4739,402 @@ button:disabled {
 
 .mcp-step-desc-mt {
   margin-top: 8px;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   HARRY POTTER THEME — "The Marauder's Map" aesthetic
+   Gold/parchment/ink palette, serif typography, glow effects, starfield bg.
+   All rules scoped under [data-theme="harry-potter"] — zero impact on others.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Ambient atmosphere ── */
+
+[data-theme="harry-potter"] body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background:
+    radial-gradient(ellipse at 20% 50%, rgba(42,172,232,0.03) 0%, transparent 60%),
+    radial-gradient(ellipse at 80% 20%, rgba(201,168,76,0.05) 0%, transparent 50%),
+    radial-gradient(ellipse at 60% 80%, rgba(168,85,247,0.03) 0%, transparent 50%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* ── Keyframes (scoped by usage, not selector) ── */
+
+@keyframes hp-pulse-glow {
+  0%, 100% { box-shadow: 0 0 16px rgba(201,168,76,0.3); }
+  50% { box-shadow: 0 0 32px rgba(201,168,76,0.6), 0 0 64px rgba(201,168,76,0.15); }
+}
+
+@keyframes hp-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.2; }
+}
+
+@keyframes hp-card-pulse {
+  0%, 100% { box-shadow: 0 0 6px rgba(201,168,76,0.15); }
+  50% { box-shadow: 0 0 18px rgba(201,168,76,0.35); }
+}
+
+@keyframes hp-text-shimmer {
+  0% { background-position: -200% center; }
+  100% { background-position: 200% center; }
+}
+
+/* ── Typography — serif fonts for the wizarding world ── */
+
+[data-theme="harry-potter"] body {
+  font-family: var(--font-body, 'IM Fell English', serif);
+}
+
+/* Headings: Cinzel for that stone-carved look */
+[data-theme="harry-potter"] .top-bar .app-title,
+[data-theme="harry-potter"] .top-bar .flow-name-display {
+  font-family: var(--font-heading, 'Cinzel Decorative', serif);
+  letter-spacing: 2px;
+  text-shadow: 0 0 16px rgba(201,168,76,0.4);
+}
+
+[data-theme="harry-potter"] .sidebar-section-label,
+[data-theme="harry-potter"] .panel-header-label,
+[data-theme="harry-potter"] .node-config-header,
+[data-theme="harry-potter"] .run-log-group-header .run-log-status,
+[data-theme="harry-potter"] .flow-workspace-tab span {
+  font-family: 'Cinzel', serif;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+}
+
+[data-theme="harry-potter"] .agent-card .agent-card-name,
+[data-theme="harry-potter"] .agent-detail .agent-config-topbar-title {
+  font-family: 'Cinzel', serif;
+  letter-spacing: 1px;
+}
+
+/* Node type badges — Cinzel small caps */
+[data-theme="harry-potter"] .node-type-badge {
+  font-family: 'Cinzel', serif;
+  letter-spacing: 2px;
+}
+
+/* Monospace areas — JetBrains Mono */
+[data-theme="harry-potter"] .run-log-panel,
+[data-theme="harry-potter"] .run-log-line,
+[data-theme="harry-potter"] .fr-code-block,
+[data-theme="harry-potter"] code,
+[data-theme="harry-potter"] .fr-tool-cmd,
+[data-theme="harry-potter"] .fr-tool-file,
+[data-theme="harry-potter"] .session-tab,
+[data-theme="harry-potter"] .log-time,
+[data-theme="harry-potter"] .mcp-log-line {
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+}
+
+/* ── Top bar — golden border glow ── */
+
+[data-theme="harry-potter"] .top-bar {
+  border-bottom-color: rgba(201,168,76,0.25);
+  box-shadow: 0 1px 12px rgba(201,168,76,0.08);
+}
+
+/* ── Sidebar — warm gold accents ── */
+
+[data-theme="harry-potter"] .unified-sidebar {
+  border-right-color: rgba(201,168,76,0.2);
+}
+
+[data-theme="harry-potter"] .sidebar-item.active,
+[data-theme="harry-potter"] .sidebar-item:hover {
+  background: rgba(201,168,76,0.08);
+  border-color: rgba(201,168,76,0.25);
+}
+
+[data-theme="harry-potter"] .sidebar-item.active {
+  box-shadow: 0 0 10px rgba(201,168,76,0.12);
+}
+
+/* ── Section decorative headers ── */
+
+[data-theme="harry-potter"] .sidebar-section-label::before {
+  content: '✦ ';
+  color: rgba(201,168,76,0.5);
+}
+
+/* ── Panels — translucent backgrounds ── */
+
+[data-theme="harry-potter"] .flow-workspace-editor,
+[data-theme="harry-potter"] .flow-workspace-bottom,
+[data-theme="harry-potter"] .property-panel,
+[data-theme="harry-potter"] .node-config-panel,
+[data-theme="harry-potter"] .agents-panel {
+  background: rgba(10,10,15,0.85);
+}
+
+/* ── Flow nodes — gold glow on hover ── */
+
+[data-theme="harry-potter"] .custom-node {
+  border-color: rgba(201,168,76,0.2);
+  transition: box-shadow 0.3s, border-color 0.3s, background 0.15s;
+}
+
+[data-theme="harry-potter"] .custom-node:hover {
+  border-color: rgba(201,168,76,0.4);
+  box-shadow: 0 0 14px rgba(201,168,76,0.15);
+}
+
+[data-theme="harry-potter"] .custom-node.selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 20px rgba(201,168,76,0.25);
+}
+
+/* Running state — gold pulse instead of default accent */
+[data-theme="harry-potter"] .custom-node.run-running {
+  animation: hp-card-pulse 1.5s ease-in-out infinite;
+  border-color: rgba(201,168,76,0.6);
+}
+
+[data-theme="harry-potter"] .custom-node.run-completed {
+  border-color: rgba(74,222,128,0.5);
+  box-shadow: 0 0 16px rgba(74,222,128,0.2);
+}
+
+/* ── React Flow edges — gold ── */
+
+[data-theme="harry-potter"] .react-flow__edge path {
+  stroke: rgba(201,168,76,0.35) !important;
+}
+
+[data-theme="harry-potter"] .react-flow__edge.selected path,
+[data-theme="harry-potter"] .react-flow__edge:hover path {
+  stroke: rgba(201,168,76,0.7) !important;
+}
+
+/* ── Connection handles — gold ── */
+
+[data-theme="harry-potter"] .react-flow__handle {
+  background: rgba(201,168,76,0.5);
+  border-color: rgba(201,168,76,0.8);
+}
+
+/* ── Agent cards — warm glow ── */
+
+[data-theme="harry-potter"] .agent-card {
+  border-color: rgba(201,168,76,0.12);
+  transition: all 0.3s;
+}
+
+[data-theme="harry-potter"] .agent-card:hover {
+  border-color: rgba(201,168,76,0.3);
+  box-shadow: 0 0 12px rgba(201,168,76,0.1);
+}
+
+/* ── Status dots — animated blink ── */
+
+[data-theme="harry-potter"] .sidebar-busy-dot,
+[data-theme="harry-potter"] .agent-card .agent-card-status-dot.busy {
+  animation: hp-blink 1.2s ease-in-out infinite;
+}
+
+/* ── Session tabs — gold active indicator ── */
+
+[data-theme="harry-potter"] .session-tab.active {
+  border-bottom-color: var(--accent);
+  box-shadow: 0 2px 8px rgba(201,168,76,0.15);
+}
+
+[data-theme="harry-potter"] .session-tab .session-tab-dot.alive {
+  box-shadow: 0 0 6px rgba(201,168,76,0.4);
+}
+
+/* ── Run button — gold gradient, matching reference ── */
+
+[data-theme="harry-potter"] .top-bar .run-btn,
+[data-theme="harry-potter"] .top-bar button[class*="default"] {
+  background: linear-gradient(135deg, rgba(201,168,76,0.3), rgba(232,98,42,0.2));
+  border-color: rgba(201,168,76,0.5);
+  color: #f0c060;
+  text-shadow: 0 0 8px rgba(201,168,76,0.3);
+}
+
+[data-theme="harry-potter"] .top-bar .run-btn:hover,
+[data-theme="harry-potter"] .top-bar button[class*="default"]:hover {
+  box-shadow: 0 0 20px rgba(201,168,76,0.3);
+  transform: translateY(-1px);
+}
+
+/* ── Console / log — warm ink feel ── */
+
+[data-theme="harry-potter"] .run-log-panel {
+  border-color: rgba(201,168,76,0.15);
+}
+
+[data-theme="harry-potter"] .run-log-label {
+  font-family: 'Cinzel', serif;
+  letter-spacing: 1px;
+}
+
+/* ── Chat thread — parchment feel ── */
+
+[data-theme="harry-potter"] .fr-viewport {
+  scrollbar-color: rgba(201,168,76,0.2) transparent;
+}
+
+[data-theme="harry-potter"] .fr-msg.assistant {
+  border-color: rgba(201,168,76,0.1);
+}
+
+/* ── Tool renderers — gold tool borders ── */
+
+[data-theme="harry-potter"] .fr-tool {
+  border-color: rgba(201,168,76,0.15);
+}
+
+[data-theme="harry-potter"] .fr-tool-row {
+  border-bottom-color: rgba(201,168,76,0.08);
+}
+
+/* ── Template gallery — gold card borders ── */
+
+[data-theme="harry-potter"] .tg-card {
+  border-color: rgba(201,168,76,0.15);
+}
+
+[data-theme="harry-potter"] .tg-card:hover {
+  border-color: rgba(201,168,76,0.4);
+  box-shadow: 0 0 16px rgba(201,168,76,0.15);
+}
+
+/* ── MiniMap — warm tones ── */
+
+[data-theme="harry-potter"] .react-flow__minimap {
+  background: rgba(10,10,15,0.9);
+  border-color: rgba(201,168,76,0.2);
+}
+
+/* ── Scrollbar — gold trim ── */
+
+[data-theme="harry-potter"] ::-webkit-scrollbar-thumb {
+  background: rgba(201,168,76,0.2);
+}
+
+[data-theme="harry-potter"] ::-webkit-scrollbar-thumb:hover {
+  background: rgba(201,168,76,0.35);
+}
+
+/* ── Dividers — warm gold on drag ── */
+
+[data-theme="harry-potter"] .flow-workspace-divider-h:hover,
+[data-theme="harry-potter"] .flow-workspace-divider-v:hover,
+[data-theme="harry-potter"] .agent-detail-divider:hover,
+[data-theme="harry-potter"] .fr-preview-divider:hover {
+  background: rgba(201,168,76,0.3);
+}
+
+/* ── Focus rings — gold ── */
+
+[data-theme="harry-potter"] input:focus,
+[data-theme="harry-potter"] textarea:focus,
+[data-theme="harry-potter"] select:focus {
+  border-color: rgba(201,168,76,0.5);
+  box-shadow: 0 0 0 2px rgba(201,168,76,0.15);
+}
+
+/* ── Particle canvas (injected by ParticleCanvas component) ── */
+
+[data-theme="harry-potter"] .hp-particle-canvas {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0.6;
+}
+
+/* ── Collapsed sidebar — decorative ── */
+
+[data-theme="harry-potter"] .sidebar-collapsed {
+  border-right-color: rgba(201,168,76,0.2);
+}
+
+/* ── Node palette drag dots — gold tint ── */
+
+[data-theme="harry-potter"] .sidebar-node-palette .node-palette-item:hover {
+  background: rgba(201,168,76,0.08);
+  border-color: rgba(201,168,76,0.25);
+}
+
+/* ── Dialog / modal — gold border ── */
+
+[data-theme="harry-potter"] [role="dialog"] {
+  border-color: rgba(201,168,76,0.3);
+  box-shadow: 0 0 40px rgba(201,168,76,0.1);
+}
+
+/* ── Prompt editor — parchment feel ── */
+
+[data-theme="harry-potter"] .prompt-editor-view .prompt-editor-header {
+  border-bottom-color: rgba(201,168,76,0.2);
+}
+
+/* ── Badge / pill overrides — warm tones ── */
+
+[data-theme="harry-potter"] .live-badge,
+[data-theme="harry-potter"] .connection-dot.connected {
+  box-shadow: 0 0 8px rgba(74,222,128,0.3);
+}
+
+/* ── Empty state — decorative ── */
+
+[data-theme="harry-potter"] .flow-workspace-empty h2 {
+  font-family: 'Cinzel Decorative', serif;
+  letter-spacing: 3px;
+  text-shadow: 0 0 20px rgba(201,168,76,0.3);
+}
+
+[data-theme="harry-potter"] .flow-workspace-empty p {
+  font-family: 'IM Fell English', serif;
+}
+
+/* ── Select / dropdown — solid opaque backgrounds ── */
+
+[data-theme="harry-potter"] [data-slot="select-trigger"] {
+  background: var(--bg-secondary) !important;
+  border-color: rgba(201,168,76,0.25);
+  color: var(--text);
+  font-family: 'IM Fell English', serif;
+}
+
+[data-theme="harry-potter"] [data-slot="select-trigger"]:hover {
+  background: var(--bg-tertiary) !important;
+  border-color: rgba(201,168,76,0.4);
+}
+
+[data-theme="harry-potter"] [data-slot="select-content"] {
+  background: var(--bg-secondary) !important;
+  border-color: rgba(201,168,76,0.3);
+  box-shadow: 0 4px 24px rgba(0,0,0,0.5), 0 0 12px rgba(201,168,76,0.08);
+}
+
+[data-theme="harry-potter"] [data-slot="select-item"] {
+  font-family: 'IM Fell English', serif;
+  color: var(--text);
+}
+
+[data-theme="harry-potter"] [data-slot="select-item"]:hover,
+[data-theme="harry-potter"] [data-slot="select-item"][data-highlighted] {
+  background: rgba(201,168,76,0.12);
+  color: #c9a84c;
+}
+
+[data-theme="harry-potter"] [data-slot="select-label"] {
+  font-family: 'Cinzel', serif;
+  color: #c9a84c;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  font-size: 0.65rem;
+}
+
+[data-theme="harry-potter"] [data-slot="select-separator"] {
+  background: rgba(201,168,76,0.2);
 }

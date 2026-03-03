@@ -8,6 +8,7 @@ import RunLog from "./RunLog";
 import AgentChatView from "./AgentChatView";
 import NodeConfigPanel from "./NodeConfigPanel";
 import ErrorBoundary from "./ErrorBoundary";
+import { ListFilter, TerminalSquare, PanelBottomClose, ChevronUp, X } from "lucide-react";
 
 interface FlowWorkspaceViewProps {
   flowId: string | null;
@@ -253,17 +254,26 @@ export default function FlowWorkspaceView({
                 className={`flow-workspace-tab${bottomTab === "log" ? " active" : ""}`}
                 onClick={() => setBottomTab("log")}
               >
-                Run Log
+                <ListFilter size={13} />
+                <span>LOGS</span>
+                {runEvents.length > 0 && (
+                  <span className="flow-workspace-tab-badge">{runEvents.length}</span>
+                )}
               </button>
               <button
                 className={`flow-workspace-tab${bottomTab === "terminal" ? " active" : ""}`}
                 onClick={() => setBottomTab("terminal")}
               >
-                Terminal
+                <TerminalSquare size={13} />
+                <span>TERMINAL</span>
               </button>
               <div className="spacer" />
-              <button className="flow-workspace-tab-close" onClick={handleBottomClose}>
-                ×
+              <button
+                className="flow-workspace-tab-action"
+                onClick={handleBottomClose}
+                title="Close panel"
+              >
+                <PanelBottomClose size={14} />
               </button>
             </div>
             <div className="flow-workspace-bottom-content">
@@ -286,20 +296,33 @@ export default function FlowWorkspaceView({
         </>
       )}
 
-      {/* Toggle button when bottom is closed */}
+      {/* Status-bar toggle when bottom is closed */}
       {!bottomOpen && flowId && (
         <div className="flow-workspace-bottom-toggle">
           <button
-            className="flow-workspace-tab"
+            className="flow-workspace-toggle-btn"
             onClick={() => { setBottomOpen(true); setBottomTab("log"); }}
           >
-            Run Log
+            <ListFilter size={12} />
+            <span>Logs</span>
+            {runEvents.length > 0 && (
+              <span className="flow-workspace-toggle-badge">{runEvents.length}</span>
+            )}
           </button>
           <button
-            className="flow-workspace-tab"
+            className="flow-workspace-toggle-btn"
             onClick={() => { setBottomOpen(true); setBottomTab("terminal"); }}
           >
-            Terminal
+            <TerminalSquare size={12} />
+            <span>Terminal</span>
+          </button>
+          <div className="spacer" />
+          <button
+            className="flow-workspace-toggle-btn"
+            onClick={() => { setBottomOpen(true); setBottomTab("log"); }}
+            title="Open panel"
+          >
+            <ChevronUp size={14} />
           </button>
         </div>
       )}

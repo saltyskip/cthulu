@@ -31,6 +31,15 @@ impl TemplateRepository {
     pub async fn save_imported_flow(&self, flow: Flow) -> anyhow::Result<()> {
         self.flow_repo.save_flow(flow).await
     }
+
+    pub fn delete_template(&self, category: &str, slug: &str) -> Result<(), std::io::Error> {
+        let file_path = self
+            .static_dir
+            .join("workflows")
+            .join(category)
+            .join(format!("{slug}.yaml"));
+        std::fs::remove_file(file_path)
+    }
 }
 
 /// Fetch all `.yaml` / `.yml` files from a GitHub repo path using the Contents API.

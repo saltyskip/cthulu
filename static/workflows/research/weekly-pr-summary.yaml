@@ -1,0 +1,57 @@
+meta:
+  title: "Weekly Merged PR Summary"
+  description: "Collects merged PRs from the past week and posts a summary to Slack every Monday at 9am"
+  tags: [github, pr, slack, cron, weekly]
+  estimated_cost: "~$0.04 / run"
+  icon: "🔀"
+
+name: weekly-pr-summary
+description: Weekly summary of merged PRs posted to Slack every Monday morning
+enabled: false
+
+trigger:
+  kind: cron
+  config:
+    schedule: "0 9 * * 1"
+    working_dir: "."
+
+sources:
+  - kind: github-merged-prs
+    label: "GitHub: merged PRs (last 7 days)"
+    config:
+      repos:
+        - owner/repo
+      since_days: 7
+
+executors:
+  - kind: claude-code
+    label: "Claude: PR summarizer"
+    config:
+      prompt: |
+        You are a developer relations specialist. Summarize the following merged pull requests
+        from the past week into a concise weekly changelog for the team.
+
+        Merged PRs:
+        {{content}}
+
+        Format your response as:
+        ## Weekly PR Summary — {{timestamp}}
+
+        **Highlights** (3-5 most impactful PRs with brief descriptions and links)
+
+        **By Category**
+        - Features: (new functionality added)
+        - Fixes: (bugs resolved)
+        - Infra/CI: (build, deploy, config changes)
+        - Docs: (documentation updates)
+
+        **Stats** (total PRs merged, contributors involved)
+
+        Keep the summary under 500 words. Group related PRs together. Include PR links.
+      permissions:
+        - Read
+
+sinks:
+  - kind: slack
+    config:
+      webhook_url_env: SLACK_WEBHOOK_URL

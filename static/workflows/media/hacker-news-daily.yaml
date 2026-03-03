@@ -1,0 +1,52 @@
+meta:
+  title: "Hacker News Daily Brief"
+  description: "Summarizes the top 15 Hacker News stories every weekday at 9am, delivered to Slack"
+  tags: [hackernews, rss, slack, cron]
+  estimated_cost: "~$0.03 / run"
+  icon: "🟠"
+
+name: hacker-news-daily
+description: Top 15 Hacker News stories summarized every weekday at 9am to Slack
+enabled: false
+
+trigger:
+  kind: cron
+  config:
+    schedule: "0 9 * * 1-5"
+    working_dir: "."
+
+sources:
+  - kind: rss
+    label: "RSS: Hacker News"
+    config:
+      url: "https://news.ycombinator.com/rss"
+      limit: 15
+
+executors:
+  - kind: claude-code
+    label: "Claude: HN summarizer"
+    config:
+      prompt: |
+        You are a tech news curator. Summarize the following Hacker News top stories
+        into a concise morning brief for a technical audience.
+
+        Stories:
+        {{content}}
+
+        Format your response as:
+        ## HN Daily Brief — {{timestamp}}
+
+        **Top Stories** (rank the 5 most significant items with one-line summaries and links)
+
+        **Themes** (2-3 recurring themes or trends across all items)
+
+        **Worth Reading** (2-3 articles that deserve a deeper look, with brief why)
+
+        Keep the brief under 500 words. Be concise and direct. Include links.
+      permissions:
+        - Read
+
+sinks:
+  - kind: slack
+    config:
+      webhook_url_env: SLACK_WEBHOOK_URL

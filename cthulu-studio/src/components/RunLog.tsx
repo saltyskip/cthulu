@@ -1,6 +1,8 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import type { RunEvent } from "../types/flow";
-import { Button } from "@/components/ui/button";
+import { Eraser, ArrowDownToLine } from "lucide-react";
+
+type LogFilter = "all" | "errors" | "info";
 
 const EVENT_COLORS: Record<string, string> = {
   run_started: "var(--accent)",
@@ -28,9 +30,13 @@ interface RunLogProps {
   onClose: () => void;
 }
 
-export default function RunLog({ events, onClear, onClose }: RunLogProps) {
+export default function RunLog({ events, onClear }: RunLogProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const [autoScroll, setAutoScroll] = useState(true);
+  const [filter, setFilter] = useState<LogFilter>("all");
+
+  const errorCount = useMemo(() => events.filter((e) => e.event_type.includes("failed")).length, [events]);
+  const infoCount = useMemo(() => events.filter((e) => !e.event_type.includes("failed")).length, [events]);
 
   useEffect(() => {
     if (autoScroll && bottomRef.current) {
@@ -42,6 +48,11 @@ export default function RunLog({ events, onClear, onClose }: RunLogProps) {
     const el = e.currentTarget;
     const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
     setAutoScroll(atBottom);
+  };
+
+  const scrollToBottom = () => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    setAutoScroll(true);
   };
 
   // Group entries by run_id for display
@@ -68,21 +79,47 @@ export default function RunLog({ events, onClear, onClose }: RunLogProps) {
   };
 
   return (
-    <div className="console-panel run-log-panel">
-      <div className="console-header">
-        <span className="console-title">Run Log</span>
-        <div className="spacer" />
-        <Button variant="ghost" size="xs" onClick={onClear}>
-          Clear
-        </Button>
-        <Button variant="ghost" size="xs" onClick={onClose}>
-          Close
-        </Button>
+    <div className="run-log-panel">
+      {/* Filter bar + actions — VS Code style */}
+      <div className="run-log-toolbar">
+        <div className="run-log-filters">
+          <button
+            className={`run-log-filter-btn${filter === "all" ? " active" : ""}`}
+            onClick={() => setFilter("all")}
+          >
+            All
+            <span className="run-log-filter-count">{events.length}</span>
+          </button>
+          <button
+            className={`run-log-filter-btn run-log-filter-btn--error${filter === "errors" ? " active" : ""}`}
+            onClick={() => setFilter("errors")}
+          >
+            Errors
+            <span className="run-log-filter-count">{errorCount}</span>
+          </button>
+          <button
+            className={`run-log-filter-btn run-log-filter-btn--info${filter === "info" ? " active" : ""}`}
+            onClick={() => setFilter("info")}
+          >
+            Info
+            <span className="run-log-filter-count">{infoCount}</span>
+          </button>
+        </div>
+        <div className="run-log-actions">
+          <button className="run-log-action-btn" onClick={onClear} title="Clear output">
+            <Eraser size={13} />
+          </button>
+          <button className="run-log-action-btn" onClick={scrollToBottom} title="Scroll to bottom">
+            <ArrowDownToLine size={13} />
+          </button>
+        </div>
       </div>
-      <div className="console-body" onScroll={handleScroll}>
+
+      <div className="run-log-body" onScroll={handleScroll}>
         {events.length === 0 && (
-          <div className="console-empty">
-            Waiting for run events...
+          <div className="run-log-empty">
+            <span className="run-log-empty-icon">$</span>
+            <span>No output yet. Run a flow to see events here.</span>
           </div>
         )}
         {runIds.map((runId) => {
@@ -96,7 +133,7 @@ export default function RunLog({ events, onClear, onClose }: RunLogProps) {
           );
 
           return (
-            <div key={runId}>
+            <div key={runId} className="run-log-group">
               <div
                 className="run-log-group-header"
                 onClick={() => toggleRun(runId)}
@@ -104,11 +141,11 @@ export default function RunLog({ events, onClear, onClose }: RunLogProps) {
                 <span className="run-log-chevron">
                   {isCollapsed ? "\u25b6" : "\u25bc"}
                 </span>
-                <span className="console-time">
+                <span className="run-log-ts">
                   {formatTime(startEvent.timestamp)}
                 </span>
                 <span
-                  className="run-log-badge"
+                  className="run-log-status"
                   style={{
                     color: endEvent
                       ? EVENT_COLORS[endEvent.event_type]
@@ -132,23 +169,27 @@ export default function RunLog({ events, onClear, onClose }: RunLogProps) {
                 )}
               </div>
               {!isCollapsed &&
-                runEntries.map((entry, i) => (
+                runEntries.filter((entry) => {
+                  if (filter === "all") return true;
+                  if (filter === "errors") return entry.event_type.includes("failed");
+                  return !entry.event_type.includes("failed");
+                }).map((entry, i) => (
                   <div
                     key={`${runId}-${i}`}
-                    className={`console-entry run-log-entry run-log-${entry.event_type.includes("failed") ? "failed" : entry.event_type.includes("completed") ? "completed" : "default"}`}
+                    className={`run-log-line run-log-line--${entry.event_type.includes("failed") ? "error" : entry.event_type.includes("completed") ? "success" : "info"}`}
                   >
-                    <span className="console-time">
+                    <span className="run-log-ts">
                       {formatTime(entry.timestamp)}
                     </span>
                     <span
-                      className="run-log-badge"
+                      className="run-log-label"
                       style={{
                         color: EVENT_COLORS[entry.event_type] || "var(--text-secondary)",
                       }}
                     >
                       {EVENT_LABELS[entry.event_type] || entry.event_type}
                     </span>
-                    <span className="console-message">
+                    <span className="run-log-msg">
                       {entry.message}
                     </span>
                   </div>

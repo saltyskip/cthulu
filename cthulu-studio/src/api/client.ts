@@ -484,6 +484,14 @@ export async function getTemplateYaml(
   return res.text();
 }
 
+/** Delete a template YAML file from disk. */
+export async function deleteTemplate(
+  category: string,
+  slug: string
+): Promise<void> {
+  await apiFetch(`/templates/${category}/${slug}`, { method: "DELETE" });
+}
+
 /** Parse + save a template as a new Flow. Returns the created Flow. */
 export async function importTemplate(
   category: string,

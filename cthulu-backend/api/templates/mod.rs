@@ -11,6 +11,9 @@ pub fn router() -> Router<AppState> {
         .route("/templates", get(handlers::list_templates))
         .route("/templates/import-yaml", post(handlers::import_yaml))
         .route("/templates/import-github", post(handlers::import_github))
-        .route("/templates/{category}/{slug}", get(handlers::get_template_yaml))
+        .route(
+            "/templates/{category}/{slug}",
+            get(handlers::get_template_yaml).delete(handlers::delete_template),
+        )
         .route("/templates/{category}/{slug}/import", post(handlers::import_template))
 }

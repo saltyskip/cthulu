@@ -11,8 +11,9 @@
  *  - "Use Template" one-click import
  */
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
-import { listTemplates, importTemplate, importYaml, importFromGithub, getServerUrl } from "../api/client";
+import { listTemplates, importTemplate, importYaml, importFromGithub, deleteTemplate, getServerUrl } from "../api/client";
 import type { TemplateMetadata, Flow } from "../types/flow";
+import { Trash2 } from "lucide-react";
 import MiniFlowDiagram from "./MiniFlowDiagram";
 
 interface TemplateGalleryProps {
@@ -45,6 +46,22 @@ function defaultIcon(category: string): string {
   return getCategoryEmoji(category);
 }
 
+function YamlPanel({ slug, templates, onClose }: { slug: string; templates: TemplateMetadata[]; onClose: () => void }) {
+  const tmpl = templates.find((t) => `${t.category}/${t.slug}` === slug);
+  if (!tmpl) return null;
+  return (
+    <div className="tg-yaml-panel">
+      <div className="tg-yaml-panel-header">
+        <span className="tg-yaml-panel-title">{tmpl.title} — YAML</span>
+        <button className="tg-yaml-panel-close" onClick={onClose}>✕</button>
+      </div>
+      <div className="tg-yaml-block">
+        <pre className="tg-yaml-pre">{tmpl.raw_yaml}</pre>
+      </div>
+    </div>
+  );
+}
+
 export default function TemplateGallery({
   onImport,
   onBlank,
@@ -58,6 +75,7 @@ export default function TemplateGallery({
   const [expandedYaml, setExpandedYaml] = useState<string | null>(null);
   const [hoveredCard, setHoveredCard] = useState<string | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
 
   // Upload / GitHub import state
   const [ghUrl, setGhUrl] = useState("");
@@ -85,9 +103,19 @@ export default function TemplateGallery({
   }, [templates]);
 
   const filtered = useMemo(() => {
-    if (activeCategory === "all") return templates;
-    return templates.filter((t) => t.category === activeCategory);
-  }, [templates, activeCategory]);
+    let result = activeCategory === "all" ? templates : templates.filter((t) => t.category === activeCategory);
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      result = result.filter(
+        (t) =>
+          t.title.toLowerCase().includes(q) ||
+          t.description.toLowerCase().includes(q) ||
+          t.tags.some((tag) => tag.toLowerCase().includes(q)) ||
+          t.slug.toLowerCase().includes(q)
+      );
+    }
+    return result;
+  }, [templates, activeCategory, searchQuery]);
 
   const handleImport = useCallback(
     async (template: TemplateMetadata) => {
@@ -109,6 +137,20 @@ export default function TemplateGallery({
   const toggleYaml = useCallback(
     (key: string) => {
       setExpandedYaml((prev) => (prev === key ? null : key));
+    },
+    []
+  );
+
+  const handleDeleteTemplate = useCallback(
+    async (tmpl: TemplateMetadata) => {
+      if (!confirm(`Delete template "${tmpl.title}"? This removes the YAML file from disk.`)) return;
+      setImportError(null);
+      try {
+        await deleteTemplate(tmpl.category, tmpl.slug);
+        setTemplates((prev) => prev.filter((t) => !(t.category === tmpl.category && t.slug === tmpl.slug)));
+      } catch (e) {
+        setImportError(`Failed to delete "${tmpl.title}": ${(e as Error).message}`);
+      }
     },
     []
   );
@@ -192,6 +234,23 @@ export default function TemplateGallery({
           <button className="tg-close" onClick={onClose} aria-label="Close">
             ✕
           </button>
+        </div>
+
+        {/* Search bar */}
+        <div className="tg-search-bar">
+          <input
+            className="tg-search-input"
+            type="text"
+            placeholder="Search templates by name, tag, or description…"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            autoFocus
+          />
+          {searchQuery && (
+            <button className="tg-search-clear" onClick={() => setSearchQuery("")}>
+              ✕
+            </button>
+          )}
         </div>
 
         {/* Import panel: Upload YAML + GitHub */}
@@ -325,7 +384,7 @@ export default function TemplateGallery({
                 return (
                   <div
                     key={key}
-                    className={`tg-card ${isHovered ? "hovered" : ""}`}
+                    className={`tg-card ${isHovered ? "hovered" : ""}${isYamlOpen ? " yaml-active" : ""}`}
                     onMouseEnter={() => setHoveredCard(key)}
                     onMouseLeave={() => setHoveredCard(null)}
                   >
@@ -364,13 +423,6 @@ export default function TemplateGallery({
                       )}
                     </div>
 
-                    {/* YAML inline viewer */}
-                    {isYamlOpen && (
-                      <div className="tg-yaml-block">
-                        <pre className="tg-yaml-pre">{tmpl.raw_yaml}</pre>
-                      </div>
-                    )}
-
                     {/* Footer actions */}
                     <div className="tg-card-footer">
                       <button
@@ -390,6 +442,13 @@ export default function TemplateGallery({
                       >
                         ↗
                       </a>
+                      <button
+                        className="tg-btn-delete"
+                        onClick={() => handleDeleteTemplate(tmpl)}
+                        title="Delete template"
+                      >
+                        <Trash2 size={13} />
+                      </button>
                       <button
                         className="tg-btn-use"
                         onClick={() => handleImport(tmpl)}
@@ -423,6 +482,9 @@ export default function TemplateGallery({
               )}
             </div>
           )}
+
+          {/* YAML preview panel — shown below the grid for the selected template */}
+          {expandedYaml && <YamlPanel slug={expandedYaml} templates={templates} onClose={() => setExpandedYaml(null)} />}
         </div>
 
         {/* Footer hint */}

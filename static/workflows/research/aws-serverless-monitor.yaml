@@ -1,0 +1,73 @@
+meta:
+  title: "AWS Serverless Blog Monitor"
+  description: "Monitors the AWS blog for serverless articles and sends a digest to Slack"
+  tags: [aws, serverless, rss, slack, cron]
+  estimated_cost: "~$0.03 / run"
+  icon: "☁️"
+
+name: aws-serverless-monitor
+description: Monitors AWS blog for serverless articles and posts a digest to Slack
+enabled: false
+
+trigger:
+  kind: cron
+  config:
+    schedule: "0 10 * * 1-5"
+    working_dir: "."
+
+sources:
+  - kind: rss
+    label: "RSS: AWS Blog"
+    config:
+      url: "https://aws.amazon.com/blogs/aws/feed/"
+      limit: 20
+
+  - kind: rss
+    label: "RSS: AWS Compute Blog"
+    config:
+      url: "https://aws.amazon.com/blogs/compute/feed/"
+      limit: 20
+
+filters:
+  - kind: keyword
+    config:
+      keywords:
+        - serverless
+        - lambda
+        - step functions
+        - api gateway
+        - eventbridge
+        - fargate
+        - sam
+        - cdk
+      require_all: false
+      field: title_or_summary
+
+executors:
+  - kind: claude-code
+    label: "Claude: AWS serverless digest"
+    config:
+      prompt: |
+        You are an AWS serverless specialist. Based on the following blog posts,
+        produce a concise digest for a team building on AWS serverless.
+
+        Articles:
+        {{content}}
+
+        Format your response as:
+        ## AWS Serverless Update — {{timestamp}}
+
+        **New & Notable** (key announcements or feature launches, with links)
+
+        **Patterns & Best Practices** (any architectural guidance or tutorials)
+
+        **Action Items** (things the team should evaluate or adopt)
+
+        Keep the digest under 400 words. Focus on what's actionable. Include links.
+      permissions:
+        - Read
+
+sinks:
+  - kind: slack
+    config:
+      webhook_url_env: SLACK_WEBHOOK_URL

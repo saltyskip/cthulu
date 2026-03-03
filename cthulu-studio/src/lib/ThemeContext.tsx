@@ -18,6 +18,18 @@ function applyTheme(def: ThemeDefinition) {
     el.style.setProperty(`--${key}`, value);
   }
 
+  // Font overrides — set when theme defines them, clear otherwise
+  if (def.fonts) {
+    el.style.setProperty("--font-heading", def.fonts.heading);
+    el.style.setProperty("--font-body", def.fonts.body);
+    el.style.setProperty("--font-mono", def.fonts.mono);
+  } else {
+    el.style.removeProperty("--font-heading");
+    el.style.removeProperty("--font-body");
+    // Reset mono to default stack
+    el.style.setProperty("--font-mono", '"SF Mono", "Fira Code", "Cascadia Code", monospace');
+  }
+
   // Theme metadata for selectors
   el.setAttribute("data-theme", def.id);
 

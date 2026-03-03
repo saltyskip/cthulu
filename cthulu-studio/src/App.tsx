@@ -9,8 +9,10 @@ import FlowWorkspaceView from "./components/FlowWorkspaceView";
 import AgentGridView from "./components/AgentGridView";
 import AgentDetailView from "./components/AgentDetailView";
 import PromptEditorView from "./components/PromptEditorView";
+import ParticleCanvas from "./components/ParticleCanvas";
 import { type CanvasHandle } from "./components/Canvas";
 import McpSetupView from "./components/McpSetupView";
+import { useTheme } from "./lib/ThemeContext";
 import {
   Dialog,
   DialogContent,
@@ -316,6 +318,16 @@ export default function App() {
     } catch { /* logged */ }
   };
 
+  const handleDeleteFlow = async (flowId: string) => {
+    const flow = flows.find((f) => f.id === flowId);
+    if (!flow || !confirm(`Delete "${flow.name}"? This cannot be undone.`)) return;
+    try {
+      await api.deleteFlow(flowId);
+      if (activeFlowId === flowId) setActiveFlowId(null);
+      loadFlows();
+    } catch { /* logged */ }
+  };
+
   const handleSaveSettings = () => {
     api.setServerUrl(serverUrl);
     setShowSettings(false);
@@ -323,8 +335,11 @@ export default function App() {
     loadNodeTypes();
   };
 
+  const { theme: activeTheme } = useTheme();
+
   return (
     <div className="app">
+      {activeTheme.particles && <ParticleCanvas />}
       <TopBar
         activeView={activeView}
         flow={activeFlowMeta}
@@ -351,6 +366,7 @@ export default function App() {
             onCreateFlow={createFlow}
             onImportTemplate={handleImportTemplate}
             onToggleEnabled={handleToggleFlowEnabled}
+            onDeleteFlow={handleDeleteFlow}
             selectedAgentId={selectedAgentId}
             onSelectAgent={handleSelectAgent}
             onShowAgentGrid={handleShowAgentGrid}

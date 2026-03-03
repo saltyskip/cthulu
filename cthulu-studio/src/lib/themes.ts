@@ -6,11 +6,20 @@ export interface ThemeDefinition {
   /** Bundled Shiki theme name, or a custom theme object */
   shikiTheme: string | Record<string, unknown>;
   vars: Record<string, string>;
+  /** Optional font overrides — applied as CSS custom properties */
+  fonts?: {
+    heading: string;
+    body: string;
+    mono: string;
+  };
+  /** Enable animated particle canvas background */
+  particles?: boolean;
 }
 
 import { eldritchDark, eldritchLight, toCssVarMap } from "@cthulu/brand";
 import { eldritchShikiTheme } from "./shiki-eldritch";
 import { eldritchLightShikiTheme } from "./shiki-eldritch-light";
+import { hpShikiTheme } from "./shiki-hp";
 
 const STORAGE_KEY = "cthulu_theme";
 
@@ -206,23 +215,29 @@ export const themes: ThemeDefinition[] = [
     label: "Harry Potter",
     group: "preset",
     colorScheme: "dark",
-    shikiTheme: "tokyo-night",
+    shikiTheme: hpShikiTheme,
+    particles: true,
+    fonts: {
+      heading: "'Cinzel Decorative', 'Cinzel', serif",
+      body: "'IM Fell English', serif",
+      mono: "'JetBrains Mono', monospace",
+    },
     vars: {
-      bg: "#0d1117",
-      "bg-secondary": "#161b22",
-      "bg-tertiary": "#1c2333",
-      border: "#2a3040",
-      text: "#e8d5b5",
+      bg: "#0a0a0f",
+      "bg-secondary": "#0f1419",
+      "bg-tertiary": "#161d26",
+      border: "#2a2418",
+      text: "#f5e6c8",
       "text-secondary": "#8a7a60",
-      accent: "#d4a03c",
-      success: "#2e8b57",
-      danger: "#8b0000",
-      warning: "#d4a03c",
-      "trigger-color": "#d4a03c",
+      accent: "#c9a84c",
+      success: "#4ade80",
+      danger: "#f87171",
+      warning: "#c9a84c",
+      "trigger-color": "#e8622a",
       "source-color": "#5b7fb8",
-      "executor-color": "#7c5caa",
-      "sink-color": "#2e8b57",
-      "primary-foreground": "#0d1117",
+      "executor-color": "#a855f7",
+      "sink-color": "#4ade80",
+      "primary-foreground": "#0a0a0f",
     },
   },
 ];
