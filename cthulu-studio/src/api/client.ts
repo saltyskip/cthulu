@@ -246,6 +246,18 @@ export async function killSession(
   });
 }
 
+/** Fetch git status snapshot for a session. Returns null if no git integration. */
+export async function getGitSnapshot(
+  agentId: string,
+  sessionId: string
+): Promise<import("../components/chat/FilePreviewContext").MultiRepoSnapshot | null> {
+  try {
+    return await apiFetch(`/agents/${agentId}/sessions/${sessionId}/git`);
+  } catch {
+    return null; // 404 = no git integration
+  }
+}
+
 /** Fetch the full JSONL log for a completed flow-run session. */
 export async function getSessionLog(
   agentId: string,

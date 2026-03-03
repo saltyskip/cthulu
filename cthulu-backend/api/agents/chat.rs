@@ -138,7 +138,7 @@ pub(crate) async fn new_session(
         (StatusCode::NOT_FOUND, Json(json!({ "error": "agent not found" })))
     })?;
 
-    let working_dir = agent.working_dir.clone().unwrap_or_else(|| {
+    let original_working_dir = agent.working_dir.clone().unwrap_or_else(|| {
         std::env::current_dir()
             .unwrap_or_else(|_| ".".into())
             .to_string_lossy()
@@ -148,6 +148,33 @@ pub(crate) async fn new_session(
     let key = agent_key(&id);
     let new_id = Uuid::new_v4().to_string();
     let now = Utc::now().to_rfc3339();
+
+    // Try to create a worktree group for git isolation
+    let (working_dir, worktree_group) = match crate::git::create_worktree_group(
+        std::path::Path::new(&original_working_dir),
+        &new_id,
+    ) {
+        Ok(group) => {
+            let meta = crate::git::WorktreeGroupMeta::from(&group);
+            let wt_working_dir = group.shadow_root.to_string_lossy().to_string();
+            tracing::info!(
+                session_id = %new_id,
+                shadow_root = %wt_working_dir,
+                repos = group.repos.len(),
+                single_repo = group.single_repo,
+                "created worktree group for session"
+            );
+            (wt_working_dir, Some(meta))
+        }
+        Err(e) => {
+            tracing::debug!(
+                session_id = %new_id,
+                error = %e,
+                "no git repos found, session will use original working dir"
+            );
+            (original_working_dir, None)
+        }
+    };
 
     let mut all_sessions = state.interact_sessions.write().await;
     let flow_sessions = all_sessions
@@ -183,6 +210,7 @@ pub(crate) async fn new_session(
         skills_dir: None,
         kind: "interactive".to_string(),
         flow_run: None,
+        worktree_group,
     });
     flow_sessions.active_session = new_id.clone();
 
@@ -234,6 +262,19 @@ pub(crate) async fn delete_session(
         if let Some(session) = flow_sessions.get_session(&session_id) {
             if let Some(pid) = session.active_pid {
                 kill_pid(pid);
+            }
+            // Clean up worktree group if present
+            if let Some(ref wt_meta) = session.worktree_group {
+                let group = wt_meta.to_worktree_group();
+                if let Err(e) = crate::git::remove_worktree_group(&group) {
+                    tracing::warn!(
+                        session_id = %session_id,
+                        error = %e,
+                        "failed to remove worktree group on session delete"
+                    );
+                } else {
+                    tracing::info!(session_id = %session_id, "removed worktree group");
+                }
             }
         }
 
@@ -347,6 +388,28 @@ pub(crate) async fn session_status(
         "message_count": session.message_count,
         "total_cost": session.total_cost,
     })))
+}
+
+/// GET /agents/{id}/sessions/{session_id}/git — git status snapshot
+pub(crate) async fn git_status(
+    State(state): State<AppState>,
+    Path((id, session_id)): Path<(String, String)>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let key = agent_key(&id);
+    let sessions = state.interact_sessions.read().await;
+    let flow_sessions = sessions.get(&key).ok_or_else(|| {
+        (StatusCode::NOT_FOUND, Json(json!({ "error": "no sessions for this agent" })))
+    })?;
+    let session = flow_sessions.get_session(&session_id).ok_or_else(|| {
+        (StatusCode::NOT_FOUND, Json(json!({ "error": "session not found" })))
+    })?;
+
+    let wt_meta = session.worktree_group.as_ref().ok_or_else(|| {
+        (StatusCode::NOT_FOUND, Json(json!({ "error": "no git integration for this session" })))
+    })?;
+
+    let snapshot = crate::git::snapshot_from_meta(wt_meta);
+    Ok(Json(serde_json::to_value(&snapshot).unwrap_or_default()))
 }
 
 /// POST /agents/{id}/sessions/{session_id}/kill — force-kill session process
@@ -477,6 +540,7 @@ pub(crate) async fn chat(
                         skills_dir: None,
                         kind: "interactive".to_string(),
                         flow_run: None,
+                        worktree_group: None,
                     }],
                 }
             });
@@ -963,6 +1027,26 @@ pub(crate) async fn chat(
                         }
 
                         if is_result {
+                            // Send git snapshot after result (before done)
+                            {
+                                let sessions = sessions_ref.read().await;
+                                if let Some(fs) = sessions.get(&key_for_bg) {
+                                    if let Some(s) = fs.get_session(&sid_for_bg) {
+                                        if let Some(ref wt_meta) = s.worktree_group {
+                                            let snapshot = crate::git::snapshot_from_meta(wt_meta);
+                                            if let Ok(snap_json) = serde_json::to_string(&snapshot) {
+                                                let git_event = format!("git_snapshot:{snap_json}");
+                                                let _ = bc_tx.send(git_event.clone());
+                                                append_log(&git_event);
+                                                let mut buffers = chat_event_buffers.lock().await;
+                                                if let Some(buf) = buffers.get_mut(&proc_key) {
+                                                    buf.push(git_event);
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                             break;
                         }
                     } else {

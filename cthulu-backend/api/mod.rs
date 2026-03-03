@@ -23,6 +23,7 @@ use crate::flows::events::RunEvent;
 use crate::flows::repository::FlowRepository;
 use crate::flows::scheduler::FlowScheduler;
 use crate::flows::session_bridge::FlowRunMeta;
+use crate::git::WorktreeGroupMeta;
 use crate::github::client::GithubClient;
 use crate::prompts::repository::PromptRepository;
 use crate::sandbox::backends::vm_manager::VmManagerProvider;
@@ -67,6 +68,9 @@ pub struct InteractSession {
     /// Flow run metadata — only present for flow_run sessions.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub flow_run: Option<FlowRunMeta>,
+    /// Git worktree group metadata — present when session has git isolation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worktree_group: Option<WorktreeGroupMeta>,
 }
 
 fn default_interactive() -> String {
@@ -200,6 +204,7 @@ pub fn load_sessions(path: &Path) -> LoadedSessions {
                     skills_dir: None,
                     kind: default_interactive(),
                     flow_run: None,
+                    worktree_group: None,
                 };
                 let flow_sessions = FlowSessions {
                     flow_name: if old.flow_name.is_empty() {
@@ -253,6 +258,7 @@ pub fn save_sessions(
                         skills_dir: s.skills_dir.clone(),
                         kind: s.kind.clone(),
                         flow_run: s.flow_run.clone(),
+                        worktree_group: s.worktree_group.clone(),
                     })
                     .collect();
                 (

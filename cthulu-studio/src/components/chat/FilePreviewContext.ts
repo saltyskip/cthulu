@@ -21,3 +21,23 @@ export interface PlanOp {
   filePath: string;
   content?: string;
 }
+
+// Git integration types (match Rust backend structs)
+export interface GitFileStatus {
+  path: string;
+  status: string; // M, A, D, ?, R
+  additions: number;
+  deletions: number;
+}
+
+export interface RepoSnapshot {
+  root: string;
+  branch: string;
+  commit: string;
+  is_dirty: boolean;
+  files: GitFileStatus[];
+}
+
+export interface MultiRepoSnapshot {
+  repos: RepoSnapshot[];
+}

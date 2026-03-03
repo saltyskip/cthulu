@@ -3,7 +3,7 @@ import ShikiHighlighter from "react-shiki";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useTheme } from "../../lib/ThemeContext";
-import type { FileOp, PlanOp } from "./FilePreviewContext";
+import type { FileOp, PlanOp, MultiRepoSnapshot } from "./FilePreviewContext";
 import type { TaskStep } from "./chatUtils";
 import { groupFileOpsByTask } from "./chatUtils";
 import { computeDiffLines } from "../../utils/diff";
@@ -40,18 +40,37 @@ type SelectedItem =
   | { kind: "file"; op: FileOp }
   | { kind: "plan"; op: PlanOp };
 
+// Git status letter badge color
+function gitStatusColor(status: string): string {
+  switch (status) {
+    case "M": return "var(--warning)";
+    case "A": return "var(--success)";
+    case "D": return "var(--danger)";
+    case "R": return "var(--accent)";
+    default: return "var(--text-secondary)";
+  }
+}
+
+// Truncate user message for display
+function truncateMsg(text: string, max = 60): string {
+  const oneLine = text.replace(/\n/g, " ").trim();
+  return oneLine.length > max ? oneLine.slice(0, max) + "…" : oneLine;
+}
+
 const FilePreviewPanel = memo(function FilePreviewPanel({
   fileOps,
   plans,
   messages,
   selectedId,
   onSelect,
+  gitSnapshot,
 }: {
   fileOps: FileOp[];
   plans: PlanOp[];
   messages: ThreadMessageLike[];
   selectedId: string | null;
   onSelect: (id: string) => void;
+  gitSnapshot?: MultiRepoSnapshot | null;
 }) {
   const { theme: appTheme } = useTheme();
   const shikiTheme = appTheme.shikiTheme;
@@ -60,43 +79,44 @@ const FilePreviewPanel = memo(function FilePreviewPanel({
   // Build steps from messages
   const steps = useMemo(() => groupFileOpsByTask(messages), [messages]);
 
-  // Active step state — auto-advance to latest
-  const [activeStep, setActiveStep] = useState(0);
+  // Accordion: track which steps are expanded (latest auto-expands)
+  const [expandedSteps, setExpandedSteps] = useState<Set<number>>(new Set());
   const prevStepCountRef = useRef(steps.length);
   useEffect(() => {
     if (steps.length > prevStepCountRef.current) {
-      setActiveStep(steps.length - 1);
+      // Collapse previous latest, expand new latest
+      setExpandedSteps(new Set([steps.length - 1]));
+    } else if (steps.length > 0 && expandedSteps.size === 0) {
+      setExpandedSteps(new Set([steps.length - 1]));
     }
     prevStepCountRef.current = steps.length;
   }, [steps.length]);
 
-  // Clamp activeStep
-  const clampedStep = Math.min(activeStep, Math.max(0, steps.length - 1));
-  const currentStep: TaskStep | undefined = steps[clampedStep];
+  const toggleStep = (idx: number) => {
+    setExpandedSteps((prev) => {
+      const next = new Set(prev);
+      if (next.has(idx)) next.delete(idx);
+      else next.add(idx);
+      return next;
+    });
+  };
 
-  // The file ops to show: current step's ops (or empty)
-  const stepFileOps = currentStep?.fileOps ?? [];
-
-  // Find selected item across plans and current step's file ops
-  const allFileOps = stepFileOps; // only show current step
+  // Find selected item across plans and all file ops
   const selected: SelectedItem | null = useMemo(() => {
     if (selectedId) {
       const plan = plans.find((p) => p.toolCallId === selectedId);
       if (plan) return { kind: "plan", op: plan };
-      const file = allFileOps.find((f) => f.toolCallId === selectedId);
+      const file = fileOps.find((f) => f.toolCallId === selectedId);
       if (file) return { kind: "file", op: file };
-      // Also check all fileOps (in case selected from a different step)
-      const anyFile = fileOps.find((f) => f.toolCallId === selectedId);
-      if (anyFile) return { kind: "file", op: anyFile };
     }
-    // Default to latest item in current step
-    const lastFile = allFileOps[allFileOps.length - 1];
+    // Default to latest item
+    const lastFile = fileOps[fileOps.length - 1];
     const lastPlan = plans[plans.length - 1];
     if (!lastFile && !lastPlan) return null;
     if (!lastFile) return { kind: "plan", op: lastPlan };
     if (!lastPlan) return { kind: "file", op: lastFile };
     return { kind: "file", op: lastFile };
-  }, [selectedId, allFileOps, fileOps, plans]);
+  }, [selectedId, fileOps, plans]);
 
   const fileOp = selected?.kind === "file" ? selected.op : null;
   const planOp = selected?.kind === "plan" ? selected.op : null;
@@ -125,7 +145,6 @@ const FilePreviewPanel = memo(function FilePreviewPanel({
         map.push(newTokens?.[newIdx] ?? null);
         newIdx++;
       } else {
-        // ctx — advance both
         map.push(newTokens?.[newIdx] ?? oldTokens?.[oldIdx] ?? null);
         oldIdx++;
         newIdx++;
@@ -141,140 +160,193 @@ const FilePreviewPanel = memo(function FilePreviewPanel({
   for (const p of plans) planMap.set(p.filePath, p);
   const uniquePlans = [...planMap.values()];
 
-  // Group step file ops by directory for tree display
-  const groups = new Map<string, FileOp[]>();
-  for (const f of stepFileOps) {
-    const parts = f.filePath.replace(/\\/g, "/").split("/");
-    const name = parts.pop() || f.filePath;
-    const dir = parts.length > 0 ? parts.slice(-2).join("/") : "";
-    const existing = groups.get(dir) || [];
-    existing.push({ ...f, filePath: name }); // store basename for display
-    groups.set(dir, existing);
-  }
-
   const activeId = selected?.kind === "file" ? selected.op.toolCallId : selected?.op.toolCallId ?? "";
 
-  // Truncate user message for display
-  const truncateMsg = (text: string, max = 80) => {
-    const oneLine = text.replace(/\n/g, " ").trim();
-    return oneLine.length > max ? oneLine.slice(0, max) + "…" : oneLine;
+  // Match a file op path to a git file path
+  const matchGitFile = (opPath: string, gitPath: string): boolean => {
+    const normalizedOp = opPath.replace(/\\/g, "/");
+    return normalizedOp.endsWith(gitPath) || gitPath.endsWith(normalizedOp);
+  };
+
+  // Build set of file paths that have tool-call ops (for marking clickable git files)
+  const fileOpsByPath = useMemo(() => {
+    const map = new Map<string, FileOp>();
+    for (const op of fileOps) {
+      map.set(op.filePath.replace(/\\/g, "/"), op);
+    }
+    return map;
+  }, [fileOps]);
+
+  // Find matching file op for a git file
+  const findMatchingOp = (gitPath: string): FileOp | null => {
+    for (const [opPath, op] of fileOpsByPath) {
+      if (matchGitFile(opPath, gitPath)) return op;
+    }
+    return null;
+  };
+
+  // Render a line-count badge for a file op
+  const renderBadge = (op: FileOp): React.ReactNode => {
+    if (op.type === "edit") {
+      const { added, removed } = editLineCounts(op);
+      if (added === 0 && removed === 0) return null;
+      return (
+        <span className="fr-file-badge">
+          {removed > 0 && <span className="fr-file-badge-del">−{removed}</span>}
+          {added > 0 && <span className="fr-file-badge-add">+{added}</span>}
+        </span>
+      );
+    } else if (op.type === "write") {
+      const lines = writeLineCount(op);
+      if (lines > 0) return <span className="fr-file-badge"><span className="fr-file-badge-add">+{lines}</span></span>;
+    }
+    return null;
   };
 
   return (
     <div className="fr-preview-split">
       <div className="fr-preview-tree">
-        {/* Stepper — sticky context bar at top */}
-        {steps.length > 0 && (
-          <div className="fr-stepper" title={currentStep?.userMessage}>
-            <button
-              className="fr-stepper-btn"
-              disabled={clampedStep <= 0}
-              onClick={() => setActiveStep((s) => Math.max(0, s - 1))}
-            >
-              ‹
-            </button>
-            <span className="fr-stepper-label">
-              Step {clampedStep + 1} of {steps.length}
-            </span>
-            <button
-              className="fr-stepper-btn"
-              disabled={clampedStep >= steps.length - 1}
-              onClick={() => setActiveStep((s) => Math.min(steps.length - 1, s + 1))}
-            >
-              ›
-            </button>
-          </div>
-        )}
 
-        {/* Plans section — always visible, step-independent */}
-        {uniquePlans.length > 0 && (
-          <div className="fr-tree-section">
-            <div className="fr-tree-section-label">Plans</div>
-            {uniquePlans.map((p) => {
-              const isActive = p.toolCallId === activeId;
-              const icon = fileIcon(p.filePath);
-              return (
-                <button
-                  key={p.toolCallId}
-                  className={`fr-tree-file ${isActive ? "fr-tree-file-active" : ""}`}
-                  onClick={() => onSelect(p.toolCallId)}
-                  title={p.filePath}
-                >
-                  <span className="fr-tree-icon" style={{ color: icon.color }}>{icon.icon}</span>
-                  <span className="fr-tree-file-name">{basename(p.filePath)}</span>
-                </button>
+        {/* ─── Section 1: Git Status ─── */}
+        {gitSnapshot && gitSnapshot.repos.length > 0 && (
+          <div className="fr-sidebar-section">
+            {/* Branch badges */}
+            <div className="fr-git-branches">
+              {gitSnapshot.repos.map((repo) => (
+                <div key={repo.root || "_root"} className="fr-git-branch">
+                  <span className="fr-git-branch-icon">⎇</span>
+                  {gitSnapshot.repos.length > 1 && repo.root && (
+                    <span className="fr-git-branch-repo">{repo.root}:</span>
+                  )}
+                  <span className="fr-git-branch-name">{repo.branch}</span>
+                  {repo.is_dirty && <span className="fr-git-branch-dirty">•</span>}
+                </div>
+              ))}
+            </div>
+
+            {/* Git file list */}
+            {gitSnapshot.repos.some((r) => r.files.length > 0) && (() => {
+              const totalFiles = gitSnapshot.repos.reduce((n, r) => n + r.files.length, 0);
+              const totalAdded = gitSnapshot.repos.reduce(
+                (n, r) => n + r.files.reduce((a, f) => a + f.additions, 0), 0
               );
-            })}
+              const totalDeleted = gitSnapshot.repos.reduce(
+                (n, r) => n + r.files.reduce((a, f) => a + f.deletions, 0), 0
+              );
+              return (
+                <div className="fr-git-files">
+                  <div className="fr-section-header">
+                    <span className="fr-section-title">Changes</span>
+                    <span className="fr-section-stats">
+                      {totalFiles}
+                      {totalAdded > 0 && <span className="fr-file-badge-add"> +{totalAdded}</span>}
+                      {totalDeleted > 0 && <span className="fr-file-badge-del"> −{totalDeleted}</span>}
+                    </span>
+                  </div>
+                  {gitSnapshot.repos.map((repo) =>
+                    repo.files.map((f) => {
+                      const icon = fileIcon(f.path);
+                      const matchingOp = findMatchingOp(f.path);
+                      return matchingOp ? (
+                        <button
+                          key={`${repo.root}/${f.path}`}
+                          className={`fr-tree-file ${matchingOp.toolCallId === activeId ? "fr-tree-file-active" : ""}`}
+                          onClick={() => onSelect(matchingOp.toolCallId)}
+                          title={f.path}
+                        >
+                          <span className="fr-tree-icon" style={{ color: icon.color }}>{icon.icon}</span>
+                          <span className="fr-tree-file-name">{basename(f.path)}</span>
+                          {renderBadge(matchingOp) ?? <span className="fr-git-status" style={{ color: gitStatusColor(f.status) }}>{f.status}</span>}
+                        </button>
+                      ) : (
+                        <div
+                          key={`${repo.root}/${f.path}`}
+                          className="fr-tree-file fr-git-only"
+                          title={f.path}
+                        >
+                          <span className="fr-tree-icon" style={{ color: icon.color }}>{icon.icon}</span>
+                          <span className="fr-tree-file-name">{basename(f.path)}</span>
+                          <span className="fr-git-status" style={{ color: gitStatusColor(f.status) }}>{f.status}</span>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              );
+            })()}
           </div>
         )}
 
-        {/* File list for active step */}
-        {stepFileOps.length > 0 && (
-          <div className="fr-tree-section fr-tree-section-files">
-            <div className="fr-tree-section-label">Changed files</div>
-            {[...groups.entries()].map(([dir, files]) => (
-              <div key={dir} className="fr-tree-group">
-                {dir && <div className="fr-tree-dir">{dir}</div>}
-                {files.map((f) => {
-                  const original = stepFileOps.find((o) => o.filePath.endsWith(f.filePath) && o.toolCallId === f.toolCallId);
-                  const isActive = original?.toolCallId === activeId;
-                  const icon = fileIcon(f.filePath);
-                  // Line count badge
-                  let badge: React.ReactNode = null;
-                  if (original) {
-                    if (original.type === "edit") {
-                      const { added, removed } = editLineCounts(original);
-                      badge = (
-                        <span className="fr-file-badge">
-                          {removed > 0 && <span className="fr-file-badge-del">−{removed}</span>}
-                          {added > 0 && <span className="fr-file-badge-add">+{added}</span>}
-                        </span>
-                      );
-                    } else if (original.type === "write") {
-                      const lines = writeLineCount(original);
-                      if (lines > 0) {
-                        badge = <span className="fr-file-badge"><span className="fr-file-badge-add">+{lines}</span></span>;
-                      }
-                    }
-                  }
+        {/* ─── Section 2: Run Log ─── */}
+        {(steps.length > 0 || uniquePlans.length > 0) && (
+          <div className="fr-sidebar-section fr-sidebar-section-runlog">
+            <div className="fr-section-header">
+              <span className="fr-section-title">Run log</span>
+              <span className="fr-section-stats">{steps.length} step{steps.length !== 1 ? "s" : ""}</span>
+            </div>
+
+            {/* Plans — always visible */}
+            {uniquePlans.length > 0 && (
+              <div className="fr-runlog-group">
+                <div className="fr-runlog-group-label">Plans</div>
+                {uniquePlans.map((p) => {
+                  const isActive = p.toolCallId === activeId;
+                  const icon = fileIcon(p.filePath);
                   return (
                     <button
-                      key={f.toolCallId}
+                      key={p.toolCallId}
                       className={`fr-tree-file ${isActive ? "fr-tree-file-active" : ""}`}
-                      onClick={() => onSelect(f.toolCallId)}
-                      title={original?.filePath}
+                      onClick={() => onSelect(p.toolCallId)}
+                      title={p.filePath}
                     >
                       <span className="fr-tree-icon" style={{ color: icon.color }}>{icon.icon}</span>
-                      <span className="fr-tree-file-name">{f.filePath}</span>
-                      {badge}
+                      <span className="fr-tree-file-name">{basename(p.filePath)}</span>
                     </button>
                   );
                 })}
               </div>
-            ))}
+            )}
+
+            {/* Step accordion */}
+            {steps.map((step, idx) => {
+              const isExpanded = expandedSteps.has(idx);
+              return (
+                <div key={idx} className="fr-runlog-step">
+                  <button
+                    className={`fr-runlog-step-header ${isExpanded ? "fr-runlog-step-expanded" : ""}`}
+                    onClick={() => toggleStep(idx)}
+                  >
+                    <span className="fr-runlog-caret">{isExpanded ? "▾" : "▸"}</span>
+                    <span className="fr-runlog-step-label">
+                      {step.userMessage ? truncateMsg(step.userMessage) : `Step ${idx + 1}`}
+                    </span>
+                    <span className="fr-runlog-step-count">{step.fileOps.length}</span>
+                  </button>
+                  {isExpanded && (
+                    <div className="fr-runlog-step-body">
+                      {step.fileOps.map((op) => {
+                        const isActive = op.toolCallId === activeId;
+                        const icon = fileIcon(op.filePath);
+                        return (
+                          <button
+                            key={op.toolCallId}
+                            className={`fr-tree-file ${isActive ? "fr-tree-file-active" : ""}`}
+                            onClick={() => onSelect(op.toolCallId)}
+                            title={op.filePath}
+                          >
+                            <span className="fr-tree-icon" style={{ color: icon.color }}>{icon.icon}</span>
+                            <span className="fr-tree-file-name">{basename(op.filePath)}</span>
+                            {renderBadge(op)}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
-
-        {/* Summary footer */}
-        {stepFileOps.length > 0 && (() => {
-          let totalAdded = 0, totalRemoved = 0;
-          for (const op of stepFileOps) {
-            if (op.type === "edit") {
-              const c = editLineCounts(op);
-              totalAdded += c.added;
-              totalRemoved += c.removed;
-            } else if (op.type === "write" && op.content) {
-              totalAdded += op.content.split("\n").length;
-            }
-          }
-          return (
-            <div className="fr-tree-summary">
-              {stepFileOps.length} file{stepFileOps.length !== 1 ? "s" : ""} changed
-              {totalAdded > 0 && <span className="fr-file-badge-add"> +{totalAdded}</span>}
-              {totalRemoved > 0 && <span className="fr-file-badge-del"> −{totalRemoved}</span>}
-            </div>
-          );
-        })()}
       </div>
 
       <div className="fr-preview-main">

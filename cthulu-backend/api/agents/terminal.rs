@@ -169,6 +169,7 @@ async fn handle_terminal(socket: WebSocket, state: AppState, agent_id: String, q
                         skills_dir: None,
                         kind: "interactive".to_string(),
                         flow_run: None,
+                        worktree_group: None,
                     }],
                 }
             });

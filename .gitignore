@@ -12,3 +12,4 @@ sessions.yaml.tmp
 # Nx / Node
 .nx/
 node_modules/
+.claude/
