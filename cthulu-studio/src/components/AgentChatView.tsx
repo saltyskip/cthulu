@@ -26,6 +26,8 @@ export default function AgentChatView({ agentId, sessionId }: AgentChatViewProps
       debugEvents={chat.debugEvents}
       onToggleDebug={() => chat.setDebugMode((v) => !v)}
       onClearDebug={chat.clearDebugEvents}
+      onClear={chat.clearMessages}
+      onInjectAssistant={chat.injectAssistantMessage}
     />
   );
 }

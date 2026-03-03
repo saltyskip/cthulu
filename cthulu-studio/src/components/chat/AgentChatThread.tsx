@@ -46,6 +46,14 @@ function DebugEventRow({ ev }: { ev: DebugEvent }) {
   );
 }
 
+/* ── Slash command registry ──────────────────────────────────────── */
+
+const SLASH_COMMANDS = [
+  { command: "/compact", description: "Compress conversation context", type: "backend" as const },
+  { command: "/clear", description: "Clear chat history", type: "local" as const },
+  { command: "/help", description: "Show available commands", type: "local" as const },
+];
+
 interface AgentChatThreadProps {
   messages: ThreadMessageLike[];
   isStreaming: boolean;
@@ -53,6 +61,8 @@ interface AgentChatThreadProps {
   isDone: boolean;
   onNew: (message: { content: unknown; role?: string }) => Promise<void>;
   onCancel: () => void;
+  onClear: () => void;
+  onInjectAssistant: (text: string) => void;
   attachments: ImageAttachment[];
   onAddFiles: (files: FileList | File[]) => void;
   onRemoveAttachment: (id: string) => void;
@@ -70,6 +80,8 @@ export default function AgentChatThread({
   isDone,
   onNew,
   onCancel,
+  onClear,
+  onInjectAssistant,
   attachments,
   onAddFiles,
   onRemoveAttachment,
@@ -80,13 +92,120 @@ export default function AgentChatThread({
   onClearDebug,
 }: AgentChatThreadProps) {
   const [dragOver, setDragOver] = useState(false);
+
+  /* ── Slash command state ── */
+  const [slashFilter, setSlashFilter] = useState<string | null>(null);
+  const [slashIndex, setSlashIndex] = useState(0);
+
+  const filteredCommands = useMemo(() => {
+    if (slashFilter === null) return [];
+    if (slashFilter === "") return SLASH_COMMANDS;
+    const q = slashFilter.toLowerCase();
+    return SLASH_COMMANDS.filter((c) => c.command.slice(1).startsWith(q));
+  }, [slashFilter]);
+
+  // Reset selection when filter changes
+  const prevFilterRef = useRef(slashFilter);
+  if (slashFilter !== prevFilterRef.current) {
+    prevFilterRef.current = slashFilter;
+    setSlashIndex(0);
+  }
+
+  const handleComposerChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const val = e.target.value;
+    if (val.startsWith("/")) {
+      setSlashFilter(val.slice(1));
+    } else {
+      setSlashFilter(null);
+    }
+  }, []);
+
+  const composerInputRef = useRef<HTMLTextAreaElement>(null);
+
+  const selectSlashCommand = useCallback((cmd: string) => {
+    setSlashFilter(null);
+    // Fill the composer with the command — we need to set the native input value
+    const input = composerInputRef.current;
+    if (input) {
+      const nativeSetter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set;
+      nativeSetter?.call(input, cmd);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      input.focus();
+    }
+  }, []);
+
+  const handleSlashKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (slashFilter === null || filteredCommands.length === 0) return;
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setSlashIndex((i) => (i + 1) % filteredCommands.length);
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setSlashIndex((i) => (i - 1 + filteredCommands.length) % filteredCommands.length);
+    } else if (e.key === "Tab" || (e.key === "Enter" && filteredCommands.length > 0)) {
+      // Tab always selects; Enter selects only if popup is showing
+      // But if the full command is already typed and user presses Enter, let it send
+      const input = composerInputRef.current;
+      const currentVal = input?.value || "";
+      const isExactMatch = SLASH_COMMANDS.some((c) => c.command === currentVal.trim());
+      if (e.key === "Tab" || !isExactMatch) {
+        e.preventDefault();
+        selectSlashCommand(filteredCommands[slashIndex].command);
+      }
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      setSlashFilter(null);
+    }
+  }, [slashFilter, filteredCommands, slashIndex, selectSlashCommand]);
+
   // Stable references prevent useExternalStoreRuntime from flushing its
   // internal converter cache on every render — without this, the runtime
   // re-converts ALL messages each frame, which can delay tool-call rendering.
   const convertMessage = useCallback((msg: ThreadMessageLike) => msg, []);
+
   const handleNew = useCallback(
-    async (message: { content: unknown; role?: string }) => { await onNew(message); },
-    [onNew],
+    async (message: { content: unknown; role?: string }) => {
+      // Extract text from message content
+      let text = "";
+      const content = message.content;
+      if (typeof content === "string") {
+        text = content;
+      } else if (Array.isArray(content)) {
+        text = (content as Array<Record<string, unknown>>)
+          .filter((p) => p.type === "text" && p.text)
+          .map((p) => p.text as string)
+          .join("\n");
+      }
+
+      const trimmed = text.trim();
+
+      // Check for slash commands
+      if (trimmed.startsWith("/")) {
+        const cmd = SLASH_COMMANDS.find((c) => c.command === trimmed);
+        setSlashFilter(null);
+
+        if (cmd?.type === "local") {
+          if (cmd.command === "/clear") {
+            onClear();
+            return;
+          }
+          if (cmd.command === "/help") {
+            const helpText = "**Available commands:**\n" + SLASH_COMMANDS.map(
+              (c) => `\`${c.command}\` — ${c.description}`
+            ).join("\n");
+            onInjectAssistant(helpText);
+            return;
+          }
+        }
+
+        // Backend command (e.g. /compact) or unknown — forward as-is
+        await onNew(message);
+        return;
+      }
+
+      await onNew(message);
+    },
+    [onNew, onClear, onInjectAssistant],
   );
   const handleCancel = useCallback(async () => { onCancel(); }, [onCancel]);
   const handleAddToolResult = useCallback(
@@ -300,6 +419,24 @@ export default function AgentChatThread({
           )}
 
           <div className="ac-footer" onPaste={handlePaste}>
+            {slashFilter !== null && filteredCommands.length > 0 && (
+              <div className="ac-slash-popup">
+                {filteredCommands.map((cmd, i) => (
+                  <div
+                    key={cmd.command}
+                    className={`ac-slash-item ${i === slashIndex ? "ac-slash-item-active" : ""}`}
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      selectSlashCommand(cmd.command);
+                    }}
+                    onMouseEnter={() => setSlashIndex(i)}
+                  >
+                    <span className="ac-slash-cmd">{cmd.command}</span>
+                    <span className="ac-slash-desc">{cmd.description}</span>
+                  </div>
+                ))}
+              </div>
+            )}
             <ComposerPrimitive.Root>
               <button
                 className={`ac-btn ac-btn-debug ${debugMode ? "ac-btn-debug-active" : ""}`}
@@ -329,8 +466,12 @@ export default function AgentChatThread({
                 }}
               />
               <ComposerPrimitive.Input
+                ref={composerInputRef}
+                rows={1}
                 placeholder="Send a message..."
                 autoFocus
+                onChange={handleComposerChange}
+                onKeyDown={handleSlashKeyDown}
               />
               {isStreaming ? (
                 <button className="ac-btn ac-btn-stop" onClick={onCancel}>

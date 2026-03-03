@@ -354,6 +354,22 @@ export function useAgentChat(agentId: string, sessionId: string) {
     stopAgentChat(agentId, sessionId).catch(() => {});
   }, [agentId, sessionId]);
 
+  const clearMessages = useCallback(() => {
+    setMessages([]);
+    setStreamingParts([]);
+    partsRef.current = [];
+    setIsStreaming(false);
+    setIsDone(false);
+    setResultMeta(null);
+  }, []);
+
+  const injectAssistantMessage = useCallback((text: string) => {
+    setMessages((prev) => [
+      ...prev,
+      { role: "assistant" as const, content: [{ type: "text" as const, text }], createdAt: new Date() },
+    ]);
+  }, []);
+
   const threadMessages = useMemo((): ThreadMessageLike[] => {
     if (!isStreaming) return messages;
     return streamingParts.length > 0
@@ -370,6 +386,8 @@ export function useAgentChat(agentId: string, sessionId: string) {
     fileInputRef,
     handleSend,
     handleCancel,
+    clearMessages,
+    injectAssistantMessage,
     addFiles,
     removeAttachment,
     debugMode,
