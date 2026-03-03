@@ -6,23 +6,9 @@ import { useTheme } from "../../lib/ThemeContext";
 import type { FileOp, PlanOp } from "./FilePreviewContext";
 import { computeDiffLines } from "../../utils/diff";
 import { fileIcon } from "../../utils/fileIcons";
+import { langFromPath } from "../../utils/langFromPath";
 import { SyntaxHighlighter } from "../assistant-ui/shiki-highlighter";
 import { useShikiTokens, type Token } from "./useShikiTokens";
-
-const EXT_TO_LANG: Record<string, string> = {
-  ts: "typescript", tsx: "tsx", js: "javascript", jsx: "jsx",
-  rs: "rust", py: "python", rb: "ruby", go: "go",
-  java: "java", kt: "kotlin", swift: "swift", cs: "csharp",
-  css: "css", scss: "scss", html: "html", vue: "vue", svelte: "svelte",
-  json: "json", yaml: "yaml", yml: "yaml", toml: "toml",
-  md: "markdown", sql: "sql", sh: "bash", zsh: "bash", bash: "bash",
-  dockerfile: "dockerfile", graphql: "graphql",
-};
-
-function langFromPath(filePath: string): string | undefined {
-  const ext = filePath.split(".").pop()?.toLowerCase() || "";
-  return EXT_TO_LANG[ext];
-}
 
 function basename(filePath: string): string {
   return filePath.replace(/\\/g, "/").split("/").pop() || filePath;

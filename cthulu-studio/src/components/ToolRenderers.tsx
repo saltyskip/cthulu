@@ -1,12 +1,15 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import {
   makeAssistantToolUI,
   type ToolCallMessagePartProps,
 } from "@assistant-ui/react";
 import { useAuiState } from "@assistant-ui/store";
 import { useFilePreviewSelect } from "./chat/FilePreviewContext";
+import { useShikiTokens, type Token } from "./chat/useShikiTokens";
+import { useTheme } from "../lib/ThemeContext";
 import { computeDiffLines } from "../utils/diff";
 import { fileIcon } from "../utils/fileIcons";
+import { langFromPath } from "../utils/langFromPath";
 
 // Helpers
 
@@ -72,9 +75,9 @@ function ToolShell({
         {dir && <span className="fr-tool-file-dir">{dir}</span>}
         {error && <span className="fr-tool-err">✗</span>}
         {done && !error && <span className="fr-tool-done">✓</span>}
-        {hasBody && (
-          <span className="fr-tool-caret">{open ? "▾" : "▸"}</span>
-        )}
+        <span className="fr-tool-caret" style={hasBody ? undefined : { visibility: "hidden" }}>
+          {open ? "▾" : "▸"}
+        </span>
       </div>
       {open && children && (
         <div className="fr-tool-detail">{children}</div>
@@ -100,6 +103,34 @@ export function EditToolRenderer(props: ToolCallMessagePartProps) {
       ? computeDiffLines(args.old_string, args.new_string)
       : null;
 
+  // Shiki syntax highlighting for diff tokens
+  const { theme: appTheme } = useTheme();
+  const shikiTheme = appTheme.shikiTheme;
+  const lang = useMemo(() => langFromPath(filePath), [filePath]);
+  const oldTokens = useShikiTokens(args.old_string, lang, shikiTheme);
+  const newTokens = useShikiTokens(args.new_string, lang, shikiTheme);
+
+  const diffTokenMap = useMemo(() => {
+    if (!diffLines) return null;
+    const map: (Token[] | null)[] = [];
+    let oldIdx = 0;
+    let newIdx = 0;
+    for (const line of diffLines) {
+      if (line.type === "del") {
+        map.push(oldTokens?.[oldIdx] ?? null);
+        oldIdx++;
+      } else if (line.type === "add") {
+        map.push(newTokens?.[newIdx] ?? null);
+        newIdx++;
+      } else {
+        map.push(newTokens?.[newIdx] ?? oldTokens?.[oldIdx] ?? null);
+        oldIdx++;
+        newIdx++;
+      }
+    }
+    return map;
+  }, [diffLines, oldTokens, newTokens]);
+
   const handleClick = selectFile
     ? () => selectFile(props.toolCallId)
     : undefined;
@@ -123,23 +154,32 @@ export function EditToolRenderer(props: ToolCallMessagePartProps) {
     >
       {diffLines && (
         <div className="fr-diff">
-          {diffLines.map((line, i) => (
-            <div
-              key={i}
-              className={`fr-diff-line ${
-                line.type === "del"
-                  ? "fr-diff-del"
-                  : line.type === "add"
-                    ? "fr-diff-add"
-                    : "fr-diff-ctx"
-              }`}
-            >
-              <span className="fr-diff-prefix">
-                {line.type === "del" ? "−" : line.type === "add" ? "+" : " "}
-              </span>
-              {line.text}
-            </div>
-          ))}
+          {diffLines.map((line, i) => {
+            const tokens = diffTokenMap?.[i];
+            return (
+              <div
+                key={i}
+                className={`fr-diff-line ${
+                  line.type === "del"
+                    ? "fr-diff-del"
+                    : line.type === "add"
+                      ? "fr-diff-add"
+                      : "fr-diff-ctx"
+                }`}
+              >
+                <span className="fr-diff-prefix">
+                  {line.type === "del" ? "−" : line.type === "add" ? "+" : " "}
+                </span>
+                {tokens
+                  ? tokens.map((t, j) => (
+                      <span key={j} style={t.color ? { color: t.color } : undefined}>
+                        {t.content}
+                      </span>
+                    ))
+                  : line.text}
+              </div>
+            );
+          })}
         </div>
       )}
     </ToolShell>
