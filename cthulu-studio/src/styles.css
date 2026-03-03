@@ -2553,96 +2553,121 @@ button:disabled {
   text-align: center;
 }
 
-.fr-tree-section {
-  margin-bottom: 2px;
-  padding-top: 2px;
+/* ─── Sidebar sections (Git Status / Run Log) ─── */
+.fr-sidebar-section {
+  display: flex;
+  flex-direction: column;
 }
 
-.fr-tree-section-files {
+.fr-sidebar-section-runlog {
+  border-top: 1px solid var(--border);
   flex: 1;
 }
 
-.fr-tree-section-label {
-  padding: 8px 10px 3px;
-  font-size: 10px;
-  font-weight: 500;
-  color: var(--text-secondary);
+.fr-section-header {
   display: flex;
-  align-items: baseline;
+  align-items: center;
+  padding: 6px 10px 4px;
   gap: 6px;
 }
 
-.fr-wt-stats {
+.fr-section-title {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-secondary);
+}
+
+.fr-section-stats {
   margin-left: auto;
   font-size: 9px;
   font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
-  opacity: 0.7;
-}
-
-/* Stepper — sticky context bar at top of sidebar */
-.fr-stepper {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 2px;
-  padding: 6px 10px;
-  border-bottom: 1px solid var(--border);
-  background: var(--bg-secondary);
-  position: sticky;
-  top: 0;
-  z-index: 1;
-}
-
-.fr-stepper-nav {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.fr-stepper-msg {
-  font-size: 10px;
   color: var(--text-secondary);
   opacity: 0.7;
-  max-width: 100%;
+}
+
+/* Git file list within git status section */
+.fr-git-files {
+  padding-bottom: 4px;
+}
+
+/* Run log groups (plans) */
+.fr-runlog-group {
+  margin-bottom: 2px;
+}
+
+.fr-runlog-group-label {
+  padding: 4px 10px 2px;
+  font-size: 9px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  opacity: 0.7;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+/* Run log step accordion */
+.fr-runlog-step {
+  border-top: 1px solid color-mix(in srgb, var(--border) 50%, transparent);
+}
+
+.fr-runlog-step:first-of-type {
+  border-top: none;
+}
+
+.fr-runlog-step-header {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  padding: 5px 10px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.1s;
+}
+
+.fr-runlog-step-header:hover {
+  background: var(--bg-tertiary);
+  color: var(--text);
+}
+
+.fr-runlog-step-expanded {
+  background: color-mix(in srgb, var(--bg-tertiary) 50%, transparent);
+}
+
+.fr-runlog-caret {
+  font-size: 9px;
+  flex-shrink: 0;
+  width: 12px;
+  color: var(--text-secondary);
+}
+
+.fr-runlog-step-label {
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  text-align: center;
 }
 
-.fr-stepper-btn {
-  width: 20px;
-  height: 20px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: none;
-  border: 1px solid var(--border);
-  border-radius: 3px;
-  color: var(--text-secondary);
-  font-size: 13px;
-  cursor: pointer;
-  padding: 0;
-  line-height: 1;
+.fr-runlog-step-count {
   flex-shrink: 0;
-}
-
-.fr-stepper-btn:hover:not(:disabled) {
+  font-size: 9px;
+  padding: 0 5px;
+  border-radius: 3px;
   background: var(--bg-tertiary);
-  color: var(--accent);
-  border-color: var(--accent);
-}
-
-.fr-stepper-btn:disabled {
-  opacity: 0.25;
-  cursor: default;
-}
-
-.fr-stepper-label {
-  font-size: 10px;
-  font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
   color: var(--text-secondary);
-  white-space: nowrap;
+  border: 1px solid var(--border);
+  line-height: 16px;
+}
+
+.fr-runlog-step-body {
+  padding-bottom: 2px;
 }
 
 /* File tree line count badges — pill style (à la GitHub) */
@@ -2680,15 +2705,6 @@ button:disabled {
   background: color-mix(in srgb, var(--danger) 12%, transparent);
 }
 
-/* Summary footer — pushed to bottom */
-.fr-tree-summary {
-  padding: 8px 10px;
-  font-size: 10px;
-  color: var(--text-secondary);
-  opacity: 0.6;
-  margin-top: auto;
-  border-top: 1px solid var(--border);
-}
 
 /* Git branch badges */
 .fr-git-branches {
@@ -2696,8 +2712,6 @@ button:disabled {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
-  border-bottom: 1px solid var(--border);
-  margin-bottom: 4px;
 }
 
 .fr-git-branch {
@@ -2755,21 +2769,6 @@ button:disabled {
   background: transparent;
 }
 
-/* Files from a different step (clickable but dimmer) */
-.fr-git-other-step {
-  opacity: 0.6;
-}
-
-.fr-git-other-step:hover {
-  opacity: 0.85;
-}
-
-/* All changes section separator */
-.fr-tree-section-git {
-  border-top: 1px solid var(--border);
-  margin-top: 4px;
-  padding-top: 2px;
-}
 
 /* Markdown preview for plans */
 .fr-preview-markdown {
