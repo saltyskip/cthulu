@@ -12,6 +12,7 @@ use futures::stream::Stream;
 use serde_json::json;
 use std::convert::Infallible;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::Ordering;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 use tokio_stream::wrappers::LinesStream;
@@ -21,9 +22,10 @@ use crate::api::AppState;
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
-/// Compile-time project root. `CARGO_MANIFEST_DIR` is set by cargo during build
-/// and points to the directory containing `Cargo.toml` — the workspace root.
-/// This is reliable across `cargo run`, release binaries, and installed paths.
+/// Compile-time path to the workspace root. `CARGO_MANIFEST_DIR` is set by
+/// cargo during build and points to the directory containing `Cargo.toml`.
+/// Only valid when running from the original build tree — not portable if the
+/// binary is copied to another machine or directory.
 const PROJECT_ROOT: &str = env!("CARGO_MANIFEST_DIR");
 
 fn project_root() -> &'static Path {
@@ -67,10 +69,10 @@ pub(crate) async fn mcp_status(State(state): State<AppState>) -> impl IntoRespon
     // 2. Launcher exists?
     let launcher_exists = launcher.exists();
 
-    // 3. Registered in Claude Desktop?
+    // 3. Registered in Claude Desktop? (async file read to avoid blocking the runtime)
     let (registered, config_entry, config_path_str) = match &config_path {
         Some(path) if path.exists() => {
-            match std::fs::read_to_string(path) {
+            match tokio::fs::read_to_string(path).await {
                 Ok(raw) => match serde_json::from_str::<serde_json::Value>(&raw) {
                     Ok(cfg) => {
                         let entry = cfg
@@ -125,15 +127,26 @@ pub(crate) async fn mcp_status(State(state): State<AppState>) -> impl IntoRespon
 
 // ── POST /api/mcp/build ───────────────────────────────────────────────────────
 // Returns an SSE stream so the UI can show live build output.
+// Only one build can run at a time — concurrent requests are rejected.
 
 pub(crate) async fn mcp_build(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
     let root = project_root().to_path_buf();
+    let building = state.mcp_building.clone();
 
-    tracing::info!(?root, "Starting cthulu-mcp release build");
+    // Concurrency guard: acquire before entering the stream
+    let already_building = building.swap(true, Ordering::SeqCst);
 
     let stream = async_stream::stream! {
+        if already_building {
+            tracing::warn!("Rejected concurrent MCP build request");
+            yield Ok(Event::default().event("error").data("Build already in progress"));
+            yield Ok(Event::default().event("done").data("exit:1"));
+            return;
+        }
+
+        tracing::info!(?root, "Starting cthulu-mcp release build");
         yield Ok(Event::default().data("[cthulu-mcp] Starting build: cargo build --release --bin cthulu-mcp"));
 
         let mut child = match Command::new("cargo")
@@ -148,6 +161,7 @@ pub(crate) async fn mcp_build(
                 tracing::error!(error = %e, "Failed to spawn cargo build");
                 yield Ok(Event::default().event("error").data(format!("Failed to spawn cargo: {e}")));
                 yield Ok(Event::default().event("done").data("exit:1"));
+                building.store(false, Ordering::SeqCst);
                 return;
             }
         };
@@ -187,6 +201,9 @@ pub(crate) async fn mcp_build(
                 yield Ok(Event::default().event("done").data("exit:1"));
             }
         }
+
+        // Release the build guard
+        building.store(false, Ordering::SeqCst);
     };
 
     Sse::new(stream)

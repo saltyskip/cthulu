@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { getMcpStatus, buildMcp, registerMcp, type McpStatus } from "../api/client";
 
 // ── Status badge ──────────────────────────────────────────────────────────────
@@ -43,7 +43,6 @@ export default function McpSetupView() {
   const [registering, setRegistering] = useState(false);
   const [registerResult, setRegisterResult] = useState<{ ok: boolean; message?: string; error?: string } | null>(null);
   const logEndRef = useRef<HTMLDivElement>(null);
-  const initialized = useRef(false);
 
   const scrollToEnd = useCallback(() => {
     logEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -60,11 +59,8 @@ export default function McpSetupView() {
     }
   }, []);
 
-  // One-time init fetch (matches App.tsx init pattern)
-  if (!initialized.current) {
-    initialized.current = true;
-    refresh();
-  }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { refresh(); }, []);
 
   async function handleBuild() {
     setBuilding(true);
@@ -240,7 +236,7 @@ export default function McpSetupView() {
         {status && (
           <p className="mcp-status-line">
             Status:{" "}
-            <span className={status.searxng_ok ? "mcp-ok-text" : "mcp-fail-text"}>
+            <span className={status.searxng_ok ? "mcp-ok-text" : "mcp-warn-text"}>
               {status.searxng_ok ? `Running at ${status.searxng_url}` : "Not running (DDG fallback active)"}
             </span>
           </p>

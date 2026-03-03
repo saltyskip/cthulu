@@ -27,6 +27,7 @@ use crate::github::client::GithubClient;
 use crate::prompts::repository::PromptRepository;
 use crate::sandbox::backends::vm_manager::VmManagerProvider;
 use crate::sandbox::provider::SandboxProvider;
+use std::sync::atomic::AtomicBool;
 
 /// A single Claude Code session (one tab in the History list).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -377,6 +378,8 @@ pub struct AppState {
     /// In-memory event buffers for agent chat reconnection.
     /// Key: process_key (agent::{id}::session::{sid}), Value: buffered SSE events for current turn.
     pub chat_event_buffers: Arc<Mutex<HashMap<String, Vec<String>>>>,
+    /// Guard to prevent concurrent `cargo build --release --bin cthulu-mcp` runs.
+    pub mcp_building: Arc<AtomicBool>,
 }
 
 impl AppState {

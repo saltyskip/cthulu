@@ -33,6 +33,9 @@
   --executor-color: #9d8ce0;
   --sink-color: #5bb98c;
 
+  /* Monospace font stack — single source of truth for code/chat areas */
+  --font-mono: "SF Mono", "Fira Code", "Cascadia Code", monospace;
+
   /* shadcn/ui CSS variable overrides — map to our theme */
   --background: var(--bg);
   --foreground: var(--text);
@@ -3927,7 +3930,7 @@ button:disabled {
 }
 
 .mcp-step-desc code {
-  font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
+  font-family: var(--font-mono);
   font-size: 11px;
   background: var(--bg-tertiary);
   padding: 1px 4px;
@@ -4018,7 +4021,7 @@ button:disabled {
 }
 
 .mcp-code {
-  font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
+  font-family: var(--font-mono);
   font-size: 11px;
   background: var(--bg-tertiary);
   padding: 4px 8px;
@@ -4046,7 +4049,7 @@ button:disabled {
 /* Build log */
 
 .mcp-build-log {
-  font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
+  font-family: var(--font-mono);
   font-size: 11px;
   background: var(--bg-tertiary);
   border: 1px solid var(--border);
@@ -4112,7 +4115,7 @@ button:disabled {
   color: var(--success);
 }
 
-.mcp-fail-text {
+.mcp-warn-text {
   color: var(--warning);
 }
 
