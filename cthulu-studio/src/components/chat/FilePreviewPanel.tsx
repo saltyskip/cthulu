@@ -1,17 +1,38 @@
-import { memo, useMemo } from "react";
+import { memo, useMemo, useState, useEffect, useRef } from "react";
 import ShikiHighlighter from "react-shiki";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useTheme } from "../../lib/ThemeContext";
 import type { FileOp, PlanOp } from "./FilePreviewContext";
+import type { TaskStep } from "./chatUtils";
+import { groupFileOpsByTask } from "./chatUtils";
 import { computeDiffLines } from "../../utils/diff";
 import { fileIcon } from "../../utils/fileIcons";
 import { langFromPath } from "../../utils/langFromPath";
 import { SyntaxHighlighter } from "../assistant-ui/shiki-highlighter";
 import { useShikiTokens, type Token } from "./useShikiTokens";
+import type { ThreadMessageLike } from "@assistant-ui/react";
 
 function basename(filePath: string): string {
   return filePath.replace(/\\/g, "/").split("/").pop() || filePath;
+}
+
+/** Count changed lines for an edit op. */
+function editLineCounts(op: FileOp): { added: number; removed: number } {
+  if (op.type !== "edit" || !op.oldString || !op.newString) return { added: 0, removed: 0 };
+  const lines = computeDiffLines(op.oldString, op.newString);
+  let added = 0, removed = 0;
+  for (const l of lines) {
+    if (l.type === "add") added++;
+    else if (l.type === "del") removed++;
+  }
+  return { added, removed };
+}
+
+/** Count lines for a write op. */
+function writeLineCount(op: FileOp): number {
+  if (op.type !== "write" || !op.content) return 0;
+  return op.content.split("\n").length;
 }
 
 // Selected item can be a file op or a plan op
@@ -22,11 +43,13 @@ type SelectedItem =
 const FilePreviewPanel = memo(function FilePreviewPanel({
   fileOps,
   plans,
+  messages,
   selectedId,
   onSelect,
 }: {
   fileOps: FileOp[];
   plans: PlanOp[];
+  messages: ThreadMessageLike[];
   selectedId: string | null;
   onSelect: (id: string) => void;
 }) {
@@ -34,23 +57,46 @@ const FilePreviewPanel = memo(function FilePreviewPanel({
   const shikiTheme = appTheme.shikiTheme;
   const theme = { dark: shikiTheme as string, light: shikiTheme as string };
 
-  // Find selected item across both plans and files
+  // Build steps from messages
+  const steps = useMemo(() => groupFileOpsByTask(messages), [messages]);
+
+  // Active step state — auto-advance to latest
+  const [activeStep, setActiveStep] = useState(0);
+  const prevStepCountRef = useRef(steps.length);
+  useEffect(() => {
+    if (steps.length > prevStepCountRef.current) {
+      setActiveStep(steps.length - 1);
+    }
+    prevStepCountRef.current = steps.length;
+  }, [steps.length]);
+
+  // Clamp activeStep
+  const clampedStep = Math.min(activeStep, Math.max(0, steps.length - 1));
+  const currentStep: TaskStep | undefined = steps[clampedStep];
+
+  // The file ops to show: current step's ops (or empty)
+  const stepFileOps = currentStep?.fileOps ?? [];
+
+  // Find selected item across plans and current step's file ops
+  const allFileOps = stepFileOps; // only show current step
   const selected: SelectedItem | null = useMemo(() => {
     if (selectedId) {
       const plan = plans.find((p) => p.toolCallId === selectedId);
       if (plan) return { kind: "plan", op: plan };
-      const file = fileOps.find((f) => f.toolCallId === selectedId);
+      const file = allFileOps.find((f) => f.toolCallId === selectedId);
       if (file) return { kind: "file", op: file };
+      // Also check all fileOps (in case selected from a different step)
+      const anyFile = fileOps.find((f) => f.toolCallId === selectedId);
+      if (anyFile) return { kind: "file", op: anyFile };
     }
-    // Default to latest item overall
-    const lastFile = fileOps[fileOps.length - 1];
+    // Default to latest item in current step
+    const lastFile = allFileOps[allFileOps.length - 1];
     const lastPlan = plans[plans.length - 1];
     if (!lastFile && !lastPlan) return null;
     if (!lastFile) return { kind: "plan", op: lastPlan };
     if (!lastPlan) return { kind: "file", op: lastFile };
-    // Both exist — pick whichever has the later toolCallId (proxy for recency)
     return { kind: "file", op: lastFile };
-  }, [selectedId, fileOps, plans]);
+  }, [selectedId, allFileOps, fileOps, plans]);
 
   const fileOp = selected?.kind === "file" ? selected.op : null;
   const planOp = selected?.kind === "plan" ? selected.op : null;
@@ -88,15 +134,16 @@ const FilePreviewPanel = memo(function FilePreviewPanel({
     return map;
   }, [diffLines, oldTokens, newTokens]);
 
-  if (!selected) return null;
+  if (!selected && plans.length === 0 && steps.length === 0) return null;
 
-  // Build unique file list grouped by directory
-  const fileMap = new Map<string, FileOp>();
-  for (const f of fileOps) fileMap.set(f.filePath, f);
-  const uniqueFiles = [...fileMap.values()];
+  // Deduplicate plans by filePath (keep latest)
+  const planMap = new Map<string, PlanOp>();
+  for (const p of plans) planMap.set(p.filePath, p);
+  const uniquePlans = [...planMap.values()];
 
+  // Group step file ops by directory for tree display
   const groups = new Map<string, FileOp[]>();
-  for (const f of uniqueFiles) {
+  for (const f of stepFileOps) {
     const parts = f.filePath.replace(/\\/g, "/").split("/");
     const name = parts.pop() || f.filePath;
     const dir = parts.length > 0 ? parts.slice(-2).join("/") : "";
@@ -105,17 +152,41 @@ const FilePreviewPanel = memo(function FilePreviewPanel({
     groups.set(dir, existing);
   }
 
-  // Deduplicate plans by filePath (keep latest)
-  const planMap = new Map<string, PlanOp>();
-  for (const p of plans) planMap.set(p.filePath, p);
-  const uniquePlans = [...planMap.values()];
+  const activeId = selected?.kind === "file" ? selected.op.toolCallId : selected?.op.toolCallId ?? "";
 
-  const activeId = selected.kind === "file" ? selected.op.toolCallId : selected.op.toolCallId;
+  // Truncate user message for display
+  const truncateMsg = (text: string, max = 80) => {
+    const oneLine = text.replace(/\n/g, " ").trim();
+    return oneLine.length > max ? oneLine.slice(0, max) + "…" : oneLine;
+  };
 
   return (
     <div className="fr-preview-split">
       <div className="fr-preview-tree">
-        {/* Plans section */}
+        {/* Stepper — sticky context bar at top */}
+        {steps.length > 0 && (
+          <div className="fr-stepper" title={currentStep?.userMessage}>
+            <button
+              className="fr-stepper-btn"
+              disabled={clampedStep <= 0}
+              onClick={() => setActiveStep((s) => Math.max(0, s - 1))}
+            >
+              ‹
+            </button>
+            <span className="fr-stepper-label">
+              Step {clampedStep + 1} of {steps.length}
+            </span>
+            <button
+              className="fr-stepper-btn"
+              disabled={clampedStep >= steps.length - 1}
+              onClick={() => setActiveStep((s) => Math.min(steps.length - 1, s + 1))}
+            >
+              ›
+            </button>
+          </div>
+        )}
+
+        {/* Plans section — always visible, step-independent */}
         {uniquePlans.length > 0 && (
           <div className="fr-tree-section">
             <div className="fr-tree-section-label">Plans</div>
@@ -127,34 +198,55 @@ const FilePreviewPanel = memo(function FilePreviewPanel({
                   key={p.toolCallId}
                   className={`fr-tree-file ${isActive ? "fr-tree-file-active" : ""}`}
                   onClick={() => onSelect(p.toolCallId)}
+                  title={p.filePath}
                 >
                   <span className="fr-tree-icon" style={{ color: icon.color }}>{icon.icon}</span>
-                  {basename(p.filePath)}
+                  <span className="fr-tree-file-name">{basename(p.filePath)}</span>
                 </button>
               );
             })}
           </div>
         )}
 
-        {/* Files section */}
-        {uniqueFiles.length > 0 && (
-          <div className="fr-tree-section">
-            {uniquePlans.length > 0 && <div className="fr-tree-section-label">Files</div>}
+        {/* File list for active step */}
+        {stepFileOps.length > 0 && (
+          <div className="fr-tree-section fr-tree-section-files">
+            <div className="fr-tree-section-label">Changed files</div>
             {[...groups.entries()].map(([dir, files]) => (
               <div key={dir} className="fr-tree-group">
                 {dir && <div className="fr-tree-dir">{dir}</div>}
                 {files.map((f) => {
-                  const original = uniqueFiles.find((o) => o.filePath.endsWith(f.filePath) && o.toolCallId === f.toolCallId);
+                  const original = stepFileOps.find((o) => o.filePath.endsWith(f.filePath) && o.toolCallId === f.toolCallId);
                   const isActive = original?.toolCallId === activeId;
                   const icon = fileIcon(f.filePath);
+                  // Line count badge
+                  let badge: React.ReactNode = null;
+                  if (original) {
+                    if (original.type === "edit") {
+                      const { added, removed } = editLineCounts(original);
+                      badge = (
+                        <span className="fr-file-badge">
+                          {removed > 0 && <span className="fr-file-badge-del">−{removed}</span>}
+                          {added > 0 && <span className="fr-file-badge-add">+{added}</span>}
+                        </span>
+                      );
+                    } else if (original.type === "write") {
+                      const lines = writeLineCount(original);
+                      if (lines > 0) {
+                        badge = <span className="fr-file-badge"><span className="fr-file-badge-add">+{lines}</span></span>;
+                      }
+                    }
+                  }
                   return (
                     <button
                       key={f.toolCallId}
                       className={`fr-tree-file ${isActive ? "fr-tree-file-active" : ""}`}
                       onClick={() => onSelect(f.toolCallId)}
+                      title={original?.filePath}
                     >
                       <span className="fr-tree-icon" style={{ color: icon.color }}>{icon.icon}</span>
-                      {f.filePath}
+                      <span className="fr-tree-file-name">{f.filePath}</span>
+                      {badge}
                     </button>
                   );
                 })}
@@ -162,10 +254,31 @@ const FilePreviewPanel = memo(function FilePreviewPanel({
             ))}
           </div>
         )}
+
+        {/* Summary footer */}
+        {stepFileOps.length > 0 && (() => {
+          let totalAdded = 0, totalRemoved = 0;
+          for (const op of stepFileOps) {
+            if (op.type === "edit") {
+              const c = editLineCounts(op);
+              totalAdded += c.added;
+              totalRemoved += c.removed;
+            } else if (op.type === "write" && op.content) {
+              totalAdded += op.content.split("\n").length;
+            }
+          }
+          return (
+            <div className="fr-tree-summary">
+              {stepFileOps.length} file{stepFileOps.length !== 1 ? "s" : ""} changed
+              {totalAdded > 0 && <span className="fr-file-badge-add"> +{totalAdded}</span>}
+              {totalRemoved > 0 && <span className="fr-file-badge-del"> −{totalRemoved}</span>}
+            </div>
+          );
+        })()}
       </div>
 
       <div className="fr-preview-main">
-        <div className="fr-preview-path">{selected.kind === "file" ? selected.op.filePath : basename(selected.op.filePath)}</div>
+        <div className="fr-preview-path">{selected?.kind === "file" ? selected.op.filePath : selected ? basename(selected.op.filePath) : ""}</div>
         <div className="fr-preview-body">
           {planOp ? (
             // Render plan as formatted markdown

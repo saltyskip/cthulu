@@ -377,6 +377,7 @@ export default function AgentChatThread({
                 <FilePreviewPanel
                   fileOps={fileOps}
                   plans={plans}
+                  messages={messages}
                   selectedId={selectedFileId}
                   onSelect={setSelectedFileId}
                 />

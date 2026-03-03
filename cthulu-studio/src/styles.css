@@ -2484,14 +2484,16 @@ button:disabled {
 
 /* File tree sidebar */
 .fr-preview-tree {
-  width: 180px;
-  min-width: 160px;
+  width: 240px;
+  min-width: 200px;
   flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
   overflow-y: auto;
   scrollbar-width: none;
   border-right: 1px solid var(--border);
   background: var(--bg);
-  padding: 4px 0;
+  padding: 0;
 }
 
 .fr-preview-tree::-webkit-scrollbar {
@@ -2516,9 +2518,10 @@ button:disabled {
 .fr-tree-file {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
   width: 100%;
-  padding: 3px 8px 3px 12px;
+  padding: 4px 8px 4px 12px;
+  min-height: 24px;
   font-size: 11px;
   color: var(--text-secondary);
   background: none;
@@ -2551,16 +2554,113 @@ button:disabled {
 }
 
 .fr-tree-section {
-  margin-bottom: 4px;
+  margin-bottom: 2px;
+  padding-top: 2px;
+}
+
+.fr-tree-section-files {
+  flex: 1;
 }
 
 .fr-tree-section-label {
-  padding: 6px 10px 2px;
-  font-size: 9px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
+  padding: 8px 10px 3px;
+  font-size: 10px;
+  font-weight: 500;
   color: var(--text-secondary);
+}
+
+/* Stepper — sticky context bar at top of sidebar */
+.fr-stepper {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-secondary);
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.fr-stepper-btn {
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  cursor: pointer;
+  padding: 0;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.fr-stepper-btn:hover:not(:disabled) {
+  background: var(--bg-tertiary);
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.fr-stepper-btn:disabled {
+  opacity: 0.25;
+  cursor: default;
+}
+
+.fr-stepper-label {
+  font-size: 10px;
+  font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+/* File tree line count badges — pill style (à la GitHub) */
+.fr-tree-file-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fr-file-badge {
+  display: inline-flex;
+  gap: 3px;
+  margin-left: auto;
+  flex-shrink: 0;
+  font-size: 9px;
+  font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
+}
+
+.fr-file-badge-add,
+.fr-file-badge-del {
+  padding: 0 4px;
+  border-radius: 3px;
+  line-height: 16px;
+}
+
+.fr-file-badge-add {
+  color: var(--success);
+  background: color-mix(in srgb, var(--success) 12%, transparent);
+}
+
+.fr-file-badge-del {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+}
+
+/* Summary footer — pushed to bottom */
+.fr-tree-summary {
+  padding: 8px 10px;
+  font-size: 10px;
+  color: var(--text-secondary);
+  opacity: 0.6;
+  margin-top: auto;
+  border-top: 1px solid var(--border);
 }
 
 /* Markdown preview for plans */
@@ -2682,8 +2782,8 @@ button:disabled {
     display: none;
   }
   .fr-preview-tree {
-    width: 140px;
-    min-width: 120px;
+    width: 180px;
+    min-width: 160px;
   }
 }
 
