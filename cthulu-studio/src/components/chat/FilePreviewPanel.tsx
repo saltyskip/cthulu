@@ -3,7 +3,7 @@ import ShikiHighlighter from "react-shiki";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useTheme } from "../../lib/ThemeContext";
-import type { FileOp, PlanOp } from "./FilePreviewContext";
+import type { FileOp, PlanOp, MultiRepoSnapshot, GitFileStatus } from "./FilePreviewContext";
 import type { TaskStep } from "./chatUtils";
 import { groupFileOpsByTask } from "./chatUtils";
 import { computeDiffLines } from "../../utils/diff";
@@ -40,18 +40,31 @@ type SelectedItem =
   | { kind: "file"; op: FileOp }
   | { kind: "plan"; op: PlanOp };
 
+// Git status letter badge color
+function gitStatusColor(status: string): string {
+  switch (status) {
+    case "M": return "var(--warning)";
+    case "A": return "var(--success)";
+    case "D": return "var(--danger)";
+    case "R": return "var(--accent)";
+    default: return "var(--text-secondary)";
+  }
+}
+
 const FilePreviewPanel = memo(function FilePreviewPanel({
   fileOps,
   plans,
   messages,
   selectedId,
   onSelect,
+  gitSnapshot,
 }: {
   fileOps: FileOp[];
   plans: PlanOp[];
   messages: ThreadMessageLike[];
   selectedId: string | null;
   onSelect: (id: string) => void;
+  gitSnapshot?: MultiRepoSnapshot | null;
 }) {
   const { theme: appTheme } = useTheme();
   const shikiTheme = appTheme.shikiTheme;
@@ -160,9 +173,74 @@ const FilePreviewPanel = memo(function FilePreviewPanel({
     return oneLine.length > max ? oneLine.slice(0, max) + "…" : oneLine;
   };
 
+  // Build a set of file paths touched by tool calls (for identifying git-only files)
+  const toolCallPaths = useMemo(() => {
+    const paths = new Set<string>();
+    for (const f of fileOps) paths.add(f.filePath);
+    return paths;
+  }, [fileOps]);
+
+  // Git files not in tool calls (modified by bash commands, etc.)
+  const gitOnlyFiles = useMemo(() => {
+    if (!gitSnapshot) return [];
+    const result: { repo: string; file: GitFileStatus }[] = [];
+    for (const repo of gitSnapshot.repos) {
+      for (const f of repo.files) {
+        // Check if any tool call path ends with this git file path
+        const fullPath = repo.root ? `${repo.root}/${f.path}` : f.path;
+        const matched = [...toolCallPaths].some(
+          (p) => p.endsWith(f.path) || p.endsWith(fullPath)
+        );
+        if (!matched) {
+          result.push({ repo: repo.root, file: f });
+        }
+      }
+    }
+    return result;
+  }, [gitSnapshot, toolCallPaths]);
+
+  // Git status lookup: path suffix → status char
+  const gitStatusMap = useMemo(() => {
+    if (!gitSnapshot) return new Map<string, string>();
+    const map = new Map<string, string>();
+    for (const repo of gitSnapshot.repos) {
+      for (const f of repo.files) {
+        map.set(f.path, f.status);
+        if (repo.root) map.set(`${repo.root}/${f.path}`, f.status);
+      }
+    }
+    return map;
+  }, [gitSnapshot]);
+
+  // Find git status for a file op by matching path suffixes
+  const getGitStatus = (filePath: string): string | null => {
+    for (const [gPath, status] of gitStatusMap) {
+      if (filePath.endsWith(gPath) || gPath.endsWith(filePath.replace(/\\/g, "/"))) {
+        return status;
+      }
+    }
+    return null;
+  };
+
   return (
     <div className="fr-preview-split">
       <div className="fr-preview-tree">
+        {/* Git branch badges */}
+        {gitSnapshot && gitSnapshot.repos.length > 0 && (
+          <div className="fr-git-branches">
+            {gitSnapshot.repos.map((repo) => (
+              <div key={repo.root || "_root"} className="fr-git-branch">
+                <span className="fr-git-branch-icon">⎇</span>
+                {gitSnapshot.repos.length > 1 && repo.root && (
+                  <span className="fr-git-branch-repo">{repo.root}:</span>
+                )}
+                <span className="fr-git-branch-name">{repo.branch}</span>
+                {repo.is_dirty && <span className="fr-git-branch-dirty">•</span>}
+              </div>
+            ))}
+          </div>
+        )}
+
         {/* Stepper — sticky context bar at top */}
         {steps.length > 0 && (
           <div className="fr-stepper" title={currentStep?.userMessage}>
@@ -219,6 +297,7 @@ const FilePreviewPanel = memo(function FilePreviewPanel({
                   const original = stepFileOps.find((o) => o.filePath.endsWith(f.filePath) && o.toolCallId === f.toolCallId);
                   const isActive = original?.toolCallId === activeId;
                   const icon = fileIcon(f.filePath);
+                  const gStatus = original ? getGitStatus(original.filePath) : null;
                   // Line count badge
                   let badge: React.ReactNode = null;
                   if (original) {
@@ -246,12 +325,37 @@ const FilePreviewPanel = memo(function FilePreviewPanel({
                     >
                       <span className="fr-tree-icon" style={{ color: icon.color }}>{icon.icon}</span>
                       <span className="fr-tree-file-name">{f.filePath}</span>
+                      {gStatus && (
+                        <span className="fr-git-status" style={{ color: gitStatusColor(gStatus) }}>{gStatus}</span>
+                      )}
                       {badge}
                     </button>
                   );
                 })}
               </div>
             ))}
+          </div>
+        )}
+
+        {/* Git-only files (changed but not via tool calls) */}
+        {gitOnlyFiles.length > 0 && (
+          <div className="fr-tree-section">
+            <div className="fr-tree-section-label">Other changes</div>
+            {gitOnlyFiles.map((g) => {
+              const icon = fileIcon(g.file.path);
+              return (
+                <div
+                  key={`${g.repo}/${g.file.path}`}
+                  className="fr-tree-file fr-git-only"
+                >
+                  <span className="fr-tree-icon" style={{ color: icon.color }}>{icon.icon}</span>
+                  {basename(g.file.path)}
+                  <span className="fr-git-status" style={{ color: gitStatusColor(g.file.status) }}>
+                    {g.file.status}
+                  </span>
+                </div>
+              );
+            })}
           </div>
         )}
 

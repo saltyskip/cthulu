@@ -28,6 +28,7 @@ export default function AgentChatView({ agentId, sessionId }: AgentChatViewProps
       onClearDebug={chat.clearDebugEvents}
       onClear={chat.clearMessages}
       onInjectAssistant={chat.injectAssistantMessage}
+      gitSnapshot={chat.gitSnapshot}
     />
   );
 }

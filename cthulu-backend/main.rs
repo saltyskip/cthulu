@@ -1,6 +1,7 @@
 mod agents;
 mod config;
 mod flows;
+mod git;
 mod github;
 mod prompts;
 mod sandbox;

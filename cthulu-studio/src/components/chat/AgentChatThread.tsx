@@ -12,6 +12,7 @@ import {
 } from "../ChatPrimitives";
 import { AskUserQuestionToolUI } from "../ToolRenderers";
 import { FilePreviewContext } from "./FilePreviewContext";
+import type { MultiRepoSnapshot } from "./FilePreviewContext";
 import { extractFileOps, extractPlans, extractLatestTodos } from "./chatUtils";
 import FilePreviewPanel from "./FilePreviewPanel";
 import StickyTodoPanel from "./StickyTodoPanel";
@@ -71,6 +72,7 @@ interface AgentChatThreadProps {
   debugEvents: DebugEvent[];
   onToggleDebug: () => void;
   onClearDebug: () => void;
+  gitSnapshot: MultiRepoSnapshot | null;
 }
 
 export default function AgentChatThread({
@@ -90,6 +92,7 @@ export default function AgentChatThread({
   debugEvents,
   onToggleDebug,
   onClearDebug,
+  gitSnapshot,
 }: AgentChatThreadProps) {
   const [dragOver, setDragOver] = useState(false);
 
@@ -521,6 +524,7 @@ export default function AgentChatThread({
                   messages={messages}
                   selectedId={selectedFileId}
                   onSelect={setSelectedFileId}
+                  gitSnapshot={gitSnapshot}
                 />
               )}
 

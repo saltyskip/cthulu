@@ -2663,6 +2663,71 @@ button:disabled {
   border-top: 1px solid var(--border);
 }
 
+/* Git branch badges */
+.fr-git-branches {
+  padding: 6px 10px 4px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 4px;
+}
+
+.fr-git-branch {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  background: var(--bg-tertiary);
+  padding: 2px 8px;
+  border-radius: 4px;
+  line-height: 1.4;
+}
+
+.fr-git-branch-icon {
+  font-size: 12px;
+  color: var(--accent);
+}
+
+.fr-git-branch-repo {
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.fr-git-branch-name {
+  color: var(--text);
+  font-weight: 500;
+  font-family: var(--font-mono, monospace);
+}
+
+.fr-git-branch-dirty {
+  color: var(--warning);
+  font-size: 16px;
+  line-height: 1;
+}
+
+/* Git status indicator next to file name */
+.fr-git-status {
+  margin-left: auto;
+  font-size: 10px;
+  font-weight: 700;
+  font-family: var(--font-mono, monospace);
+  flex-shrink: 0;
+  padding-left: 6px;
+}
+
+/* Git-only files (changed via bash, not tool calls) */
+.fr-git-only {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.fr-git-only:hover {
+  opacity: 0.7;
+  background: transparent;
+}
+
 /* Markdown preview for plans */
 .fr-preview-markdown {
   padding: 16px 20px;

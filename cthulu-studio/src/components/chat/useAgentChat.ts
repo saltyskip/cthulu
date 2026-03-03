@@ -1,9 +1,10 @@
 import { useState, useRef, useCallback, useMemo, useEffect } from "react";
 import type { ThreadMessageLike } from "@assistant-ui/react";
 import { startAgentChat, reconnectAgentChat } from "../../api/interactStream";
-import { stopAgentChat, getSessionStatus, getSessionLog } from "../../api/client";
+import { stopAgentChat, getSessionStatus, getSessionLog, getGitSnapshot } from "../../api/client";
 import { replayLogLines, type ContentPart, type ToolCallPart } from "./chatParser";
 import { fileToBase64 } from "./chatUtils";
+import type { MultiRepoSnapshot } from "./FilePreviewContext";
 
 export interface DebugEvent {
   ts: number;
@@ -35,6 +36,7 @@ function applySSEEvent(
   event: SSEEvent,
   partsRef: React.MutableRefObject<ContentPart[]>,
   setResultMeta: (meta: { cost: number; turns: number }) => void,
+  setGitSnapshot?: (snapshot: MultiRepoSnapshot) => void,
 ): boolean {
   try {
     const data = JSON.parse(event.data);
@@ -72,6 +74,11 @@ function applySSEEvent(
           return true;
         }
       }
+    } else if (event.type === "git_snapshot") {
+      if (setGitSnapshot) {
+        setGitSnapshot(data as MultiRepoSnapshot);
+      }
+      return false; // no parts to flush
     } else if (event.type === "result") {
       const hasText = partsRef.current.some((p) => p.type === "text");
       if (data.text && !hasText) {
@@ -109,6 +116,9 @@ export function useAgentChat(agentId: string, sessionId: string) {
   // Mutable mirror of streamingParts — SSE callbacks read/write this,
   // then flush to React state via rAF or direct setState.
   const partsRef = useRef<ContentPart[]>([]);
+
+  // Git snapshot state — updated via SSE events and initial fetch
+  const [gitSnapshot, setGitSnapshot] = useState<MultiRepoSnapshot | null>(null);
 
   // Debug mode: capture raw SSE events for inspection
   const [debugMode, setDebugMode] = useState(false);
@@ -186,6 +196,12 @@ export function useAgentChat(agentId: string, sessionId: string) {
         }
       })
       .catch(() => { /* backend unavailable, start empty */ });
+    // Fetch initial git snapshot
+    getGitSnapshot(agentId, sessionId)
+      .then((snap) => {
+        if (!cancelled && snap) setGitSnapshot(snap);
+      })
+      .catch(() => { /* no git integration */ });
     return () => { cancelled = true; };
   }, [agentId, sessionId]);
 
@@ -243,7 +259,7 @@ export function useAgentChat(agentId: string, sessionId: string) {
           (event) => {
             if (cancelled) return;
             pushDebugEvent(event);
-            const needsFlush = applySSEEvent(event, partsRef, setResultMeta);
+            const needsFlush = applySSEEvent(event, partsRef, setResultMeta, setGitSnapshot);
             if (needsFlush) {
               setStreamingParts([...partsRef.current]);
             } else {
@@ -314,7 +330,7 @@ export function useAgentChat(agentId: string, sessionId: string) {
         sessionId,
         (event) => {
           pushDebugEvent(event);
-          const needsFlush = applySSEEvent(event, partsRef, setResultMeta);
+          const needsFlush = applySSEEvent(event, partsRef, setResultMeta, setGitSnapshot);
           if (needsFlush) {
             setStreamingParts([...partsRef.current]);
           } else {
@@ -394,5 +410,6 @@ export function useAgentChat(agentId: string, sessionId: string) {
     setDebugMode,
     debugEvents,
     clearDebugEvents,
+    gitSnapshot,
   };
 }

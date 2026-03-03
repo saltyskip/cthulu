@@ -353,6 +353,7 @@ async fn setup_flow_run_session(
         skills_dir: None,
         kind: "flow_run".to_string(),
         flow_run: Some(meta),
+        worktree_group: None,
     };
 
     // Insert into session pool
