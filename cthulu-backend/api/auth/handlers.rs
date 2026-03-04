@@ -113,41 +113,12 @@ pub(crate) async fn refresh_token(State(state): State<AppState>) -> impl IntoRes
                 }
             }
 
-            // Re-inject the new token into all active VMs so scheduled runs pick it up.
-            // VMs store the token in ~/.bashrc; without this they keep using the expired one.
-            let vm_inject_count = if let Some(vm_manager) = &state.vm_manager {
-                let vm_urls: Vec<String> = {
-                    let mappings = state.vm_mappings.read().await;
-                    mappings.values().map(|v| v.web_terminal_url.clone()).collect()
-                };
-                let mut injected = 0usize;
-                for url in &vm_urls {
-                    if url.is_empty() {
-                        continue;
-                    }
-                    match crate::sandbox::backends::vm_manager::inject_oauth_token_pub(url, &token, credentials_json.as_deref()).await {
-                        Ok(()) => {
-                            tracing::info!(vm_url = %url, "re-injected OAuth token into VM");
-                            injected += 1;
-                        }
-                        Err(e) => {
-                            tracing::warn!(vm_url = %url, error = %e, "failed to re-inject token into VM");
-                        }
-                    }
-                }
-                // suppress unused warning when vm_manager is None
-                let _ = vm_manager;
-                injected
-            } else {
-                0
-            };
-
-            tracing::info!(killed_processes = killed, vms_updated = vm_inject_count, "OAuth token refreshed successfully");
+            tracing::info!(killed_processes = killed, "OAuth token refreshed successfully");
             Json(json!({
                 "ok": true,
                 "message": format!(
-                    "Token refreshed. {} local session(s) cleared, {} VM(s) updated.",
-                    killed, vm_inject_count
+                    "Token refreshed. {} local session(s) cleared.",
+                    killed
                 )
             }))
         }

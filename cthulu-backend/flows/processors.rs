@@ -6,7 +6,7 @@ use anyhow::{Context, Result, bail};
 use chrono::Utc;
 
 use crate::agents::repository::AgentRepository;
-use crate::api::{FlowSessions, InteractSession, VmMapping};
+use crate::api::{FlowSessions, InteractSession};
 use crate::config::{SinkConfig, SourceConfig};
 use crate::flows::graph::NodeOutput;
 use crate::flows::session_bridge::{FlowRunMeta, SessionBridge};
@@ -17,7 +17,6 @@ use crate::tasks::context::render_prompt;
 use crate::tasks::executors::{Executor, LineSink};
 use crate::tasks::executors::claude_code::ClaudeCodeExecutor;
 use crate::tasks::executors::sandbox::SandboxExecutor;
-use crate::tasks::executors::vm_executor::VmExecutor;
 use crate::tasks::pipeline::{format_items, resolve_sinks};
 use crate::tasks::sources;
 
@@ -28,7 +27,6 @@ pub struct NodeDeps {
     pub http_client: Arc<reqwest::Client>,
     pub github_client: Option<Arc<dyn GithubClient>>,
     pub sandbox_provider: Option<Arc<dyn SandboxProvider>>,
-    pub vm_mappings: HashMap<String, VmMapping>,
     pub agent_repo: Option<Arc<dyn AgentRepository>>,
     pub flow_id: String,
     /// Session bridge for creating flow-run sessions in agent workspaces.
@@ -112,26 +110,6 @@ async fn process_executor(
                 .context("sandbox executor requested but no sandbox provider configured")?;
             Box::new(SandboxExecutor::new(
                 provider.clone(),
-                permissions.clone(),
-                append_system_prompt,
-            ))
-        }
-        "vm-sandbox" => {
-            let vm_key = format!("{}::{}", deps.flow_id, node.id);
-            let mapping = deps.vm_mappings.get(&vm_key).with_context(|| {
-                format!(
-                    "no VM provisioned for executor node '{}' (key: {}). Enable the flow first.",
-                    node.label, vm_key
-                )
-            })?;
-            tracing::info!(
-                vm_name = %mapping.vm_name,
-                vm_id = mapping.vm_id,
-                url = %mapping.web_terminal_url,
-                "using VM for executor"
-            );
-            Box::new(VmExecutor::new(
-                mapping.web_terminal_url.clone(),
                 permissions.clone(),
                 append_system_prompt,
             ))
@@ -370,10 +348,7 @@ async fn setup_flow_run_session(
         // Don't change active_session — leave whatever interactive session is active
         let snapshot = sessions.clone();
         drop(sessions);
-        let vms = bridge.vm_mappings.try_read()
-            .map(|g| g.clone())
-            .unwrap_or_default();
-        crate::api::save_sessions(&bridge.sessions_path, &snapshot, &vms);
+        crate::api::save_sessions(&bridge.sessions_path, &snapshot);
     }
 
     // Create broadcast channel
@@ -459,10 +434,7 @@ async fn finalize_flow_run_session(
         }
         let snapshot = sessions.clone();
         drop(sessions);
-        let vms = bridge.vm_mappings.try_read()
-            .map(|g| g.clone())
-            .unwrap_or_default();
-        crate::api::save_sessions(&bridge.sessions_path, &snapshot, &vms);
+        crate::api::save_sessions(&bridge.sessions_path, &snapshot);
     }
 }
 

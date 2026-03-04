@@ -54,7 +54,6 @@ fn api_router() -> Router<AppState> {
         .merge(super::templates::router())
         .merge(super::auth::router())
         .merge(super::scheduler::router())
-        .merge(super::sandbox::router())
         .merge(super::changes::router())
 
 }

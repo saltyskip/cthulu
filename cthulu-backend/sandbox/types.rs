@@ -13,7 +13,6 @@ pub type CheckpointId = String;
 pub enum SandboxBackendKind {
     DangerousHost,
     Firecracker,
-    VmManager,
     FlySprite,
 }
 
@@ -395,26 +394,12 @@ pub enum SpriteFileSyncMode {
     PersistentWorkspace,
 }
 
-// ── VM Manager config ───────────────────────────────────────────────
-
-#[derive(Debug, Clone)]
-pub struct VmManagerConfig {
-    /// Base URL of the VM Manager API (e.g., "http://34.100.130.60:8080")
-    pub api_base_url: String,
-    /// Default VM tier: "nano" (1 vCPU, 512MB) or "micro" (2 vCPU, 1024MB)
-    pub default_tier: String,
-    /// Anthropic API key to inject into VMs (optional)
-    pub api_key: Option<String>,
-    // TODO: auth_token for VM Manager itself (currently no auth)
-}
-
 // ── Runtime config selector ─────────────────────────────────────────
 
 #[derive(Debug, Clone)]
 pub enum SandboxRuntimeConfig {
     Dangerous(DangerousConfig),
     Firecracker(FirecrackerConfig),
-    VmManager(VmManagerConfig),
     FlySprite(FlySpriteConfig),
 }
 

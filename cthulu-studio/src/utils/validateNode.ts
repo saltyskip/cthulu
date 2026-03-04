@@ -58,11 +58,6 @@ export function validateNode(node: FlowNode): string[] {
         errors.push("Prompt is required");
       }
       break;
-    case "vm-sandbox":
-      if (!cfg.agent_id || !(cfg.agent_id as string).trim()) {
-        errors.push("Select an agent for this executor");
-      }
-      break;
     case "slack":
       if (
         (!cfg.webhook_url_env || !(cfg.webhook_url_env as string).trim()) &&

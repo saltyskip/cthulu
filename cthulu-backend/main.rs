@@ -156,11 +156,9 @@ async fn run_server(start_disabled: bool) -> Result<(), Box<dyn Error>> {
     let (events_tx, _) = tokio::sync::broadcast::channel::<RunEvent>(256);
     let (changes_tx, _) = tokio::sync::broadcast::channel::<ResourceChangeEvent>(256);
 
-    // Load persisted interact sessions + VM mappings from ~/.cthulu/sessions.yaml
+    // Load persisted interact sessions from ~/.cthulu/sessions.yaml
     let sessions_path = base_dir.join("sessions.yaml");
-    let loaded = api::load_sessions(&sessions_path);
-    let persisted_sessions = loaded.sessions;
-    let persisted_vms = loaded.vms;
+    let persisted_sessions = api::load_sessions(&sessions_path);
 
     // Read OAuth token: macOS Keychain first, then CLAUDE_CODE_OAUTH_TOKEN env
     let oauth_token: Option<String> = {
@@ -195,35 +193,11 @@ async fn run_server(start_disabled: bool) -> Result<(), Box<dyn Error>> {
     // Initialize sandbox provider (before scheduler, so scheduler can use it)
     //
     // Priority:
-    //   1. VM_MANAGER_URL → VmManager (remote VM Manager API)
-    //   2. FIRECRACKER_SSH_HOST → RemoteSsh (real Linux server with /dev/kvm)
-    //   3. FIRECRACKER_API_URL → LimaTcp (Lima VM on macOS, FC API over TCP)
-    //   4. Default → DangerousHost (best-effort host isolation, no VM)
-    let mut vm_manager_arc: Option<Arc<sandbox::backends::vm_manager::VmManagerProvider>> = None;
+    //   1. FIRECRACKER_SSH_HOST → RemoteSsh (real Linux server with /dev/kvm)
+    //   2. FIRECRACKER_API_URL → LimaTcp (Lima VM on macOS, FC API over TCP)
+    //   3. Default → DangerousHost (best-effort host isolation, no VM)
     let sandbox_provider: Arc<dyn sandbox::SandboxProvider> =
-        if let Ok(vm_manager_url) = std::env::var("VM_MANAGER_URL") {
-            let default_tier = std::env::var("VM_MANAGER_TIER")
-                .unwrap_or_else(|_| "nano".into());
-            let api_key = std::env::var("VM_MANAGER_API_KEY").ok();
-
-            tracing::info!(
-                api_url = %vm_manager_url,
-                tier = %default_tier,
-                "initializing VmManager sandbox provider"
-            );
-
-            let vm_config = sandbox::VmManagerConfig {
-                api_base_url: vm_manager_url,
-                default_tier,
-                api_key,
-            };
-            let provider = Arc::new(
-                sandbox::backends::vm_manager::VmManagerProvider::new(vm_config)
-                    .context("failed to initialize VmManager sandbox provider")?,
-            );
-            vm_manager_arc = Some(provider.clone());
-            provider
-        } else if let Ok(ssh_host) = std::env::var("FIRECRACKER_SSH_HOST") {
+        if let Ok(ssh_host) = std::env::var("FIRECRACKER_SSH_HOST") {
             let api_url = std::env::var("FIRECRACKER_API_URL")
                 .unwrap_or_else(|_| format!("http://{}:8080", ssh_host.split('@').last().unwrap_or(&ssh_host)));
             let ssh_port: u16 = std::env::var("FIRECRACKER_SSH_PORT")
@@ -299,9 +273,6 @@ async fn run_server(start_disabled: bool) -> Result<(), Box<dyn Error>> {
             )
         };
 
-    // Create VM mappings (shared between scheduler, runner, and AppState)
-    let vm_mappings = Arc::new(tokio::sync::RwLock::new(persisted_vms));
-
     // Session streams for flow-run session broadcasting
     let session_streams = Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new()));
 
@@ -315,7 +286,6 @@ async fn run_server(start_disabled: bool) -> Result<(), Box<dyn Error>> {
         github_client.clone(),
         events_tx.clone(),
         sandbox_provider.clone(),
-        vm_mappings.clone(),
         agent_repo.clone(),
         interact_sessions.clone(),
         sessions_path.clone(),
@@ -375,8 +345,6 @@ async fn run_server(start_disabled: bool) -> Result<(), Box<dyn Error>> {
         live_processes: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
         pty_processes: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
         sandbox_provider,
-        vm_manager: vm_manager_arc,
-        vm_mappings,
         oauth_token: Arc::new(tokio::sync::RwLock::new(oauth_token)),
         session_streams,
         chat_event_buffers: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),

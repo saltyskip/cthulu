@@ -178,67 +178,6 @@ pub(crate) async fn update_flow(
         timestamp: chrono::Utc::now(),
     });
 
-    // VM lifecycle: provision on enable, destroy on disable
-    if body.enabled.is_some() {
-        if let Some(vm_manager) = &state.vm_manager {
-            if flow.enabled {
-                // Flow was enabled — provision VMs for all executor nodes
-                let oauth_arc = state.oauth_token.clone();
-                let vm_mgr = vm_manager.clone();
-                let flow_clone = flow.clone();
-                let vm_mappings = state.vm_mappings.clone();
-                let sessions_path = state.sessions_path.clone();
-                let interact_sessions = state.interact_sessions.clone();
-
-                tokio::spawn(async move {
-                    let oauth = oauth_arc.read().await.clone();
-                    let credentials_json = crate::api::auth::handlers::read_full_credentials();
-                    match vm_mgr.provision_flow_vms(&flow_clone, oauth.as_deref(), credentials_json.as_deref()).await {
-                        Ok(results) => {
-                            let mut map = vm_mappings.write().await;
-                            for (node_id, vm_name, vm) in results {
-                                let key = format!("{}::{}", flow_clone.id, node_id);
-                                map.insert(key, crate::api::VmMapping {
-                                    vm_id: vm.vm_id,
-                                    vm_name,
-                                    web_terminal_url: vm.web_terminal.clone(),
-                                });
-                            }
-                            // Persist
-                            let sessions = interact_sessions.read().await.clone();
-                            crate::api::save_sessions(&sessions_path, &sessions, &map);
-                            tracing::info!(flow = %flow_clone.name, "VMs provisioned for enabled flow");
-                        }
-                        Err(e) => {
-                            tracing::error!(flow = %flow_clone.name, error = %e, "Failed to provision VMs");
-                        }
-                    }
-                });
-            } else {
-                // Flow was disabled — destroy VMs
-                let vm_mgr = vm_manager.clone();
-                let flow_clone = flow.clone();
-                let vm_mappings = state.vm_mappings.clone();
-                let sessions_path = state.sessions_path.clone();
-                let interact_sessions = state.interact_sessions.clone();
-
-                tokio::spawn(async move {
-                    if let Err(e) = vm_mgr.destroy_flow_vms(&flow_clone).await {
-                        tracing::error!(flow = %flow_clone.name, error = %e, "Failed to destroy VMs");
-                    }
-                    // Remove VM mappings for this flow
-                    let mut map = vm_mappings.write().await;
-                    let prefix = format!("{}::", flow_clone.id);
-                    map.retain(|k, _| !k.starts_with(&prefix));
-                    // Persist
-                    let sessions = interact_sessions.read().await.clone();
-                    crate::api::save_sessions(&sessions_path, &sessions, &map);
-                    tracing::info!(flow = %flow_clone.name, "VMs destroyed for disabled flow");
-                });
-            }
-        }
-    }
-
     Ok(Json(serde_json::to_value(&flow).unwrap()))
 }
 
@@ -319,11 +258,9 @@ pub(crate) async fn trigger_flow(
     }
 
     // Default: one-shot flow execution
-    let vm_mappings_snapshot = state.vm_mappings.read().await.clone();
     let session_bridge = crate::flows::session_bridge::SessionBridge {
         sessions: state.interact_sessions.clone(),
         sessions_path: state.sessions_path.clone(),
-        vm_mappings: state.vm_mappings.clone(),
         data_dir: state.data_dir.clone(),
         session_streams: state.session_streams.clone(),
     };
@@ -332,7 +269,6 @@ pub(crate) async fn trigger_flow(
         github_client: state.github_client.clone(),
         events_tx: Some(state.events_tx.clone()),
         sandbox_provider: Some(state.sandbox_provider.clone()),
-        vm_mappings: vm_mappings_snapshot,
         agent_repo: Some(state.agent_repo.clone()),
         session_bridge: Some(session_bridge),
     };
@@ -493,17 +429,6 @@ pub(crate) async fn get_node_types() -> Json<Value> {
                 "config_schema": {
                     "agent_id": { "type": "string", "description": "ID of the agent to use", "required": true },
                     "prompt": { "type": "string", "description": "Prompt file path or inline prompt", "required": true },
-                    "working_dir": { "type": "string", "description": "Working directory", "default": "." }
-                }
-            },
-            {
-                "kind": "vm-sandbox",
-                "node_type": "executor",
-                "label": "VM Sandbox",
-                "config_schema": {
-                    "agent_id": { "type": "string", "description": "ID of the agent to use", "required": true },
-                    "tier": { "type": "string", "description": "VM tier: nano (1 vCPU, 512MB) or micro (2 vCPU, 1024MB)", "default": "nano" },
-                    "prompt": { "type": "string", "description": "Prompt template (inline or file path)" },
                     "working_dir": { "type": "string", "description": "Working directory", "default": "." }
                 }
             },

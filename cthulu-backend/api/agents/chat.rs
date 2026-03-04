@@ -216,7 +216,7 @@ pub(crate) async fn new_session(
 
     let sessions_snapshot = all_sessions.clone();
     drop(all_sessions);
-    state.save_sessions_with_vms(&sessions_snapshot);
+    state.save_sessions_to_disk(&sessions_snapshot);
 
     Ok(Json(json!({ "session_id": new_id, "created_at": now })))
 }
@@ -291,7 +291,7 @@ pub(crate) async fn delete_session(
 
     let sessions_snapshot = all_sessions.clone();
     drop(all_sessions);
-    state.save_sessions_with_vms(&sessions_snapshot);
+    state.save_sessions_to_disk(&sessions_snapshot);
 
     Ok(Json(json!({
         "deleted": true,
@@ -450,7 +450,7 @@ pub(crate) async fn kill_session(
 
     let sessions_snapshot = all_sessions.clone();
     drop(all_sessions);
-    state.save_sessions_with_vms(&sessions_snapshot);
+    state.save_sessions_to_disk(&sessions_snapshot);
 
     Ok(Json(json!({ "status": "killed" })))
 }
@@ -610,7 +610,7 @@ pub(crate) async fn chat(
 
         let sessions_snapshot = all_sessions.clone();
         drop(all_sessions);
-        state.save_sessions_with_vms(&sessions_snapshot);
+        state.save_sessions_to_disk(&sessions_snapshot);
 
         (sid, is_new, wdir)
     };
@@ -667,7 +667,7 @@ pub(crate) async fn chat(
             }
             let sessions_snapshot = all_sessions.clone();
             drop(all_sessions);
-            state.save_sessions_with_vms(&sessions_snapshot);
+            state.save_sessions_to_disk(&sessions_snapshot);
         }
 
         // 4. Build system prompt
@@ -707,7 +707,6 @@ pub(crate) async fn chat(
     let session_id_for_stream = target_session_id.clone();
     let sessions_ref = state.interact_sessions.clone();
     let sessions_path = state.sessions_path.clone();
-    let vm_mappings_ref = state.vm_mappings.clone();
     let live_processes = state.live_processes.clone();
     let session_streams = state.session_streams.clone();
     let chat_event_buffers = state.chat_event_buffers.clone();
@@ -937,7 +936,6 @@ pub(crate) async fn chat(
             let key_for_bg = key_for_stream.clone();
             let sid_for_bg = session_id_for_stream.clone();
             let sessions_path = sessions_path.clone();
-            let vm_mappings_ref = vm_mappings_ref.clone();
             let data_dir_for_bg = data_dir.clone();
             let prompt_for_log = prompt.clone();
 
@@ -1083,10 +1081,7 @@ pub(crate) async fn chat(
                     }
                     let sessions_snapshot = all_sessions.clone();
                     drop(all_sessions);
-                    let vms = vm_mappings_ref.try_read()
-                        .map(|g| g.clone())
-                        .unwrap_or_default();
-                    crate::api::save_sessions(&sessions_path, &sessions_snapshot, &vms);
+                    crate::api::save_sessions(&sessions_path, &sessions_snapshot);
                 }
 
                 // Send done event, then clean up broadcast/buffer

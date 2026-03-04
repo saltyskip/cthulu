@@ -86,7 +86,6 @@ function kindLabel(kind: string): string {
     "market-data": "Market",
     keyword: "Filter",
     "claude-code": "Claude",
-    "vm-sandbox": "VM",
     slack: "Slack",
     notion: "Notion",
   };

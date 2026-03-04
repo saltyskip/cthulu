@@ -19,7 +19,6 @@ use crate::flows::session_bridge::SessionBridge;
 use crate::flows::{Flow, NodeType};
 use crate::github::client::GithubClient;
 use crate::sandbox::provider::SandboxProvider;
-use crate::api::VmMapping;
 use crate::tasks::context::render_prompt;
 use crate::tasks::pipeline::format_items;
 use crate::tasks::sources::{self, ContentItem};
@@ -43,9 +42,6 @@ pub struct FlowRunner {
     pub github_client: Option<Arc<dyn GithubClient>>,
     pub events_tx: Option<broadcast::Sender<RunEvent>>,
     pub sandbox_provider: Option<Arc<dyn SandboxProvider>>,
-    /// VM mappings keyed by "flow_id::node_id" -> VmMapping.
-    /// Used to look up web_terminal_url for vm-sandbox executors.
-    pub vm_mappings: HashMap<String, VmMapping>,
     /// Agent repository for resolving `agent_id` on executor nodes.
     pub agent_repo: Option<Arc<dyn AgentRepository>>,
     /// Session bridge for routing executor output to agent workspaces.
@@ -376,7 +372,6 @@ impl FlowRunner {
             http_client: Arc::clone(&self.http_client),
             github_client: self.github_client.clone(),
             sandbox_provider: self.sandbox_provider.clone(),
-            vm_mappings: self.vm_mappings.clone(),
             agent_repo: self.agent_repo.clone(),
             flow_id: flow.id.clone(),
             session_bridge: self.session_bridge.clone(),

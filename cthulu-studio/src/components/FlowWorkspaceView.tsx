@@ -41,7 +41,7 @@ NODE TYPES:
 - trigger: cron (schedule), github-pr (repo), webhook, manual
 - source: rss (url, limit?, keywords?), web-scrape (url), web-scraper (url, items_selector, title_selector, url_selector), github-merged-prs (repos, since_days?), market-data (no config), google-sheets (spreadsheet_id, range, service_account_key_env)
 - filter: keyword (keywords, mode?, field?)
-- executor: claude-code (prompt REQUIRED, permissions?, working_dir?), vm-sandbox (working_dir?)
+- executor: claude-code (prompt REQUIRED, permissions?, working_dir?)
 - sink: slack (webhook_url_env?, bot_token_env?, channel?), notion (token_env, database_id)
 
 EDGE WIRING: trigger→source, source→executor (or source→filter→executor), executor→sink. "edges": "auto" handles this.

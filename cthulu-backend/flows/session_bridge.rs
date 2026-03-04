@@ -2,9 +2,9 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
-use tokio::sync::{broadcast, RwLock, Mutex};
+use tokio::sync::{broadcast, Mutex, RwLock};
 
-use crate::api::{FlowSessions, VmMapping};
+use crate::api::FlowSessions;
 
 /// Metadata linking a session to a flow run.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -25,8 +25,6 @@ pub struct SessionBridge {
     pub sessions: Arc<RwLock<HashMap<String, FlowSessions>>>,
     /// Path to `sessions.yaml` for atomic persistence.
     pub sessions_path: PathBuf,
-    /// VM mappings for save_sessions helper.
-    pub vm_mappings: Arc<RwLock<HashMap<String, VmMapping>>>,
     /// Base data directory (~/.cthulu).
     pub data_dir: PathBuf,
     /// Live broadcast channels for flow-run session streaming.

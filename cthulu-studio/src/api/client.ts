@@ -399,57 +399,6 @@ export async function validateCron(expression: string): Promise<CronValidation> 
 }
 
 // ---------------------------------------------------------------------------
-// VM Manager (Sandbox) API
-// ---------------------------------------------------------------------------
-
-export interface VmInfo {
-  vm_id: number;
-  tier: string;
-  guest_ip: string;
-  ssh_port: number;
-  web_port: number;
-  ssh_command: string;
-  web_terminal: string;
-  pid: number;
-}
-
-/** Get VM info for an executor node (returns null if no VM exists). */
-export async function getNodeVm(
-  flowId: string,
-  nodeId: string
-): Promise<VmInfo | null> {
-  try {
-    return await apiFetch<VmInfo>(`/sandbox/vm/${flowId}/${nodeId}`);
-  } catch {
-    return null;
-  }
-}
-
-/** Create (or get existing) VM for an executor node. */
-export async function createNodeVm(
-  flowId: string,
-  nodeId: string,
-  tier?: string,
-  apiKey?: string
-): Promise<VmInfo> {
-  return apiFetch<VmInfo>(`/sandbox/vm/${flowId}/${nodeId}`, {
-    method: "POST",
-    body: JSON.stringify({
-      tier: tier || undefined,
-      api_key: apiKey || undefined,
-    }),
-  });
-}
-
-/** Destroy the VM for an executor node. */
-export async function deleteNodeVm(
-  flowId: string,
-  nodeId: string
-): Promise<void> {
-  await apiFetch(`/sandbox/vm/${flowId}/${nodeId}`, { method: "DELETE" });
-}
-
-// ---------------------------------------------------------------------------
 // Auth / Token management
 // ---------------------------------------------------------------------------
 
