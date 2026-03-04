@@ -267,7 +267,7 @@ function ThemeSelector() {
       <SelectTrigger size="sm" className="text-xs h-7 min-w-[120px]">
         <SelectValue />
       </SelectTrigger>
-      <SelectContent>
+      <SelectContent position="popper" sideOffset={4}>
         <SelectGroup>
           <SelectLabel>Branded</SelectLabel>
           {branded.map((t) => (
