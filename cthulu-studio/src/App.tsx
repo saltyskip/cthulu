@@ -10,7 +10,7 @@ import AgentGridView from "./components/AgentGridView";
 import AgentDetailView from "./components/AgentDetailView";
 import PromptEditorView from "./components/PromptEditorView";
 import { type CanvasHandle } from "./components/Canvas";
-import McpSetupView from "./components/McpSetupView";
+
 import {
   Dialog,
   DialogContent,
@@ -240,10 +240,6 @@ export default function App() {
     setActiveView("prompt-editor");
   };
 
-  const handleShowMcp = () => {
-    setActiveView("mcp-setup");
-  };
-
   const createFlow = async () => {
     try {
       const { id } = await api.createFlow("New Flow");
@@ -365,7 +361,7 @@ export default function App() {
             nodeTypes={nodeTypes}
             onGrab={handleGrab}
             onCollapse={() => setSidebarCollapsed(true)}
-            onShowMcp={handleShowMcp}
+
           />
         )}
 
@@ -414,9 +410,7 @@ export default function App() {
             }}
           />
         )}
-        {activeView === "mcp-setup" && (
-          <McpSetupView />
-        )}
+
         {[...visitedAgents.entries()].map(([agentId, agentName]) => (
           <div
             key={agentId}

@@ -14,8 +14,7 @@
     "dev:site": "nx dev cthulu-site",
     "build": "nx run-many -t build",
     "build:backend": "nx build cthulu",
-    "build:mcp": "cargo build --release --bin cthulu-mcp",
-    "dev:mcp": "cargo run --bin cthulu-mcp",
+
     "build:studio": "nx build cthulu-studio",
     "build:site": "nx build cthulu-site",
     "test": "nx run-many -t test",

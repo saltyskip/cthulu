@@ -168,15 +168,6 @@ export default function TopBar({
         </>
       )}
 
-      {activeView === "mcp-setup" && (
-        <>
-          <Button variant="ghost" size="sm" className="top-bar-back" onClick={onBackToFlow}>
-            ← Back
-          </Button>
-          <span className="top-bar-agent-name">MCP Setup</span>
-        </>
-      )}
-
       {activeView === "flow-editor" && flow && (
         <>
           {editing ? (

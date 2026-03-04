@@ -56,7 +56,7 @@ fn api_router() -> Router<AppState> {
         .merge(super::scheduler::router())
         .merge(super::sandbox::router())
         .merge(super::changes::router())
-        .merge(super::mcp::router())
+
 }
 
 async fn not_found(req: axum::extract::Request) -> impl IntoResponse {
