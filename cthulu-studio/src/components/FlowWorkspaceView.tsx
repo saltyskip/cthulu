@@ -1,7 +1,8 @@
-import { useState, useCallback, useRef, useEffect, type RefObject } from "react";
+import { useState, useCallback, useRef, useEffect, useMemo, type RefObject } from "react";
 import { STUDIO_ASSISTANT_ID, type Flow, type FlowNode, type FlowEdge, type RunEvent } from "../types/flow";
 import { listAgentSessions, newAgentSession, updateAgent } from "../api/client";
 import type { UpdateSignal } from "../hooks/useFlowDispatch";
+import { X, EyeOff, Plus } from "lucide-react";
 import Canvas, { type CanvasHandle } from "./Canvas";
 import FlowEditor, { type FlowEditorHandle } from "./FlowEditor";
 import RunLog from "./RunLog";
@@ -73,6 +74,11 @@ const DEFAULT_BOTTOM_HEIGHT = 220;
 
 type BottomTab = "log" | "terminal";
 
+const ALL_TABS: { id: BottomTab; label: string }[] = [
+  { id: "log", label: "Run Log" },
+  { id: "terminal", label: "Terminal" },
+];
+
 export default function FlowWorkspaceView({
   flowId,
   canonicalFlow,
@@ -94,6 +100,21 @@ export default function FlowWorkspaceView({
   const [bottomTab, setBottomTab] = useState<BottomTab>("log");
 
   const [studioSessionId, setStudioSessionId] = useState<string | null>(null);
+
+  // Tab visibility: which tabs are shown (VS Code-style toggle)
+  const [visibleTabs, setVisibleTabs] = useState<Set<BottomTab>>(
+    () => new Set<BottomTab>(["log", "terminal"])
+  );
+  // Context menu state for right-click on tabs
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; tab: BottomTab } | null>(null);
+  // "Re-show" menu for adding hidden tabs back
+  const [showAddMenu, setShowAddMenu] = useState(false);
+  const addMenuRef = useRef<HTMLDivElement>(null);
+
+  const hiddenTabs = useMemo(
+    () => ALL_TABS.filter((t) => !visibleTabs.has(t.id)),
+    [visibleTabs]
+  );
 
   const editorRef = useRef<FlowEditorHandle>(null);
   const hDragRef = useRef<{ startX: number; startW: number } | null>(null);
@@ -157,9 +178,10 @@ export default function FlowWorkspaceView({
     [onEditorChange]
   );
 
-  // Open bottom pane when run log is requested
+  // Open bottom pane when run log is requested — also re-show if hidden
   useEffect(() => {
     if (runLogOpen && !bottomOpen) {
+      setVisibleTabs((prev) => new Set(prev).add("log"));
       setBottomOpen(true);
       setBottomTab("log");
     }
@@ -238,6 +260,70 @@ export default function FlowWorkspaceView({
     onRunLogClose();
   }, [onRunLogClose]);
 
+  // Right-click on a tab → show context menu
+  const handleTabContextMenu = useCallback(
+    (e: React.MouseEvent, tab: BottomTab) => {
+      e.preventDefault();
+      setCtxMenu({ x: e.clientX, y: e.clientY, tab });
+    },
+    []
+  );
+
+  // Hide a tab (from context menu)
+  const handleHideTab = useCallback(
+    (tab: BottomTab) => {
+      setCtxMenu(null);
+      setVisibleTabs((prev) => {
+        const next = new Set(prev);
+        next.delete(tab);
+        // If no tabs remain visible, close the panel
+        if (next.size === 0) {
+          setBottomOpen(false);
+          onRunLogClose();
+          return next;
+        }
+        // If the hidden tab was active, switch to the first remaining visible tab
+        if (bottomTab === tab) {
+          const firstVisible = ALL_TABS.find((t) => next.has(t.id));
+          if (firstVisible) setBottomTab(firstVisible.id);
+        }
+        return next;
+      });
+    },
+    [bottomTab, onRunLogClose]
+  );
+
+  // Re-show a hidden tab
+  const handleShowTab = useCallback(
+    (tab: BottomTab) => {
+      setShowAddMenu(false);
+      setVisibleTabs((prev) => new Set(prev).add(tab));
+      setBottomTab(tab);
+      setBottomOpen(true);
+    },
+    []
+  );
+
+  // Close context menu on outside click
+  useEffect(() => {
+    if (!ctxMenu) return;
+    const handler = () => setCtxMenu(null);
+    window.addEventListener("click", handler);
+    return () => window.removeEventListener("click", handler);
+  }, [ctxMenu]);
+
+  // Close add menu on outside click
+  useEffect(() => {
+    if (!showAddMenu) return;
+    const handler = (e: MouseEvent) => {
+      if (addMenuRef.current && !addMenuRef.current.contains(e.target as Node)) {
+        setShowAddMenu(false);
+      }
+    };
+    window.addEventListener("mousedown", handler);
+    return () => window.removeEventListener("mousedown", handler);
+  }, [showAddMenu]);
+
   return (
     <div className="flow-workspace">
       {/* Top area: Canvas + Editor */}
@@ -298,21 +384,43 @@ export default function FlowWorkspaceView({
           />
           <div className="flow-workspace-bottom" style={{ height: bottomHeight }}>
             <div className="flow-workspace-bottom-tabs">
-              <button
-                className={`flow-workspace-tab${bottomTab === "log" ? " active" : ""}`}
-                onClick={() => setBottomTab("log")}
-              >
-                Run Log
-              </button>
-              <button
-                className={`flow-workspace-tab${bottomTab === "terminal" ? " active" : ""}`}
-                onClick={() => setBottomTab("terminal")}
-              >
-                Terminal
-              </button>
+              {ALL_TABS.filter((t) => visibleTabs.has(t.id)).map((t) => (
+                <button
+                  key={t.id}
+                  className={`flow-workspace-tab${bottomTab === t.id ? " active" : ""}`}
+                  onClick={() => setBottomTab(t.id)}
+                  onContextMenu={(e) => handleTabContextMenu(e, t.id)}
+                >
+                  {t.label}
+                </button>
+              ))}
+              {hiddenTabs.length > 0 && (
+                <div className="flow-workspace-tab-add-wrap" ref={addMenuRef}>
+                  <button
+                    className="flow-workspace-tab-add"
+                    onClick={() => setShowAddMenu((v) => !v)}
+                    title="Show hidden tabs"
+                  >
+                    <Plus size={14} />
+                  </button>
+                  {showAddMenu && (
+                    <div className="flow-workspace-tab-dropdown">
+                      {hiddenTabs.map((t) => (
+                        <button
+                          key={t.id}
+                          className="flow-workspace-tab-dropdown-item"
+                          onClick={() => handleShowTab(t.id)}
+                        >
+                          {t.label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
               <div className="spacer" />
               <button className="flow-workspace-tab-close" onClick={handleBottomClose}>
-                ×
+                <X size={14} />
               </button>
             </div>
             <div className="flow-workspace-bottom-content">
@@ -335,20 +443,59 @@ export default function FlowWorkspaceView({
         </>
       )}
 
-      {/* Toggle button when bottom is closed */}
+      {/* Toggle bar when bottom is closed */}
       {!bottomOpen && flowId && (
         <div className="flow-workspace-bottom-toggle">
+          {ALL_TABS.filter((t) => visibleTabs.has(t.id)).map((t) => (
+            <button
+              key={t.id}
+              className="flow-workspace-tab"
+              onClick={() => { setBottomOpen(true); setBottomTab(t.id); }}
+              onContextMenu={(e) => handleTabContextMenu(e, t.id)}
+            >
+              {t.label}
+            </button>
+          ))}
+          {hiddenTabs.length > 0 && (
+            <div className="flow-workspace-tab-add-wrap" ref={addMenuRef}>
+              <button
+                className="flow-workspace-tab-add"
+                onClick={() => setShowAddMenu((v) => !v)}
+                title="Show hidden tabs"
+              >
+                <Plus size={14} />
+              </button>
+              {showAddMenu && (
+                <div className="flow-workspace-tab-dropdown">
+                  {hiddenTabs.map((t) => (
+                    <button
+                      key={t.id}
+                      className="flow-workspace-tab-dropdown-item"
+                      onClick={() => handleShowTab(t.id)}
+                    >
+                      {t.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Right-click context menu */}
+      {ctxMenu && (
+        <div
+          className="flow-workspace-tab-ctx"
+          style={{ left: ctxMenu.x, top: ctxMenu.y }}
+          onClick={(e) => e.stopPropagation()}
+        >
           <button
-            className="flow-workspace-tab"
-            onClick={() => { setBottomOpen(true); setBottomTab("log"); }}
+            className="flow-workspace-tab-ctx-item"
+            onClick={() => handleHideTab(ctxMenu.tab)}
           >
-            Run Log
-          </button>
-          <button
-            className="flow-workspace-tab"
-            onClick={() => { setBottomOpen(true); setBottomTab("terminal"); }}
-          >
-            Terminal
+            <EyeOff size={12} />
+            Hide Tab
           </button>
         </div>
       )}

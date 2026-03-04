@@ -603,23 +603,27 @@ button:disabled {
 .flow-workspace-bottom-tabs {
   display: flex;
   align-items: center;
-  gap: 0;
-  padding: 0 8px;
+  gap: 2px;
+  padding: 0 10px;
   background: var(--bg-secondary);
   border-bottom: 1px solid var(--border);
-  height: 32px;
+  height: 35px;
   flex-shrink: 0;
 }
 
 .flow-workspace-tab {
   font-size: 11px;
   font-weight: 500;
-  padding: 6px 12px;
+  padding: 6px 10px;
+  margin: 0 2px;
   color: var(--text-secondary);
   background: transparent;
   border: none;
   border-bottom: 2px solid transparent;
   cursor: pointer;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  transition: color 0.15s;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
 }
 
@@ -633,17 +637,109 @@ button:disabled {
 }
 
 .flow-workspace-tab-close {
-  font-size: 16px;
-  padding: 0 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
   color: var(--text-secondary);
   background: transparent;
   border: none;
   cursor: pointer;
-  line-height: 1;
+  border-radius: 4px;
 }
 
 .flow-workspace-tab-close:hover {
   color: var(--text);
+  background: color-mix(in srgb, var(--text) 10%, transparent);
+}
+
+/* "+" button to re-show hidden tabs */
+.flow-workspace-tab-add-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.flow-workspace-tab-add {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  color: var(--text-secondary);
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  margin-left: 2px;
+}
+
+.flow-workspace-tab-add:hover {
+  color: var(--text);
+  background: color-mix(in srgb, var(--text) 10%, transparent);
+}
+
+/* Dropdown for re-showing hidden tabs */
+.flow-workspace-tab-dropdown {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  margin-bottom: 4px;
+  min-width: 140px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 0;
+  z-index: 100;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.flow-workspace-tab-dropdown-item {
+  display: block;
+  width: 100%;
+  padding: 6px 12px;
+  font-size: 12px;
+  color: var(--text);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+}
+
+.flow-workspace-tab-dropdown-item:hover {
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+}
+
+/* Right-click context menu */
+.flow-workspace-tab-ctx {
+  position: fixed;
+  z-index: 200;
+  min-width: 140px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 0;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.flow-workspace-tab-ctx-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 12px;
+  font-size: 12px;
+  color: var(--text);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+}
+
+.flow-workspace-tab-ctx-item:hover {
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
 }
 
 .flow-workspace-bottom-content {
@@ -657,11 +753,11 @@ button:disabled {
 .flow-workspace-bottom-toggle {
   display: flex;
   align-items: center;
-  gap: 0;
-  padding: 0 8px;
+  gap: 2px;
+  padding: 0 10px;
   background: var(--bg-secondary);
   border-top: 1px solid var(--border);
-  height: 28px;
+  height: 30px;
   flex-shrink: 0;
 }
 
