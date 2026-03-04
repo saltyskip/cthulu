@@ -12,11 +12,81 @@ use axum::response::IntoResponse;
 use axum::Json;
 use serde::Deserialize;
 use serde_json::json;
+use uuid::Uuid;
 
+use crate::agents::Agent;
 use crate::api::AppState;
+use crate::flows::{Flow, NodeType};
 use crate::templates;
 
 use super::repository::TemplateRepository;
+
+// ── Agent auto-provisioning ────────────────────────────────────────────────
+//
+// Template YAML files define executor nodes with inline `prompt` and
+// `permissions` but no `agent_id`.  The runner requires every executor to
+// reference a persisted Agent.  This helper creates one Agent per executor
+// node that is missing an `agent_id`, saves it, and injects the id into
+// the node config so the flow is runnable immediately after import.
+
+async fn provision_agents_for_executors(
+    flow: &mut Flow,
+    state: &AppState,
+) {
+    for node in flow.nodes.iter_mut() {
+        if node.node_type != NodeType::Executor {
+            continue;
+        }
+        // Skip if already has a valid agent_id
+        if node.config.get("agent_id")
+            .and_then(|v| v.as_str())
+            .is_some_and(|s| !s.is_empty())
+        {
+            continue;
+        }
+
+        let agent_id = Uuid::new_v4().to_string();
+
+        // Extract prompt and permissions from inline config
+        let prompt = node.config.get("prompt")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+
+        let permissions: Vec<String> = node.config.get("permissions")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        let agent = Agent::builder(&agent_id)
+            .name(node.label.clone())
+            .description(format!("Auto-created agent for executor node '{}'", node.label))
+            .prompt(prompt)
+            .permissions(permissions)
+            .build();
+
+        if let Err(e) = state.agent_repo.save(agent).await {
+            tracing::warn!(
+                node_label = %node.label,
+                error = %e,
+                "failed to auto-create agent for executor node"
+            );
+            continue;
+        }
+
+        node.config["agent_id"] = json!(agent_id);
+
+        tracing::info!(
+            agent_id = %agent_id,
+            node_label = %node.label,
+            "auto-created agent for imported executor node"
+        );
+    }
+}
 
 /// List all templates across all categories.
 /// Returns an array of `TemplateMetadata` objects.
@@ -81,7 +151,7 @@ pub(crate) async fn import_template(
         }
     };
 
-    let flow = match templates::parse_template_yaml(&yaml) {
+    let mut flow = match templates::parse_template_yaml(&yaml) {
         Ok(f) => f,
         Err(e) => {
             return (
@@ -91,6 +161,9 @@ pub(crate) async fn import_template(
                 .into_response();
         }
     };
+
+    // Auto-create agents for executor nodes missing agent_id
+    provision_agents_for_executors(&mut flow, &state).await;
 
     match repo.save_imported_flow(flow.clone()).await {
         Ok(_) => {
@@ -153,7 +226,7 @@ pub(crate) async fn import_yaml(
             .into_response();
     }
 
-    let flow = match templates::parse_template_yaml(&body.yaml) {
+    let mut flow = match templates::parse_template_yaml(&body.yaml) {
         Ok(f) => f,
         Err(e) => {
             return (
@@ -163,6 +236,9 @@ pub(crate) async fn import_yaml(
                 .into_response();
         }
     };
+
+    // Auto-create agents for executor nodes missing agent_id
+    provision_agents_for_executors(&mut flow, &state).await;
 
     match repo.save_imported_flow(flow.clone()).await {
         Ok(_) => {
@@ -255,7 +331,10 @@ pub(crate) async fn import_github(
 
     for (filename, yaml_content) in &yaml_files {
         match templates::parse_template_yaml(yaml_content) {
-            Ok(flow) => {
+            Ok(mut flow) => {
+                // Auto-create agents for executor nodes missing agent_id
+                provision_agents_for_executors(&mut flow, &state).await;
+
                 match repo.save_imported_flow(flow.clone()).await {
                     Ok(_) => {
                         let _ = state.scheduler.restart_flow(&flow.id).await;
