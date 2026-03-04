@@ -620,6 +620,7 @@ button:disabled {
   background: transparent;
   border: none;
   border-bottom: 2px solid transparent;
+  border-radius: 0;
   cursor: pointer;
   text-transform: uppercase;
   letter-spacing: 0.5px;
