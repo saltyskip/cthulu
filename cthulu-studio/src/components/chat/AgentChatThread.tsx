@@ -13,10 +13,9 @@ import {
 import { AskUserQuestionToolUI } from "../ToolRenderers";
 import { FilePreviewContext } from "./FilePreviewContext";
 import type { MultiRepoSnapshot } from "./FilePreviewContext";
-import { extractFileOps, extractPlans, extractLatestTodos } from "./chatUtils";
-import FilePreviewPanel from "./FilePreviewPanel";
+import { extractLatestTodos } from "./chatUtils";
 import StickyTodoPanel from "./StickyTodoPanel";
-import type { ImageAttachment, DebugEvent } from "./useAgentChat";
+import type { ImageAttachment, DebugEvent, PendingPermission } from "./useAgentChat";
 
 function prettyJson(raw: string): string {
   try {
@@ -55,6 +54,58 @@ const SLASH_COMMANDS = [
   { command: "/help", description: "Show available commands", type: "local" as const },
 ];
 
+/* ── Permission Banner ─────────────────────────────────────────── */
+
+function PermissionBanner({
+  permissions,
+  onRespond,
+}: {
+  permissions: PendingPermission[];
+  onRespond: (requestId: string, decision: "allow" | "deny") => void;
+}) {
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+
+  if (permissions.length === 0) return null;
+
+  return (
+    <div className="fr-permission-banner">
+      {permissions.map((p) => (
+        <div key={p.requestId} className="fr-permission-item">
+          <div className="fr-permission-header">
+            <span className="fr-permission-icon">🔐</span>
+            <span className="fr-permission-tool">{p.toolName}</span>
+            <span className="fr-permission-label">wants permission</span>
+            <button
+              className="fr-permission-toggle"
+              onClick={() => setExpandedId(expandedId === p.requestId ? null : p.requestId)}
+            >
+              {expandedId === p.requestId ? "▾" : "▸"}
+            </button>
+            <span className="fr-permission-spacer" />
+            <button
+              className="fr-permission-btn fr-permission-allow"
+              onClick={() => onRespond(p.requestId, "allow")}
+            >
+              Allow
+            </button>
+            <button
+              className="fr-permission-btn fr-permission-deny"
+              onClick={() => onRespond(p.requestId, "deny")}
+            >
+              Deny
+            </button>
+          </div>
+          {expandedId === p.requestId && (
+            <pre className="fr-permission-input">
+              {JSON.stringify(p.toolInput, null, 2)}
+            </pre>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 interface AgentChatThreadProps {
   messages: ThreadMessageLike[];
   isStreaming: boolean;
@@ -73,6 +124,8 @@ interface AgentChatThreadProps {
   onToggleDebug: () => void;
   onClearDebug: () => void;
   gitSnapshot: MultiRepoSnapshot | null;
+  pendingPermissions: PendingPermission[];
+  onPermissionResponse: (requestId: string, decision: "allow" | "deny") => void;
 }
 
 export default function AgentChatThread({
@@ -93,6 +146,8 @@ export default function AgentChatThread({
   onToggleDebug,
   onClearDebug,
   gitSnapshot,
+  pendingPermissions,
+  onPermissionResponse,
 }: AgentChatThreadProps) {
   const [dragOver, setDragOver] = useState(false);
 
@@ -240,58 +295,6 @@ export default function AgentChatThread({
     if (!rawTodos || !todosResolvedRef.current) return rawTodos;
     return rawTodos.map((t) => t.status === "completed" ? t : { ...t, status: "completed" });
   }, [rawTodos, todosResolvedRef.current]);
-  const fileOps = useMemo(() => extractFileOps(messages), [messages]);
-  const plans = useMemo(() => extractPlans(messages), [messages]);
-  const [selectedFileId, setSelectedFileId] = useState<string | null>(null);
-  const [previewOpen, setPreviewOpen] = useState(true);
-  const [previewWidth, setPreviewWidth] = useState(480);
-  const dragRef = useRef<{ startX: number; startW: number } | null>(null);
-
-  // Auto-select latest artifact (file op or plan) as new ones arrive
-  const prevOpsLenRef = useRef(0);
-  const prevPlansLenRef = useRef(0);
-  useEffect(() => {
-    const totalPrev = prevOpsLenRef.current + prevPlansLenRef.current;
-    const totalNow = fileOps.length + plans.length;
-    if (totalNow > totalPrev) {
-      // Select the most recently added artifact
-      if (plans.length > prevPlansLenRef.current) {
-        setSelectedFileId(plans[plans.length - 1].toolCallId);
-      } else if (fileOps.length > prevOpsLenRef.current) {
-        setSelectedFileId(fileOps[fileOps.length - 1].toolCallId);
-      }
-      if (!previewOpen) setPreviewOpen(true);
-    }
-    prevOpsLenRef.current = fileOps.length;
-    prevPlansLenRef.current = plans.length;
-  }, [fileOps, plans, previewOpen]);
-
-  const handleDividerDrag = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
-    dragRef.current = { startX: e.clientX, startW: previewWidth };
-
-    const onMove = (ev: MouseEvent) => {
-      if (!dragRef.current) return;
-      const delta = dragRef.current.startX - ev.clientX;
-      const maxW = Math.max(240, window.innerWidth - 300);
-      const newW = Math.min(maxW, Math.max(240, dragRef.current.startW + delta));
-      setPreviewWidth(newW);
-    };
-
-    const onUp = () => {
-      dragRef.current = null;
-      document.body.style.cursor = "";
-      document.body.style.userSelect = "";
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("mouseup", onUp);
-    };
-
-    document.body.style.cursor = "col-resize";
-    document.body.style.userSelect = "none";
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
-  }, [previewWidth]);
-
   const runtime = useExternalStoreRuntime({
     isRunning: isStreaming,
     messages,
@@ -301,22 +304,9 @@ export default function AgentChatThread({
     onAddToolResult: handleAddToolResult,
   });
 
-  const hasArtifacts = fileOps.length > 0 || plans.length > 0;
-  const showRightPanel = hasArtifacts || debugMode;
-  const [rightTab, setRightTab] = useState<"artifacts" | "debug">("artifacts");
-
-  // Auto-switch to debug tab when toggled on
-  const prevDebugRef = useRef(debugMode);
-  useEffect(() => {
-    if (debugMode && !prevDebugRef.current) setRightTab("debug");
-    prevDebugRef.current = debugMode;
-  }, [debugMode]);
-
-  const handleFileSelect = useCallback((toolCallId: string) => {
-    setSelectedFileId(toolCallId);
-    if (!previewOpen) setPreviewOpen(true);
-    setRightTab("artifacts");
-  }, [previewOpen]);
+  const handleFileSelect = useCallback((_toolCallId: string) => {
+    // File preview now handled externally
+  }, []);
 
   // Keyboard shortcut: Cmd/Ctrl+Shift+D to toggle debug mode
   useEffect(() => {
@@ -371,7 +361,7 @@ export default function AgentChatThread({
       <FilePreviewContext.Provider value={handleFileSelect}>
       <AskUserQuestionToolUI />
       <div
-        className={`fr-wrap ${showRightPanel ? "fr-wrap-split" : ""} ${dragOver ? "fr-drag-over" : ""}`}
+        className={`fr-wrap ${dragOver ? "fr-drag-over" : ""}`}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
@@ -388,12 +378,17 @@ export default function AgentChatThread({
             </ThreadPrimitive.Viewport>
           </ThreadPrimitive.Root>
 
-          {isStreaming && (
+          {isStreaming && pendingPermissions.length === 0 && (
             <div className="fr-busy">
               <span className="fr-busy-dot" />
               <span>Thinking…</span>
             </div>
           )}
+
+          <PermissionBanner
+            permissions={pendingPermissions}
+            onRespond={onPermissionResponse}
+          />
 
           {latestTodos && latestTodos.length > 0 && latestTodos.some((t) => t.status !== "completed") && (
             <StickyTodoPanel todos={latestTodos} />
@@ -489,67 +484,6 @@ export default function AgentChatThread({
           </div>
         </div>
 
-        {showRightPanel && previewOpen && (
-          <>
-            <div className="fr-preview-divider" onMouseDown={handleDividerDrag} />
-            <div className="fr-preview" style={{ width: previewWidth, flex: `0 0 ${previewWidth}px` }}>
-              <div className="fr-preview-topbar">
-                {hasArtifacts && (
-                  <button
-                    className={`fr-tab ${rightTab === "artifacts" ? "fr-tab-active" : ""}`}
-                    onClick={() => setRightTab("artifacts")}
-                  >
-                    Artifacts <span className="fr-tab-count">{fileOps.length + plans.length}</span>
-                  </button>
-                )}
-                {debugMode && (
-                  <button
-                    className={`fr-tab ${rightTab === "debug" ? "fr-tab-active" : ""}`}
-                    onClick={() => setRightTab("debug")}
-                  >
-                    SSE Debug <span className="fr-tab-count">{debugEvents.length}</span>
-                  </button>
-                )}
-                <span className="fr-tab-spacer" />
-                {rightTab === "debug" && (
-                  <button className="fr-preview-close" onClick={onClearDebug} title="Clear events">Clear</button>
-                )}
-                <button className="fr-preview-close" onClick={() => setPreviewOpen(false)} title="Collapse panel">◨</button>
-              </div>
-
-              {rightTab === "artifacts" && hasArtifacts && (
-                <FilePreviewPanel
-                  fileOps={fileOps}
-                  plans={plans}
-                  messages={messages}
-                  selectedId={selectedFileId}
-                  onSelect={setSelectedFileId}
-                  gitSnapshot={gitSnapshot}
-                />
-              )}
-
-              {rightTab === "debug" && debugMode && (
-                <div className="fr-debug-scroll" ref={debugScrollRef}>
-                  {debugEvents.length === 0 && (
-                    <div className="fr-debug-empty">No events yet. Send a message to see raw SSE events.</div>
-                  )}
-                  {debugEvents.map((ev, i) => (
-                    <DebugEventRow key={i} ev={ev} />
-                  ))}
-                </div>
-              )}
-            </div>
-          </>
-        )}
-
-        {showRightPanel && !previewOpen && (
-          <div className="fr-preview-collapsed" onClick={() => setPreviewOpen(true)}>
-            <span className="fr-preview-collapsed-icon">◧</span>
-            <span className="fr-preview-collapsed-label">
-              {rightTab === "debug" ? "Debug" : `Artifacts (${fileOps.length + plans.length})`}
-            </span>
-          </div>
-        )}
       </div>
       </FilePreviewContext.Provider>
     </AssistantRuntimeProvider>

@@ -348,7 +348,9 @@ async fn run_server(start_disabled: bool) -> Result<(), Box<dyn Error>> {
         oauth_token: Arc::new(tokio::sync::RwLock::new(oauth_token)),
         session_streams,
         chat_event_buffers: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
-
+        pending_permissions: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
+        hook_streams: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
+        server_port: config.port,
     };
 
     // Start file change watcher (keeps caches in sync with external edits)

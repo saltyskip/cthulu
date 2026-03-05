@@ -38,8 +38,8 @@ interface TopBarProps {
   onTrigger: () => void;
   onRename: (name: string) => void;
   agentName: string | null;
+  sessionSummary?: string | null;
   onBackToFlow: () => void;
-  onShowAgentGrid?: () => void;
   onSettingsClick: () => void;
   onReconnect?: () => void;
 }
@@ -51,8 +51,8 @@ export default function TopBar({
   onTrigger,
   onRename,
   agentName,
+  sessionSummary,
   onBackToFlow,
-  onShowAgentGrid,
   onSettingsClick,
   onReconnect,
 }: TopBarProps) {
@@ -144,18 +144,9 @@ export default function TopBar({
     <div className="top-bar">
       <h1>Cthulu Studio</h1>
 
-      {activeView === "agent-grid" && (
-        <>
-          <Button variant="ghost" size="sm" className="top-bar-back" onClick={onBackToFlow}>
-            ← Back
-          </Button>
-          <span className="top-bar-agent-name">Agents</span>
-        </>
-      )}
-
       {activeView === "agent-workspace" && (
-        <Button variant="ghost" size="sm" className="top-bar-back" onClick={onShowAgentGrid || onBackToFlow}>
-          ← Agents
+        <Button variant="ghost" size="sm" className="top-bar-back" onClick={onBackToFlow}>
+          ← Back
         </Button>
       )}
 
@@ -208,7 +199,12 @@ export default function TopBar({
       )}
 
       {activeView === "agent-workspace" && agentName && (
-        <span className="top-bar-agent-name">{agentName}</span>
+        <>
+          <span className="top-bar-agent-name">{agentName}</span>
+          {sessionSummary && (
+            <span className="top-bar-session-summary">{sessionSummary}</span>
+          )}
+        </>
       )}
 
       <div className="spacer" />

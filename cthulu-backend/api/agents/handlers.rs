@@ -1,4 +1,4 @@
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::Json;
 use chrono::Utc;
 use hyper::StatusCode;
@@ -192,4 +192,162 @@ pub(crate) async fn delete_agent(
     });
 
     Ok(Json(json!({ "deleted": true })))
+}
+
+// ---------------------------------------------------------------------------
+// File explorer (read-only)
+// ---------------------------------------------------------------------------
+
+#[derive(Deserialize)]
+pub struct FileReadQuery {
+    pub path: Option<String>,
+}
+
+/// List files in the working directory of a session.
+/// Returns a tree of files/directories.
+pub(crate) async fn list_session_files(
+    State(state): State<AppState>,
+    Path((id, session_id)): Path<(String, String)>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let key = format!("agent::{id}");
+    let all_sessions = state.interact_sessions.read().await;
+    let working_dir = all_sessions
+        .get(&key)
+        .and_then(|fs| fs.get_session(&session_id))
+        .map(|s| s.working_dir.clone());
+    drop(all_sessions);
+
+    let working_dir = working_dir.ok_or((
+        StatusCode::NOT_FOUND,
+        Json(json!({ "error": "session not found" })),
+    ))?;
+
+    let dir = std::path::Path::new(&working_dir);
+    if !dir.exists() || !dir.is_dir() {
+        return Ok(Json(json!({ "tree": [] })));
+    }
+
+    let tree = build_file_tree(dir, dir, 3);
+    Ok(Json(json!({ "tree": tree, "root": working_dir })))
+}
+
+/// Read a single file from the session's working directory (read-only).
+pub(crate) async fn read_session_file(
+    State(state): State<AppState>,
+    Path((id, session_id)): Path<(String, String)>,
+    Query(query): Query<FileReadQuery>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let key = format!("agent::{id}");
+    let all_sessions = state.interact_sessions.read().await;
+    let working_dir = all_sessions
+        .get(&key)
+        .and_then(|fs| fs.get_session(&session_id))
+        .map(|s| s.working_dir.clone());
+    drop(all_sessions);
+
+    let working_dir = working_dir.ok_or((
+        StatusCode::NOT_FOUND,
+        Json(json!({ "error": "session not found" })),
+    ))?;
+
+    let rel_path = query.path.unwrap_or_default();
+    if rel_path.is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "path query parameter is required" })),
+        ));
+    }
+
+    let base = std::path::Path::new(&working_dir).canonicalize().unwrap_or_else(|_| std::path::PathBuf::from(&working_dir));
+    let target = base.join(&rel_path);
+
+    // Security: ensure the resolved path is within the working directory
+    let resolved = target.canonicalize().map_err(|_| {
+        (StatusCode::NOT_FOUND, Json(json!({ "error": "file not found" })))
+    })?;
+    if !resolved.starts_with(&base) {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({ "error": "path traversal not allowed" })),
+        ));
+    }
+
+    if !resolved.is_file() {
+        return Err((
+            StatusCode::NOT_FOUND,
+            Json(json!({ "error": "not a file" })),
+        ));
+    }
+
+    // Limit file size to 1MB
+    let metadata = std::fs::metadata(&resolved).map_err(|_| {
+        (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": "cannot read file metadata" })))
+    })?;
+    if metadata.len() > 1_048_576 {
+        return Err((
+            StatusCode::PAYLOAD_TOO_LARGE,
+            Json(json!({ "error": "file too large (>1MB)" })),
+        ));
+    }
+
+    let content = std::fs::read_to_string(&resolved).map_err(|_| {
+        (StatusCode::UNPROCESSABLE_ENTITY, Json(json!({ "error": "cannot read file as text (may be binary)" })))
+    })?;
+
+    Ok(Json(json!({
+        "path": rel_path,
+        "content": content,
+        "size": metadata.len(),
+    })))
+}
+
+/// Build a JSON file tree up to `max_depth` levels.
+fn build_file_tree(
+    dir: &std::path::Path,
+    root: &std::path::Path,
+    max_depth: u32,
+) -> Vec<Value> {
+    if max_depth == 0 {
+        return vec![];
+    }
+
+    let mut entries = Vec::new();
+    let Ok(read_dir) = std::fs::read_dir(dir) else {
+        return entries;
+    };
+
+    let mut items: Vec<_> = read_dir.flatten().collect();
+    items.sort_by_key(|e| e.file_name());
+
+    for entry in items {
+        let name = entry.file_name().to_string_lossy().to_string();
+
+        // Skip hidden files/dirs and common noise
+        if name.starts_with('.') || name == "node_modules" || name == "target" || name == "__pycache__" {
+            continue;
+        }
+
+        let path = entry.path();
+        let rel = path.strip_prefix(root).unwrap_or(&path).to_string_lossy().to_string();
+
+        if path.is_dir() {
+            let children = build_file_tree(&path, root, max_depth - 1);
+            entries.push(json!({
+                "name": name,
+                "path": rel,
+                "type": "directory",
+                "children": children,
+            }));
+        } else {
+            let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+            entries.push(json!({
+                "name": name,
+                "path": rel,
+                "type": "file",
+                "size": size,
+            }));
+        }
+    }
+
+    entries
 }

@@ -2,6 +2,7 @@ pub mod agents;
 pub mod auth;
 pub mod changes;
 pub mod flows;
+pub mod hooks;
 
 pub mod middleware;
 pub mod prompts;
@@ -344,7 +345,15 @@ pub struct AppState {
     /// In-memory event buffers for agent chat reconnection.
     /// Key: process_key (agent::{id}::session::{sid}), Value: buffered SSE events for current turn.
     pub chat_event_buffers: Arc<Mutex<HashMap<String, Vec<String>>>>,
-
+    /// Pending permission requests from Claude Code hooks.
+    /// Key: request_id (UUID), Value: oneshot sender to resolve the decision.
+    pub pending_permissions: Arc<Mutex<HashMap<String, tokio::sync::oneshot::Sender<hooks::routes::PermissionDecision>>>>,
+    /// Persistent broadcast channels for hook events (permission requests, file changes, stop).
+    /// Key: "agent::{agent_id}::session::{session_id}", Value: sender for SSE hook events.
+    /// Unlike session_streams (tied to chat message lifecycle), these persist as long as a subscriber exists.
+    pub hook_streams: Arc<Mutex<HashMap<String, broadcast::Sender<String>>>>,
+    /// The port the server is listening on (used in hook URLs).
+    pub server_port: u16,
 }
 
 impl AppState {

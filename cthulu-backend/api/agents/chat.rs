@@ -618,86 +618,168 @@ pub(crate) async fn chat(
     // On first message: generate .skills/ context files and build system prompt
     let data_dir = state.data_dir.clone();
 
-    let system_prompt = if is_new {
-        let skills_dir = std::path::Path::new(&working_dir).join(".skills");
-        let _ = std::fs::create_dir_all(&skills_dir);
+    // Generate .claude/settings.local.json with hook URLs for this session
+    {
+        let claude_dir = std::path::Path::new(&working_dir).join(".claude");
+        let _ = std::fs::create_dir_all(&claude_dir);
+        let settings_path = claude_dir.join("settings.local.json");
 
-        // 1. Copy AGENT.md from project root to .skills/
-        let agent_md_candidates = [
-            std::path::PathBuf::from("AGENT.md"),
-            data_dir.join("AGENT.md"),
-        ];
-        for candidate in &agent_md_candidates {
-            if candidate.exists() {
-                let _ = std::fs::copy(candidate, skills_dir.join("AGENT.md"));
-                break;
-            }
+        // Read existing settings if present, to merge hooks in
+        let mut settings: serde_json::Value = if settings_path.exists() {
+            std::fs::read_to_string(&settings_path)
+                .ok()
+                .and_then(|s| serde_json::from_str(&s).ok())
+                .unwrap_or_else(|| json!({}))
+        } else {
+            json!({})
+        };
+
+        let port = state.server_port;
+        let sid = &target_session_id;
+        let hook_base = format!("http://localhost:{port}/api/hooks");
+
+        // Hook config: 3 levels — event -> matcher group -> hook handlers
+        // See https://code.claude.com/docs/en/hooks
+        //
+        // NOTE: PermissionRequest hooks do NOT fire in stream-json mode.
+        // We use PreToolUse as the permission gate instead — it fires for every
+        // tool call and can return permissionDecision: "allow" or "deny".
+        settings["hooks"] = json!({
+            "PreToolUse": [{
+                "matcher": "Write|Edit|MultiEdit|NotebookEdit|Bash",
+                "hooks": [{
+                    "type": "http",
+                    "url": format!("{hook_base}/pre-tool-use?session_id={sid}"),
+                    "timeout": 120
+                }]
+            }],
+            "PostToolUse": [{
+                "matcher": "Write|Edit|MultiEdit|NotebookEdit|Bash",
+                "hooks": [{
+                    "type": "http",
+                    "url": format!("{hook_base}/post-tool-use?session_id={sid}")
+                }]
+            }],
+            "Stop": [{
+                "hooks": [{
+                    "type": "http",
+                    "url": format!("{hook_base}/stop?session_id={sid}")
+                }]
+            }]
+        });
+
+        if let Ok(json_str) = serde_json::to_string_pretty(&settings) {
+            let _ = std::fs::write(&settings_path, json_str);
+            tracing::info!(
+                path = %settings_path.display(),
+                session_id = %sid,
+                "wrote .claude/settings.local.json with hook URLs"
+            );
         }
+    }
 
-        // 2. Generate Skill.md and workflow.json if flow context is available
-        if let Some((ref flow, ref node_id)) = flow_context {
-            let skill_md = build_workflow_context_md(flow, node_id);
-            let _ = std::fs::write(skills_dir.join("Skill.md"), &skill_md);
+    let system_prompt = if is_new {
+        let has_flow_context = flow_context.is_some();
 
-            if let Ok(flow_json) = serde_json::to_string_pretty(flow) {
-                let _ = std::fs::write(skills_dir.join("workflow.json"), &flow_json);
+        // Only generate .skills/ for flow-context agents (executor nodes in flows)
+        if has_flow_context {
+            let skills_dir = std::path::Path::new(&working_dir).join(".skills");
+            let _ = std::fs::create_dir_all(&skills_dir);
+
+            // 1. Copy AGENT.md from project root to .skills/
+            let agent_md_candidates = [
+                std::path::PathBuf::from("AGENT.md"),
+                data_dir.join("AGENT.md"),
+            ];
+            for candidate in &agent_md_candidates {
+                if candidate.exists() {
+                    let _ = std::fs::copy(candidate, skills_dir.join("AGENT.md"));
+                    break;
+                }
             }
 
-            // Sync user-uploaded attachments to .skills/
-            let att_dir = attachments_path(&data_dir, &flow.id, node_id);
-            if att_dir.exists() {
-                if let Ok(entries) = std::fs::read_dir(&att_dir) {
-                    for entry in entries.flatten() {
-                        let p = entry.path();
-                        if p.is_file() {
-                            let _ = std::fs::copy(&p, skills_dir.join(entry.file_name()));
+            // 2. Generate Skill.md and workflow.json
+            if let Some((ref flow, ref node_id)) = flow_context {
+                let skill_md = build_workflow_context_md(flow, node_id);
+                let _ = std::fs::write(skills_dir.join("Skill.md"), &skill_md);
+
+                if let Ok(flow_json) = serde_json::to_string_pretty(flow) {
+                    let _ = std::fs::write(skills_dir.join("workflow.json"), &flow_json);
+                }
+
+                // Sync user-uploaded attachments to .skills/
+                let att_dir = attachments_path(&data_dir, &flow.id, node_id);
+                if att_dir.exists() {
+                    if let Ok(entries) = std::fs::read_dir(&att_dir) {
+                        for entry in entries.flatten() {
+                            let p = entry.path();
+                            if p.is_file() {
+                                let _ = std::fs::copy(&p, skills_dir.join(entry.file_name()));
+                            }
                         }
                     }
                 }
             }
-        }
 
-        // 3. Store skills_dir path in session
-        {
-            let mut all_sessions = state.interact_sessions.write().await;
-            if let Some(fs) = all_sessions.get_mut(&key) {
-                if let Some(s) = fs.get_session_mut(&target_session_id) {
-                    s.skills_dir = Some(skills_dir.to_string_lossy().to_string());
+            // 3. Store skills_dir path in session
+            {
+                let mut all_sessions = state.interact_sessions.write().await;
+                if let Some(fs) = all_sessions.get_mut(&key) {
+                    if let Some(s) = fs.get_session_mut(&target_session_id) {
+                        s.skills_dir = Some(skills_dir.to_string_lossy().to_string());
+                    }
+                }
+                let sessions_snapshot = all_sessions.clone();
+                drop(all_sessions);
+                state.save_sessions_to_disk(&sessions_snapshot);
+            }
+
+            // 4. Build scoped system prompt for flow executor agents
+            let mut sys_prompt = format!(
+                "You are \"{agent_name}\", an AI agent.\n\n\
+                 CRITICAL RULES — FOLLOW EXACTLY:\n\n\
+                 1. FIRST: Read .skills/Skill.md and .skills/AGENT.md — these contain ALL your context.\n\
+                 2. SCOPE LOCKED: Do NOT explore, search, or read ANY files outside .skills/ directory.\n\
+                    No find, no grep, no ls, no bash exploration, no reading source code, no git commands.\n\
+                    Your .skills/ files already contain your workflow context, pipeline info, and rules.\n\
+                 3. ANSWER FROM CONTEXT: When asked about the workflow, answer from .skills/Skill.md\n\
+                    and .skills/workflow.json — do NOT go looking for more information.\n\
+                 4. IF THE USER WANTS MORE: Only if the user explicitly says \"read the codebase\",\n\
+                    \"explore the project\", or similar — THEN you may expand scope. Not before.\n\
+                 5. BE EFFICIENT: Short answers. No preamble. No filler. Batch tool calls.\n\
+                    Read .skills/AGENT.md for full efficiency rules.\n\n\
+                 Files in .skills/:\n\
+                 - .skills/AGENT.md — agent rules, scope boundaries, efficiency rules\n\
+                 - .skills/Skill.md — your position in the pipeline and workflow context\n\
+                 - .skills/workflow.json — full workflow definition",
+                agent_name = agent.name,
+            );
+
+            if let Some(ref extra) = append_system_prompt {
+                if !extra.is_empty() {
+                    sys_prompt.push_str(&format!("\n\n{extra}"));
                 }
             }
-            let sessions_snapshot = all_sessions.clone();
-            drop(all_sessions);
-            state.save_sessions_to_disk(&sessions_snapshot);
-        }
 
-        // 4. Build system prompt
-        let mut sys_prompt = format!(
-            "You are \"{agent_name}\", an AI agent.\n\n\
-             CRITICAL RULES — FOLLOW EXACTLY:\n\n\
-             1. FIRST: Read .skills/Skill.md and .skills/AGENT.md — these contain ALL your context.\n\
-             2. SCOPE LOCKED: Do NOT explore, search, or read ANY files outside .skills/ directory.\n\
-                No find, no grep, no ls, no bash exploration, no reading source code, no git commands.\n\
-                Your .skills/ files already contain your workflow context, pipeline info, and rules.\n\
-             3. ANSWER FROM CONTEXT: When asked about the workflow, answer from .skills/Skill.md\n\
-                and .skills/workflow.json — do NOT go looking for more information.\n\
-             4. IF THE USER WANTS MORE: Only if the user explicitly says \"read the codebase\",\n\
-                \"explore the project\", or similar — THEN you may expand scope. Not before.\n\
-             5. BE EFFICIENT: Short answers. No preamble. No filler. Batch tool calls.\n\
-                Read .skills/AGENT.md for full efficiency rules.\n\n\
-             Files in .skills/:\n\
-             - .skills/AGENT.md — agent rules, scope boundaries, efficiency rules\n\
-             - .skills/Skill.md — your position in the pipeline and workflow context\n\
-             - .skills/workflow.json — full workflow definition",
-            agent_name = agent.name,
-        );
+            Some(sys_prompt)
+        } else {
+            // Standalone agent — simple system prompt, no .skills/ scope lock
+            let mut sys_prompt = format!(
+                "You are \"{agent_name}\", an AI assistant. \
+                 Your working directory is: {working_dir}\n\
+                 Be efficient: short answers, no preamble, batch tool calls when possible.",
+                agent_name = agent.name,
+                working_dir = working_dir,
+            );
 
-        if let Some(ref extra) = append_system_prompt {
-            if !extra.is_empty() {
-                sys_prompt.push_str(&format!("\n\n{extra}"));
+            if let Some(ref extra) = append_system_prompt {
+                if !extra.is_empty() {
+                    sys_prompt.push_str(&format!("\n\n{extra}"));
+                }
             }
-        }
 
-        Some(sys_prompt)
+            Some(sys_prompt)
+        }
     } else {
         None
     };
@@ -725,7 +807,6 @@ pub(crate) async fn chat(
             } else {
                 // Spawn inside the lock — Command::spawn() is synchronous (forks immediately)
                 let mut args = vec![
-                    "--print".to_string(),
                     "--verbose".to_string(),
                     "--output-format".to_string(),
                     "stream-json".to_string(),
@@ -733,12 +814,16 @@ pub(crate) async fn chat(
                     "stream-json".to_string(),
                 ];
 
-                if permissions.is_empty() {
-                    args.push("--dangerously-skip-permissions".to_string());
-                } else {
+                if !permissions.is_empty() {
+                    // Agent has explicit allowedTools — use them.
+                    // Tools NOT in this list trigger Claude's permission model,
+                    // which fires the PermissionRequest hook.
                     args.push("--allowedTools".to_string());
                     args.push(permissions.join(","));
                 }
+                // When no explicit permissions: Claude's default permission model
+                // kicks in and fires PermissionRequest hooks (configured in
+                // .claude/settings.local.json) for tools that need approval.
 
                 if is_new {
                     args.push("--session-id".to_string());
@@ -1709,4 +1794,85 @@ fn build_workflow_context_md(flow: &Flow, node_id: &str) -> String {
         prompt_path = prompt_path,
         node_id = node_id,
     )
+}
+
+// ---------------------------------------------------------------------------
+// Persistent SSE endpoint for hook events (permission requests, file changes, stop)
+// ---------------------------------------------------------------------------
+
+/// GET /agents/{id}/sessions/{session_id}/hooks/stream
+///
+/// Long-lived SSE connection that delivers hook events for a session.
+/// Unlike chat streams, this stays open as long as the frontend is subscribed.
+pub async fn hook_event_stream(
+    State(state): State<AppState>,
+    Path((agent_id, session_id)): Path<(String, String)>,
+) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+    let hook_key = format!("agent::{agent_id}::session::{session_id}");
+
+    // Get or create a broadcast channel for this session's hook events
+    let rx = {
+        let mut streams = state.hook_streams.lock().await;
+        let tx = streams
+            .entry(hook_key.clone())
+            .or_insert_with(|| {
+                let (tx, _) = broadcast::channel::<String>(256);
+                tx
+            });
+        tx.subscribe()
+    };
+
+    tracing::info!(
+        hook_key = %hook_key,
+        "hook event stream connected"
+    );
+
+    let hook_streams = state.hook_streams.clone();
+    let hook_key_cleanup = hook_key.clone();
+
+    let stream = async_stream::stream! {
+        let mut rx = rx;
+
+        // Send an initial keepalive/connected event
+        yield Ok(Event::default().event("connected").data(
+            serde_json::to_string(&json!({"session_id": session_id})).unwrap_or_default()
+        ));
+
+        loop {
+            match rx.recv().await {
+                Ok(data) => {
+                    // Parse to extract event type, or send as generic hook event
+                    if let Ok(parsed) = serde_json::from_str::<Value>(&data) {
+                        let event_type = parsed.get("type")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("hook");
+                        yield Ok(Event::default().event(event_type).data(data));
+                    } else {
+                        yield Ok(Event::default().event("hook").data(data));
+                    }
+                }
+                Err(broadcast::error::RecvError::Lagged(n)) => {
+                    tracing::warn!(hook_key = %hook_key_cleanup, lagged = n, "hook stream lagged");
+                    continue;
+                }
+                Err(broadcast::error::RecvError::Closed) => {
+                    tracing::info!(hook_key = %hook_key_cleanup, "hook stream closed");
+                    break;
+                }
+            }
+        }
+
+        // Cleanup: remove from hook_streams if no more subscribers
+        {
+            let mut streams = hook_streams.lock().await;
+            if let Some(tx) = streams.get(&hook_key_cleanup) {
+                if tx.receiver_count() == 0 {
+                    streams.remove(&hook_key_cleanup);
+                    tracing::info!(hook_key = %hook_key_cleanup, "cleaned up hook stream (no subscribers)");
+                }
+            }
+        }
+    };
+
+    Sse::new(stream).keep_alive(KeepAlive::default())
 }

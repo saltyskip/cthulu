@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { STUDIO_ASSISTANT_ID, type FlowSummary, type Flow, type NodeTypeSchema, type AgentSummary, type SavedPrompt, type ActiveView } from "../types/flow";
-import { listAgents, createAgent, deleteAgent, listPrompts, savePrompt, deletePrompt as deletePromptApi, listAgentSessions } from "../api/client";
+import { listAgents, createAgent, deleteAgent, listPrompts, savePrompt, deletePrompt as deletePromptApi, listAgentSessions, newAgentSession } from "../api/client";
+import type { InteractSessionInfo } from "../api/client";
 import { Switch } from "@/components/ui/switch";
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
 import TemplateGallery from "./TemplateGallery";
@@ -13,10 +14,10 @@ interface SidebarProps {
   onCreateFlow: () => void;
   onImportTemplate: (flow: Flow) => void;
   onToggleEnabled: (flowId: string) => void;
-  // Agent list
+  // Agent + session selection
   selectedAgentId: string | null;
-  onSelectAgent: (id: string) => void;
-  onShowAgentGrid: () => void;
+  selectedSessionId: string | null;
+  onSelectSession: (agentId: string, sessionId: string) => void;
   agentListKey: number;
   onAgentCreated: (id: string) => void;
   // Prompts
@@ -45,8 +46,8 @@ export default function Sidebar({
   onImportTemplate,
   onToggleEnabled,
   selectedAgentId,
-  onSelectAgent,
-  onShowAgentGrid,
+  selectedSessionId,
+  onSelectSession,
   agentListKey,
   onAgentCreated,
   selectedPromptId,
@@ -60,7 +61,8 @@ export default function Sidebar({
   const [showGallery, setShowGallery] = useState(false);
   const [agents, setAgents] = useState<AgentSummary[]>([]);
   const [prompts, setPrompts] = useState<SavedPrompt[]>([]);
-  const [agentMeta, setAgentMeta] = useState<Map<string, { busy: boolean; sessions: number; cost: number }>>(new Map());
+  const [agentMeta, setAgentMeta] = useState<Map<string, { busy: boolean; sessions: InteractSessionInfo[]; cost: number }>>(new Map());
+  const [expandedAgents, setExpandedAgents] = useState<Set<string>>(new Set());
 
   const refreshAgents = useCallback(async () => {
     try {
@@ -75,7 +77,7 @@ export default function Sidebar({
     refreshAgents();
   }, [refreshAgents, agentListKey]);
 
-  // Poll agent session metadata for status indicators
+  // Poll agent session data for tree display
   useEffect(() => {
     if (agents.length === 0) return;
 
@@ -83,13 +85,13 @@ export default function Sidebar({
       const results = await Promise.allSettled(
         agents.map((a) => listAgentSessions(a.id).then((info) => ({ id: a.id, info })))
       );
-      const next = new Map<string, { busy: boolean; sessions: number; cost: number }>();
+      const next = new Map<string, { busy: boolean; sessions: InteractSessionInfo[]; cost: number }>();
       for (const r of results) {
         if (r.status === "fulfilled") {
           const { id, info } = r.value;
           const busy = info.sessions.some((s) => s.busy);
           const cost = info.sessions.reduce((sum, s) => sum + s.total_cost, 0);
-          next.set(id, { busy, sessions: info.sessions.length, cost });
+          next.set(id, { busy, sessions: info.sessions, cost });
         }
       }
       setAgentMeta(next);
@@ -195,8 +197,115 @@ export default function Sidebar({
         />
       )}
 
-      {/* Flows section */}
+      {/* Agents section (primary, expanded by default) */}
       <Collapsible defaultOpen className="sidebar-section">
+        <CollapsibleTrigger asChild>
+          <div className="sidebar-section-header">
+            <span className="sidebar-chevron">▶</span>
+            <h2>Agents</h2>
+            <div style={{ flex: 1 }} />
+            <button
+              className="ghost sidebar-action-btn"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleCreateAgent();
+              }}
+            >
+              +
+            </button>
+          </div>
+        </CollapsibleTrigger>
+        <CollapsibleContent>
+          <div className="sidebar-section-body">
+            {[...agents].sort((a, b) => {
+              if (a.id === STUDIO_ASSISTANT_ID) return -1;
+              if (b.id === STUDIO_ASSISTANT_ID) return 1;
+              return 0;
+            }).map((agent) => {
+              const meta = agentMeta.get(agent.id);
+              const isExpanded = expandedAgents.has(agent.id);
+              const isActive = agent.id === selectedAgentId && activeView === "agent-workspace";
+              const sessions = meta?.sessions ?? [];
+
+              return (
+                <div key={agent.id} className="sb-agent">
+                  <div
+                    className={`sb-agent-row${isActive ? " sb-agent-active" : ""}`}
+                    onClick={() => {
+                      setExpandedAgents((prev) => {
+                        const next = new Set(prev);
+                        if (next.has(agent.id)) next.delete(agent.id);
+                        else next.add(agent.id);
+                        return next;
+                      });
+                      if (sessions.length > 0) {
+                        onSelectSession(agent.id, sessions[0].session_id);
+                      }
+                    }}
+                  >
+                    <span className="sb-agent-chevron">{isExpanded ? "▾" : "▸"}</span>
+                    {meta?.busy && <span className="sb-agent-pulse" />}
+                    <span className="sb-agent-name">{agent.name}</span>
+                    {meta && meta.cost > 0 && (
+                      <span className="sb-agent-cost">${meta.cost.toFixed(2)}</span>
+                    )}
+                    {agent.id !== STUDIO_ASSISTANT_ID && (
+                      <button
+                        className="ghost sb-agent-delete"
+                        onClick={(e) => handleDeleteAgent(e, agent.id)}
+                        title="Delete agent"
+                      >
+                        ×
+                      </button>
+                    )}
+                  </div>
+                  {isExpanded && (
+                    <div className="sb-sessions">
+                      {sessions.map((s) => {
+                        const isSessionActive = s.session_id === selectedSessionId && agent.id === selectedAgentId;
+                        const label = s.summary || (s.kind === "flow_run" ? `Run: ${s.flow_run?.flow_name ?? ""}` : "New session");
+                        return (
+                          <div
+                            key={s.session_id}
+                            className={`sb-session${isSessionActive ? " sb-session-active" : ""}`}
+                            onClick={() => onSelectSession(agent.id, s.session_id)}
+                          >
+                            {s.busy && <span className="sb-session-pulse" />}
+                            <span className="sb-session-label">{label}</span>
+                            {s.total_cost > 0 && (
+                              <span className="sb-session-cost">${s.total_cost.toFixed(2)}</span>
+                            )}
+                          </div>
+                        );
+                      })}
+                      <button
+                        className="sb-session-new"
+                        onClick={async (e) => {
+                          e.stopPropagation();
+                          try {
+                            const result = await newAgentSession(agent.id);
+                            onSelectSession(agent.id, result.session_id);
+                          } catch (err) {
+                            console.error("Failed to create session:", err);
+                          }
+                        }}
+                      >
+                        + New Session
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+            {agents.length === 0 && (
+              <div className="sidebar-item-empty">No agents yet</div>
+            )}
+          </div>
+        </CollapsibleContent>
+      </Collapsible>
+
+      {/* Flows section (collapsed by default) */}
+      <Collapsible className="sidebar-section">
         <CollapsibleTrigger asChild>
           <div className="sidebar-section-header">
             <span className="sidebar-chevron">▶</span>
@@ -235,82 +344,6 @@ export default function Sidebar({
             ))}
             {flows.length === 0 && (
               <div className="sidebar-item-empty">No flows yet</div>
-            )}
-          </div>
-        </CollapsibleContent>
-      </Collapsible>
-
-      {/* Agents section */}
-      <Collapsible defaultOpen className="sidebar-section">
-        <CollapsibleTrigger asChild>
-          <div className="sidebar-section-header">
-            <span className="sidebar-chevron">▶</span>
-            <h2
-              onClick={(e) => {
-                e.stopPropagation();
-                onShowAgentGrid();
-              }}
-              style={{ cursor: "pointer" }}
-              title="View all agents"
-            >
-              Agents
-            </h2>
-            <div style={{ flex: 1 }} />
-            <button
-              className="ghost sidebar-action-btn"
-              onClick={(e) => {
-                e.stopPropagation();
-                handleCreateAgent();
-              }}
-            >
-              +
-            </button>
-          </div>
-        </CollapsibleTrigger>
-        <CollapsibleContent>
-          <div className="sidebar-section-body">
-            {[...agents].sort((a, b) => {
-              if (a.id === STUDIO_ASSISTANT_ID) return -1;
-              if (b.id === STUDIO_ASSISTANT_ID) return 1;
-              return 0;
-            }).map((agent) => (
-              <div
-                key={agent.id}
-                className={`sidebar-item${agent.id === selectedAgentId && activeView === "agent-workspace" ? " active" : ""}`}
-                onClick={() => onSelectAgent(agent.id)}
-              >
-                <div className="sidebar-item-row">
-                  <div className="sidebar-item-name">
-                    {agentMeta.get(agent.id)?.busy && (
-                      <span className="sidebar-agent-busy" />
-                    )}
-                    {agent.name}
-                  </div>
-                  {agent.id !== STUDIO_ASSISTANT_ID && (
-                    <button
-                      className="ghost sidebar-delete-btn"
-                      onClick={(e) => handleDeleteAgent(e, agent.id)}
-                      title="Delete agent"
-                    >
-                      ×
-                    </button>
-                  )}
-                </div>
-                {agentMeta.has(agent.id) && (
-                  <div className="sidebar-agent-meta">
-                    {agentMeta.get(agent.id)!.sessions}s
-                    {agentMeta.get(agent.id)!.cost > 0 && (
-                      <> &middot; ${agentMeta.get(agent.id)!.cost.toFixed(2)}</>
-                    )}
-                  </div>
-                )}
-                {agent.description && (
-                  <div className="sidebar-item-meta">{agent.description}</div>
-                )}
-              </div>
-            ))}
-            {agents.length === 0 && (
-              <div className="sidebar-item-empty">No agents yet</div>
             )}
           </div>
         </CollapsibleContent>
