@@ -386,8 +386,8 @@ export default function TemplateGallery({
 
           {!loading && !error && filtered.length === 0 && (
             <div className="tg-empty">
-              {searchQuery
-                ? `No templates matching "${searchQuery}".`
+              {deferredSearch
+                ? `No templates matching "${deferredSearch}".`
                 : "No templates in this category."}
             </div>
           )}
