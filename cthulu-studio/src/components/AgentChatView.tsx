@@ -1,13 +1,16 @@
 import { useAgentChat } from "./chat/useAgentChat";
 import AgentChatThread from "./chat/AgentChatThread";
+import type { PendingPermission } from "../hooks/useGlobalPermissions";
 
 export type AgentChatHandle = ReturnType<typeof useAgentChat>;
 
 interface AgentChatViewProps {
   chat: AgentChatHandle;
+  pendingPermissions: PendingPermission[];
+  onPermissionResponse: (requestId: string, decision: "allow" | "deny") => void;
 }
 
-export default function AgentChatView({ chat }: AgentChatViewProps) {
+export default function AgentChatView({ chat, pendingPermissions, onPermissionResponse }: AgentChatViewProps) {
   return (
     <AgentChatThread
       messages={chat.messages}
@@ -20,15 +23,11 @@ export default function AgentChatView({ chat }: AgentChatViewProps) {
       onAddFiles={chat.addFiles}
       onRemoveAttachment={chat.removeAttachment}
       fileInputRef={chat.fileInputRef}
-      debugMode={chat.debugMode}
-      debugEvents={chat.debugEvents}
-      onToggleDebug={() => chat.setDebugMode((v) => !v)}
-      onClearDebug={chat.clearDebugEvents}
       onClear={chat.clearMessages}
       onInjectAssistant={chat.injectAssistantMessage}
       gitSnapshot={chat.gitSnapshot}
-      pendingPermissions={chat.pendingPermissions}
-      onPermissionResponse={chat.handlePermissionResponse}
+      pendingPermissions={pendingPermissions}
+      onPermissionResponse={onPermissionResponse}
     />
   );
 }

@@ -433,9 +433,9 @@ export default function FlowWorkspaceView({
                 />
               )}
               {bottomTab === "terminal" && studioSessionId && (
-                <AgentChatView
-                  key={`workspace-chat:${STUDIO_ASSISTANT_ID}`}
-                  chat={studioChat}
+                <StudioAssistantChat
+                  key={`workspace-chat:${STUDIO_ASSISTANT_ID}::${studioSessionId}`}
+                  sessionId={studioSessionId}
                 />
               )}
             </div>
@@ -501,4 +501,12 @@ export default function FlowWorkspaceView({
       )}
     </div>
   );
+}
+
+/** Wrapper so useAgentChat can be called unconditionally */
+function StudioAssistantChat({ sessionId }: { sessionId: string }) {
+  const chat = useAgentChat(STUDIO_ASSISTANT_ID, sessionId);
+  const emptyPerms: never[] = [];
+  const noop = () => {};
+  return <AgentChatView chat={chat} pendingPermissions={emptyPerms} onPermissionResponse={noop} />;
 }

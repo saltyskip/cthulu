@@ -255,60 +255,6 @@ export async function respondToPermission(
   });
 }
 
-/** Subscribe to persistent hook event SSE stream for a session.
- *  Returns an AbortController to close the connection. */
-export function subscribeHookEvents(
-  agentId: string,
-  sessionId: string,
-  onEvent: (event: { type: string; data: string }) => void,
-  onError?: (err: unknown) => void,
-): AbortController {
-  const controller = new AbortController();
-  const url = `${getBaseUrl()}/api/agents/${agentId}/sessions/${sessionId}/hooks/stream`;
-
-  (async () => {
-    try {
-      const res = await fetch(url, { signal: controller.signal });
-      if (!res.ok || !res.body) return;
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-      let currentEvent = "message";
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-
-        const lines = buffer.split("\n");
-        buffer = lines.pop() ?? "";
-
-        for (const line of lines) {
-          if (line.startsWith("event:")) {
-            currentEvent = line.slice(6).trim();
-          } else if (line.startsWith("data:")) {
-            const data = line.slice(5).trim();
-            if (data && currentEvent !== "connected") {
-              onEvent({ type: currentEvent, data });
-            }
-            currentEvent = "message";
-          } else if (line.startsWith(":")) {
-            // comment / keepalive, ignore
-          } else if (line === "") {
-            currentEvent = "message";
-          }
-        }
-      }
-    } catch (err) {
-      if (!controller.signal.aborted) {
-        onError?.(err);
-      }
-    }
-  })();
-
-  return controller;
-}
-
 // ---------------------------------------------------------------------------
 // File Explorer
 // ---------------------------------------------------------------------------

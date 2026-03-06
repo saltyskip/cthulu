@@ -995,9 +995,123 @@ button:disabled {
 
 .agent-detail-files {
   display: flex;
+  flex-direction: column;
   min-width: 280px;
   min-height: 0;
   overflow: hidden;
+}
+
+/* ── Reference panel toolbar (bottom, Zed-style) ── */
+.ref-content {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+.ref-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 6px;
+  height: 24px;
+  border-top: 1px solid var(--border);
+  background: var(--bg);
+  flex-shrink: 0;
+}
+.ref-toolbar-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 18px;
+  padding: 0;
+  background: none;
+  border: none;
+  border-radius: 3px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: color 0.1s, background 0.1s;
+}
+.ref-toolbar-btn:hover {
+  color: var(--text);
+  background: var(--bg-secondary);
+}
+.ref-toolbar-btn-active {
+  color: var(--accent);
+}
+.ref-toolbar-btn-active:hover {
+  color: var(--accent);
+}
+
+/* ── Debug Panel ── */
+.debug-panel {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+.debug-panel-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.debug-panel-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+}
+.debug-panel-filters {
+  display: flex;
+  gap: 2px;
+  margin-left: 4px;
+}
+.debug-filter-btn {
+  padding: 2px 8px;
+  font-size: 11px;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.debug-filter-btn:hover {
+  color: var(--text);
+  border-color: var(--text-secondary);
+}
+.debug-filter-active {
+  background: var(--accent);
+  color: var(--bg);
+  border-color: var(--accent);
+}
+.debug-panel-clear {
+  margin-left: auto;
+  padding: 2px 8px;
+  font-size: 11px;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.debug-panel-clear:hover {
+  color: var(--text);
+  border-color: var(--text-secondary);
+}
+.debug-panel-scroll {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 0;
+  font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
+}
+.debug-panel-empty {
+  padding: 24px;
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: 12px;
 }
 
 /* ── File Viewer (two-pane: tree | content) ── */
@@ -1010,13 +1124,21 @@ button:disabled {
 
 /* Left: file tree */
 .fv-tree {
-  width: 200px;
-  min-width: 140px;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  border-right: 1px solid var(--border);
   overflow: hidden;
+}
+
+.fv-tree-divider {
+  width: 3px;
+  flex-shrink: 0;
+  cursor: col-resize;
+  background: var(--border);
+  transition: background 0.15s;
+}
+.fv-tree-divider:hover {
+  background: var(--accent);
 }
 
 .fv-tree-header {
@@ -4353,6 +4475,9 @@ button:disabled {
 .fr-debug-badge-result { background: #f39c12; color: #000; }
 .fr-debug-badge-done { background: var(--text-secondary); color: var(--bg); }
 .fr-debug-badge-error { background: #e74c3c; color: #fff; }
+.fr-debug-badge-hook { background: #e67e22; color: #fff; }
+.fr-debug-badge-hook_connected { background: #27ae60; color: #fff; }
+.fr-debug-badge-hook_error { background: #e74c3c; color: #fff; }
 
 .fr-debug-preview {
   color: var(--text-secondary);

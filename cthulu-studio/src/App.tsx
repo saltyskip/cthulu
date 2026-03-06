@@ -8,6 +8,7 @@ import Sidebar from "./components/Sidebar";
 import FlowWorkspaceView from "./components/FlowWorkspaceView";
 import AgentDetailView from "./components/AgentDetailView";
 import PromptEditorView from "./components/PromptEditorView";
+import { useGlobalPermissions } from "./hooks/useGlobalPermissions";
 import { type CanvasHandle } from "./components/Canvas";
 
 import {
@@ -21,6 +22,7 @@ import { Button } from "@/components/ui/button";
 import { useFlowDispatch } from "./hooks/useFlowDispatch";
 
 export default function App() {
+  const globalPermissions = useGlobalPermissions();
   const [flows, setFlows] = useState<FlowSummary[]>([]);
   const [activeFlowId, setActiveFlowId] = useState<string | null>(null);
   const [nodeTypes, setNodeTypes] = useState<NodeTypeSchema[]>([]);
@@ -409,6 +411,10 @@ export default function App() {
               agentId={agentId}
               agentName={agentName}
               sessionId={sessionId}
+              pendingPermissions={globalPermissions.permissionsForSession(agentId, sessionId)}
+              onPermissionResponse={globalPermissions.respondToPermission}
+              hookDebugEvents={globalPermissions.hookDebugEvents}
+              onClearHookDebug={globalPermissions.clearHookDebugEvents}
               onDeleted={() => {
                 setVisitedAgents((prev) => { const next = new Map(prev); next.delete(agentId); return next; });
                 setSelectedAgentId(null);

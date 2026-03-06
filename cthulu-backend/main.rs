@@ -350,7 +350,7 @@ async fn run_server(start_disabled: bool) -> Result<(), Box<dyn Error>> {
         chat_event_buffers: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
         sdk_sessions: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
         pending_permissions: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
-        hook_streams: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
+        global_hook_tx: Arc::new(tokio::sync::broadcast::channel::<String>(256).0),
         server_port: config.port,
     };
 

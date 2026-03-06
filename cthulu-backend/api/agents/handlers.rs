@@ -227,7 +227,7 @@ pub(crate) async fn list_session_files(
         return Ok(Json(json!({ "tree": [] })));
     }
 
-    let tree = build_file_tree(dir, dir, 3);
+    let tree = build_file_tree(dir, dir, 20);
     Ok(Json(json!({ "tree": tree, "root": working_dir })))
 }
 

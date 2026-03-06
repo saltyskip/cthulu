@@ -15,36 +15,8 @@ import { FilePreviewContext } from "./FilePreviewContext";
 import type { MultiRepoSnapshot } from "./FilePreviewContext";
 import { extractLatestTodos } from "./chatUtils";
 import StickyTodoPanel from "./StickyTodoPanel";
-import type { ImageAttachment, DebugEvent, PendingPermission } from "./useAgentChat";
-
-function prettyJson(raw: string): string {
-  try {
-    return JSON.stringify(JSON.parse(raw), null, 2);
-  } catch {
-    return raw;
-  }
-}
-
-function DebugEventRow({ ev }: { ev: DebugEvent }) {
-  const [expanded, setExpanded] = useState(false);
-  return (
-    <div className={`fr-debug-event ${ev.error ? "fr-debug-event-error" : ""}`}>
-      <div className="fr-debug-event-row" onClick={() => setExpanded((v) => !v)}>
-        <span className="fr-debug-expand">{expanded ? "▾" : "▸"}</span>
-        <span className="fr-debug-ts">{new Date(ev.ts).toLocaleTimeString()}</span>
-        <span className={`fr-debug-badge fr-debug-badge-${ev.type}`}>{ev.type}</span>
-        {!expanded && (
-          <span className="fr-debug-preview">
-            {ev.data.length > 80 ? ev.data.slice(0, 80) + "…" : ev.data}
-          </span>
-        )}
-      </div>
-      {expanded && (
-        <pre className="fr-debug-json">{prettyJson(ev.data)}</pre>
-      )}
-    </div>
-  );
-}
+import type { ImageAttachment } from "./useAgentChat";
+import type { PendingPermission } from "../../hooks/useGlobalPermissions";
 
 /* ── Slash command registry ──────────────────────────────────────── */
 
@@ -70,34 +42,34 @@ function PermissionBanner({
   return (
     <div className="fr-permission-banner">
       {permissions.map((p) => (
-        <div key={p.requestId} className="fr-permission-item">
+        <div key={p.request_id} className="fr-permission-item">
           <div className="fr-permission-header">
             <span className="fr-permission-icon">🔐</span>
-            <span className="fr-permission-tool">{p.toolName}</span>
+            <span className="fr-permission-tool">{p.tool_name}</span>
             <span className="fr-permission-label">wants permission</span>
             <button
               className="fr-permission-toggle"
-              onClick={() => setExpandedId(expandedId === p.requestId ? null : p.requestId)}
+              onClick={() => setExpandedId(expandedId === p.request_id ? null : p.request_id)}
             >
-              {expandedId === p.requestId ? "▾" : "▸"}
+              {expandedId === p.request_id ? "▾" : "▸"}
             </button>
             <span className="fr-permission-spacer" />
             <button
               className="fr-permission-btn fr-permission-allow"
-              onClick={() => onRespond(p.requestId, "allow")}
+              onClick={() => onRespond(p.request_id, "allow")}
             >
               Allow
             </button>
             <button
               className="fr-permission-btn fr-permission-deny"
-              onClick={() => onRespond(p.requestId, "deny")}
+              onClick={() => onRespond(p.request_id, "deny")}
             >
               Deny
             </button>
           </div>
-          {expandedId === p.requestId && (
+          {expandedId === p.request_id && (
             <pre className="fr-permission-input">
-              {JSON.stringify(p.toolInput, null, 2)}
+              {JSON.stringify(p.tool_input, null, 2)}
             </pre>
           )}
         </div>
@@ -119,10 +91,6 @@ interface AgentChatThreadProps {
   onAddFiles: (files: FileList | File[]) => void;
   onRemoveAttachment: (id: string) => void;
   fileInputRef: React.RefObject<HTMLInputElement | null>;
-  debugMode: boolean;
-  debugEvents: DebugEvent[];
-  onToggleDebug: () => void;
-  onClearDebug: () => void;
   gitSnapshot: MultiRepoSnapshot | null;
   pendingPermissions: PendingPermission[];
   onPermissionResponse: (requestId: string, decision: "allow" | "deny") => void;
@@ -141,10 +109,6 @@ export default function AgentChatThread({
   onAddFiles,
   onRemoveAttachment,
   fileInputRef,
-  debugMode,
-  debugEvents,
-  onToggleDebug,
-  onClearDebug,
   gitSnapshot,
   pendingPermissions,
   onPermissionResponse,
@@ -308,25 +272,6 @@ export default function AgentChatThread({
     // File preview now handled externally
   }, []);
 
-  // Keyboard shortcut: Cmd/Ctrl+Shift+D to toggle debug mode
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === "D") {
-        e.preventDefault();
-        onToggleDebug();
-      }
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [onToggleDebug]);
-
-  const debugScrollRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (debugMode && debugScrollRef.current) {
-      debugScrollRef.current.scrollTop = debugScrollRef.current.scrollHeight;
-    }
-  }, [debugMode, debugEvents]);
-
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
@@ -436,14 +381,6 @@ export default function AgentChatThread({
               </div>
             )}
             <ComposerPrimitive.Root>
-              <button
-                className={`ac-btn ac-btn-debug ${debugMode ? "ac-btn-debug-active" : ""}`}
-                onClick={onToggleDebug}
-                title="Toggle debug mode (Cmd+Shift+D)"
-                type="button"
-              >
-                🐛
-              </button>
               <button
                 className="ac-btn ac-btn-attach"
                 onClick={() => fileInputRef.current?.click()}
