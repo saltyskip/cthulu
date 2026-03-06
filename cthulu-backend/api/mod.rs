@@ -16,6 +16,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::{broadcast, Mutex, RwLock};
 
+use crate::agent_sdk::AgentSession;
 use crate::agents::repository::AgentRepository;
 use crate::api::changes::ResourceChangeEvent;
 use crate::flows::events::RunEvent;
@@ -344,7 +345,9 @@ pub struct AppState {
     /// In-memory event buffers for agent chat reconnection.
     /// Key: process_key (agent::{id}::session::{sid}), Value: buffered SSE events for current turn.
     pub chat_event_buffers: Arc<Mutex<HashMap<String, Vec<String>>>>,
-
+    /// Agent SDK sessions (feature-flagged via AGENT_SDK_ENABLED env var).
+    /// Key: process_key (agent::{id}::session::{sid}), Value: AgentSession wrapping ClaudeSDKClient.
+    pub sdk_sessions: Arc<Mutex<HashMap<String, AgentSession>>>,
 }
 
 impl AppState {
