@@ -506,6 +506,6 @@ export default function FlowWorkspaceView({
 function StudioAssistantChat({ sessionId }: { sessionId: string }) {
   const chat = useAgentChat(STUDIO_ASSISTANT_ID, sessionId);
   const emptyPerms: never[] = [];
-  const noop = () => {};
+  const noop = () => { };
   return <AgentChatView chat={chat} pendingPermissions={emptyPerms} onPermissionResponse={noop} />;
 }

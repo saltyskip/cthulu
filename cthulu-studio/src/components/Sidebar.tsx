@@ -5,6 +5,7 @@ import type { InteractSessionInfo } from "../api/client";
 import { Switch } from "@/components/ui/switch";
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
 import TemplateGallery from "./TemplateGallery";
+import LooneyTunesShow from "./LooneyTunesShow";
 
 interface SidebarProps {
   // Flow list
@@ -196,6 +197,8 @@ export default function Sidebar({
           onClose={() => setShowGallery(false)}
         />
       )}
+
+      <LooneyTunesShow />
 
       {/* Agents section (primary, expanded by default) */}
       <Collapsible defaultOpen className="sidebar-section">

@@ -272,6 +272,90 @@ button:disabled {
   background: var(--bg-tertiary);
 }
 
+/* ---- Road Runner mascot (collapsible) ---- */
+.sidebar-toon-dancer {
+  padding: 12px 8px 8px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+  text-align: center;
+  overflow: visible;
+  transition: background 0.2s;
+}
+.sidebar-toon-dancer:hover {
+  background: var(--bg-secondary);
+}
+.toon-collapse-btn {
+  font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
+  font-size: 9px;
+  color: var(--text-secondary);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 2px 4px;
+  width: 100%;
+  text-align: left;
+  letter-spacing: 0.3px;
+}
+.toon-collapse-btn:hover {
+  color: var(--accent);
+}
+.toon-ascii-container {
+  display: flex;
+  justify-content: center;
+  cursor: pointer;
+  transition: filter 0.15s;
+  user-select: none;
+  margin-top: 4px;
+}
+.toon-ascii-container:hover {
+  filter: drop-shadow(0 0 6px var(--accent));
+}
+.toon-ascii-container:active {
+  transform: scale(0.95);
+}
+.toon-ascii {
+  font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
+  margin: 0;
+  padding: 0;
+  white-space: pre;
+  overflow: hidden;
+}
+.toon-ascii-roadrunner {
+  font-size: 3.8px;
+  line-height: 1.15;
+  color: var(--accent);
+  letter-spacing: 0.3px;
+}
+.toon-char-name {
+  font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
+  font-size: 8px;
+  font-weight: 600;
+  color: var(--accent);
+  margin-top: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.toon-dialog {
+  font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
+  font-size: 10px;
+  color: var(--text);
+  margin-top: 8px;
+  padding: 4px 8px;
+  border: 1px dashed var(--border);
+  border-radius: 4px;
+  display: inline-block;
+  transition: all 0.2s;
+  max-width: 100%;
+  word-break: break-word;
+}
+.toon-poke-counter {
+  font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
+  font-size: 7px;
+  color: var(--text-secondary);
+  opacity: 0.5;
+  margin-top: 2px;
+}
+
 .sidebar-collapsed {
   width: 36px;
   min-width: 36px;
