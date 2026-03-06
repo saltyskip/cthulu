@@ -264,16 +264,6 @@ pub(crate) async fn delete_session(
         }
     }
 
-    // Kill PTY process for this specific session
-    {
-        let mut pty_pool = state.pty_processes.lock().await;
-        let pty_k = super::terminal::pty_key(&id, Some(&session_id));
-        if let Some(mut pty) = pty_pool.remove(&pty_k) {
-            let _ = pty.child.kill();
-            let _ = pty.child.wait();
-        }
-    }
-
     let mut all_sessions = state.interact_sessions.write().await;
 
     let active_after = {
@@ -361,25 +351,6 @@ pub(crate) async fn stop_chat(
             if let Err(e) = session.disconnect().await {
                 tracing::warn!(error = %e, "failed to disconnect SDK session on stop");
             }
-        }
-    }
-
-    // Kill PTY process — try session-scoped key first, then legacy agent-level key
-    {
-        let mut pty_pool = state.pty_processes.lock().await;
-        let pty_k = match &target_sid {
-            Some(sid) => super::terminal::pty_key(&id, Some(sid)),
-            None => super::terminal::pty_key(&id, None),
-        };
-        if let Some(mut pty) = pty_pool.remove(&pty_k) {
-            let _ = pty.child.kill();
-            let _ = pty.child.wait();
-        }
-        // Also try legacy key (agent-level, no session) for backward compat
-        let legacy_key = key.clone();
-        if let Some(mut pty) = pty_pool.remove(&legacy_key) {
-            let _ = pty.child.kill();
-            let _ = pty.child.wait();
         }
     }
 
@@ -477,16 +448,6 @@ pub(crate) async fn kill_session(
             if let Err(e) = session.disconnect().await {
                 tracing::warn!(error = %e, "failed to disconnect SDK session on kill");
             }
-        }
-    }
-
-    // Kill PTY process
-    {
-        let mut pty_pool = state.pty_processes.lock().await;
-        let pty_k = super::terminal::pty_key(&id, Some(&session_id));
-        if let Some(mut pty) = pty_pool.remove(&pty_k) {
-            let _ = pty.child.kill();
-            let _ = pty.child.wait();
         }
     }
 
