@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import anime from "animejs";
+import { animate, createScope, spring } from "animejs";
+import type { Scope } from "animejs";
 
 /* ------------------------------------------------------------------ */
 /*  ACTS — 24+ random skits featuring Bugs, Daffy, & Elmer            */
@@ -10,7 +11,7 @@ type Character = "bugs" | "daffy" | "elmer";
 interface Act {
   character: Character;
   line: string;
-  /** anime.js animation preset key */
+  /** animation preset key */
   anim: string;
 }
 
@@ -335,128 +336,94 @@ function ElmerFuddSVG() {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Animation engine                                                   */
+/*  Animation engine (anime.js v4)                                     */
 /* ------------------------------------------------------------------ */
 
-function applyAnimations(svg: SVGSVGElement, anim: string): anime.AnimeInstance[] {
-  const q = (sel: string) => svg.querySelector(sel);
-  const anims: anime.AnimeInstance[] = [];
+function applyAnimations(svg: SVGSVGElement, anim: string): void {
+  const q = (sel: string) => svg.querySelector(sel) as SVGElement | null;
 
   // Base idle bounce (always)
-  anims.push(
-    anime({
-      targets: q("#toon-body"),
-      translateY: [-2, 2],
-      duration: 500 + Math.random() * 200,
-      easing: "easeInOutSine",
-      direction: "alternate",
-      loop: true,
-    }),
-  );
+  animate(q("#toon-body")!, {
+    translateY: [-2, 2],
+    duration: 500 + Math.random() * 200,
+    ease: "inOutSine",
+    alternate: true,
+    loop: true,
+  });
 
   // Ear/hat/tuft wiggle (always)
-  anims.push(
-    anime({
-      targets: q("#char-ear-l"),
-      rotate: [-8, 8],
-      duration: 700,
-      easing: "easeInOutQuad",
-      direction: "alternate",
-      loop: true,
-    }),
-  );
+  animate(q("#char-ear-l")!, {
+    rotate: [-8, 8],
+    duration: 700,
+    ease: "inOutQuad",
+    alternate: true,
+    loop: true,
+  });
 
   switch (anim) {
     case "chomp":
     case "laugh":
-      anims.push(
-        anime({ targets: q("#char-mouth"), scaleY: [1, 0.4, 1], duration: 500, easing: "easeInOutSine", loop: true }),
-        anime({ targets: q("#char-arm-r"), rotate: [0, -15, 0], duration: 800, easing: "easeInOutSine", loop: true }),
-      );
+      animate(q("#char-mouth")!, { scaleY: [1, 0.4, 1], duration: 500, ease: "inOutSine", loop: true });
+      animate(q("#char-arm-r")!, { rotate: [0, -15, 0], duration: 800, ease: "inOutSine", loop: true });
       break;
     case "wave":
     case "point":
-      anims.push(
-        anime({ targets: q("#char-arm-r"), rotate: [0, -30, 0, -30, 0], duration: 1200, easing: "easeInOutSine", loop: true }),
-      );
+      animate(q("#char-arm-r")!, { rotate: [0, -30, 0, -30, 0], duration: 1200, ease: "inOutSine", loop: true });
       break;
     case "smug":
     case "strut":
-      anims.push(
-        anime({ targets: q("#toon-body"), rotate: [-2, 2], duration: 800, easing: "easeInOutSine", direction: "alternate", loop: true }),
-      );
+      animate(q("#toon-body")!, { rotate: [-2, 2], duration: 800, ease: "inOutSine", alternate: true, loop: true });
       break;
     case "shrug":
     case "confused":
-      anims.push(
-        anime({ targets: q("#char-arm-l"), rotate: [0, 15, 0], duration: 1000, easing: "easeInOutSine", loop: true }),
-        anime({ targets: q("#char-arm-r"), rotate: [0, -15, 0], duration: 1000, easing: "easeInOutSine", loop: true }),
-      );
+      animate(q("#char-arm-l")!, { rotate: [0, 15, 0], duration: 1000, ease: "inOutSine", loop: true });
+      animate(q("#char-arm-r")!, { rotate: [0, -15, 0], duration: 1000, ease: "inOutSine", loop: true });
       break;
     case "dance":
     case "bounce":
-      anims.push(
-        anime({ targets: q("#toon-body"), translateY: [-6, 6], rotate: [-3, 3], duration: 400, easing: "easeInOutSine", direction: "alternate", loop: true }),
-        anime({ targets: q("#char-foot-l"), rotate: [-10, 10], duration: 300, easing: "easeInOutSine", direction: "alternate", loop: true }),
-        anime({ targets: q("#char-arm-l"), rotate: [0, 20, 0, -10, 0], duration: 800, easing: "easeInOutSine", loop: true }),
-        anime({ targets: q("#char-arm-r"), rotate: [0, -20, 0, 10, 0], duration: 800, easing: "easeInOutSine", loop: true }),
-      );
+      animate(q("#toon-body")!, { translateY: [-6, 6], rotate: [-3, 3], duration: 400, ease: "inOutSine", alternate: true, loop: true });
+      animate(q("#char-foot-l")!, { rotate: [-10, 10], duration: 300, ease: "inOutSine", alternate: true, loop: true });
+      animate(q("#char-arm-l")!, { rotate: [0, 20, 0, -10, 0], duration: 800, ease: "inOutSine", loop: true });
+      animate(q("#char-arm-r")!, { rotate: [0, -20, 0, 10, 0], duration: 800, ease: "inOutSine", loop: true });
       break;
     case "rage":
-      anims.push(
-        anime({ targets: q("#toon-body"), translateX: [-3, 3], duration: 150, easing: "easeInOutSine", direction: "alternate", loop: true }),
-        anime({ targets: q("#char-arm-l"), rotate: [0, 20, 0], duration: 400, easing: "easeInOutSine", loop: true }),
-        anime({ targets: q("#char-arm-r"), rotate: [0, -20, 0], duration: 400, easing: "easeInOutSine", loop: true }),
-      );
+      animate(q("#toon-body")!, { translateX: [-3, 3], duration: 150, ease: "inOutSine", alternate: true, loop: true });
+      animate(q("#char-arm-l")!, { rotate: [0, 20, 0], duration: 400, ease: "inOutSine", loop: true });
+      animate(q("#char-arm-r")!, { rotate: [0, -20, 0], duration: 400, ease: "inOutSine", loop: true });
       break;
     case "grab":
-      anims.push(
-        anime({ targets: q("#char-arm-r"), rotate: [0, -35, -10, -35, 0], duration: 1000, easing: "easeInOutSine", loop: true }),
-        anime({ targets: q("#char-arm-l"), rotate: [0, 20, 5, 20, 0], duration: 1000, easing: "easeInOutSine", loop: true }),
-      );
+      animate(q("#char-arm-r")!, { rotate: [0, -35, -10, -35, 0], duration: 1000, ease: "inOutSine", loop: true });
+      animate(q("#char-arm-l")!, { rotate: [0, 20, 5, 20, 0], duration: 1000, ease: "inOutSine", loop: true });
       break;
     case "dodge":
-      anims.push(
-        anime({ targets: q("#toon-body"), translateX: [-8, 8], rotate: [-5, 5], duration: 600, easing: "easeInOutSine", direction: "alternate", loop: true }),
-      );
+      animate(q("#toon-body")!, { translateX: [-8, 8], rotate: [-5, 5], duration: 600, ease: "inOutSine", alternate: true, loop: true });
       break;
     case "sneak":
-      anims.push(
-        anime({ targets: q("#toon-body"), translateX: [-4, 4], translateY: [0, 3, 0], duration: 1200, easing: "easeInOutSine", direction: "alternate", loop: true }),
-        anime({ targets: q("#char-foot-l"), rotate: [-5, 5], duration: 600, easing: "easeInOutSine", direction: "alternate", loop: true }),
-      );
+      animate(q("#toon-body")!, { translateX: [-4, 4], translateY: [0, 3, 0], duration: 1200, ease: "inOutSine", alternate: true, loop: true });
+      animate(q("#char-foot-l")!, { rotate: [-5, 5], duration: 600, ease: "inOutSine", alternate: true, loop: true });
       break;
     case "aim":
-      anims.push(
-        anime({ targets: q("#char-arm-r"), rotate: [0, -10, -5, -10, 0], duration: 1500, easing: "easeInOutSine", loop: true }),
-        anime({ targets: q("#char-prop"), rotate: [-3, 3], duration: 800, easing: "easeInOutSine", direction: "alternate", loop: true }),
-      );
+      animate(q("#char-arm-r")!, { rotate: [0, -10, -5, -10, 0], duration: 1500, ease: "inOutSine", loop: true });
+      animate(q("#char-prop")!, { rotate: [-3, 3], duration: 800, ease: "inOutSine", alternate: true, loop: true });
       break;
     case "chase":
-      anims.push(
-        anime({ targets: q("#toon-body"), translateX: [-6, 6], duration: 400, easing: "easeInOutSine", direction: "alternate", loop: true }),
-        anime({ targets: q("#char-foot-l"), rotate: [-12, 12], duration: 250, easing: "easeInOutSine", direction: "alternate", loop: true }),
-        anime({ targets: q("#char-arm-l"), rotate: [-10, 10], duration: 300, easing: "easeInOutSine", direction: "alternate", loop: true }),
-      );
+      animate(q("#toon-body")!, { translateX: [-6, 6], duration: 400, ease: "inOutSine", alternate: true, loop: true });
+      animate(q("#char-foot-l")!, { rotate: [-12, 12], duration: 250, ease: "inOutSine", alternate: true, loop: true });
+      animate(q("#char-arm-l")!, { rotate: [-10, 10], duration: 300, ease: "inOutSine", alternate: true, loop: true });
       break;
     default:
-      anims.push(
-        anime({ targets: q("#char-arm-r"), rotate: [0, -10, 0], duration: 1500, easing: "easeInOutSine", loop: true }),
-      );
+      animate(q("#char-arm-r")!, { rotate: [0, -10, 0], duration: 1500, ease: "inOutSine", loop: true });
       break;
   }
-
-  return anims;
 }
 
 /** One-shot "poked!" squish animation */
-function playPokeReaction(svg: SVGSVGElement): anime.AnimeInstance {
-  return anime({
-    targets: svg.querySelector("#toon-body"),
+function playPokeReaction(svg: SVGSVGElement): void {
+  animate(svg.querySelector("#toon-body")!, {
     scaleX: [1, 1.15, 0.9, 1.05, 1],
     scaleY: [1, 0.85, 1.1, 0.95, 1],
-    duration: 400,
-    easing: "easeOutElastic(1, .6)",
+    duration: 500,
+    ease: spring({ stiffness: 300, damping: 12 }),
   });
 }
 
@@ -482,8 +449,9 @@ function pickRandom<T>(arr: T[]): T {
 /* ------------------------------------------------------------------ */
 
 export default function LooneyTunesShow() {
+  const rootRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
-  const animsRef = useRef<anime.AnimeInstance[]>([]);
+  const scopeRef = useRef<Scope | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [actIndex, setActIndex] = useState(0);
   const [playlist] = useState(() => shuffleArray(ACTS));
@@ -507,21 +475,31 @@ export default function LooneyTunesShow() {
     return () => { if (timerRef.current) clearInterval(timerRef.current); };
   }, [resetTimer]);
 
-  // Apply animations whenever act changes
+  // Apply animations whenever act changes — use createScope for proper cleanup
   useEffect(() => {
     if (!svgRef.current) return;
 
-    // Stop previous
-    animsRef.current.forEach((a) => a.pause());
-    animsRef.current = [];
+    // Revert previous scope (stops all animations created within it)
+    if (scopeRef.current) {
+      scopeRef.current.revert();
+      scopeRef.current = null;
+    }
 
+    const svg = svgRef.current;
+
+    // Small delay to ensure SVG elements are rendered after character swap
     requestAnimationFrame(() => {
       if (!svgRef.current) return;
-      animsRef.current = applyAnimations(svgRef.current, act.anim);
+      scopeRef.current = createScope({ root: svg }).add(() => {
+        applyAnimations(svg, act.anim);
+      });
     });
 
     return () => {
-      animsRef.current.forEach((a) => a.pause());
+      if (scopeRef.current) {
+        scopeRef.current.revert();
+        scopeRef.current = null;
+      }
     };
   }, [act.anim, actIndex]);
 
@@ -567,6 +545,7 @@ export default function LooneyTunesShow() {
 
   return (
     <div
+      ref={rootRef}
       className={`sidebar-toon-dancer${isPoked ? " toon-poked" : ""}`}
       title={`Click to poke ${CHAR_NAMES[act.character]}! Double-click to skip.`}
     >
