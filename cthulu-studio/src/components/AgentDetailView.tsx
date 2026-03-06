@@ -1,289 +1,70 @@
-import { useState, useEffect, useCallback, useRef, useMemo } from "react";
-import AgentEditor from "./AgentEditor";
-import FlowRunChatView from "./FlowRunChatView";
-import AgentChatView from "./AgentChatView";
-import SessionTabBar from "./SessionTabBar";
-import {
-  listAgentSessions,
-  newAgentSession,
-  deleteAgentSession,
-  killSession,
-} from "../api/client";
-import type { InteractSessionInfo } from "../api/client";
+import { useState, useRef, useCallback } from "react";
+import AgentChatView, { useAgentChat } from "./AgentChatView";
+import FileViewer from "./FileViewer";
 
 interface AgentDetailViewProps {
   agentId: string;
   agentName: string;
+  sessionId: string;
   onDeleted: () => void;
 }
 
-const MIN_CONFIG_WIDTH = 280;
-const MAX_CONFIG_WIDTH = 500;
+const MIN_CHAT_WIDTH = 320;
+const MIN_FILES_WIDTH = 280;
 
 export default function AgentDetailView({
   agentId,
-  agentName,
-  onDeleted,
+  agentName: _agentName,
+  sessionId,
+  onDeleted: _onDeleted,
 }: AgentDetailViewProps) {
-  const [sessions, setSessions] = useState<InteractSessionInfo[]>([]);
-  const [activeSessionId, setActiveSessionId] = useState<string>("");
-  const [mountedSessions, setMountedSessions] = useState<Set<string>>(new Set());
-  const [configWidth, setConfigWidth] = useState(320);
-  const [configCollapsed, setConfigCollapsed] = useState(false);
-  const [interactiveCount, setInteractiveCount] = useState(0);
-  const [maxSessions, setMaxSessions] = useState(5);
-  const dragRef = useRef<{ startX: number; startW: number } | null>(null);
+  const chat = useAgentChat(agentId, sessionId);
+  const [chatFlex, setChatFlex] = useState(1);
+  const [filesFlex, setFilesFlex] = useState(1);
+  const containerRef = useRef<HTMLDivElement>(null);
 
-  // Fetch sessions on mount
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const info = await listAgentSessions(agentId);
-        if (cancelled) return;
-        setInteractiveCount(info.interactive_count ?? 0);
-        setMaxSessions(info.max_interactive_sessions ?? 5);
-        if (info.sessions.length === 0) {
-          // Auto-create first session
-          const result = await newAgentSession(agentId);
-          if (cancelled) return;
-          setSessions([
-            {
-              session_id: result.session_id,
-              summary: "",
-              message_count: 0,
-              total_cost: 0,
-              created_at: result.created_at,
-              busy: false,
-              kind: "interactive",
-            },
-          ]);
-          setActiveSessionId(result.session_id);
-          setMountedSessions(new Set([result.session_id]));
-          setInteractiveCount(1);
-        } else {
-          setSessions(info.sessions);
-          const active = info.active_session || info.sessions[0].session_id;
-          setActiveSessionId(active);
-          setMountedSessions(new Set([active]));
-        }
-      } catch {
-        // server unreachable
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [agentId]);
-
-  // Periodic refresh to detect new flow-run sessions
-  useEffect(() => {
-    const interval = setInterval(async () => {
-      try {
-        const info = await listAgentSessions(agentId);
-        setInteractiveCount(info.interactive_count ?? 0);
-        setSessions((prev) => {
-          // Only update if session count changed, busy state changed, or process_alive changed
-          if (prev.length !== info.sessions.length) return info.sessions;
-          const changed = prev.some((p) => {
-            const match = info.sessions.find((s) => s.session_id === p.session_id);
-            return match && (match.busy !== p.busy || match.kind !== p.kind || match.process_alive !== p.process_alive);
-          });
-          return changed ? info.sessions : prev;
-        });
-      } catch {
-        // ignore
-      }
-    }, 5000);
-    return () => clearInterval(interval);
-  }, [agentId]);
-
-  const handleSelectSession = useCallback((sessionId: string) => {
-    setActiveSessionId(sessionId);
-    setMountedSessions((prev) => {
-      const next = new Set(prev);
-      next.add(sessionId);
-      return next;
-    });
-  }, []);
-
-  const handleNewSession = useCallback(async () => {
-    try {
-      const result = await newAgentSession(agentId);
-      const newSession: InteractSessionInfo = {
-        session_id: result.session_id,
-        summary: "",
-        message_count: 0,
-        total_cost: 0,
-        created_at: result.created_at,
-        busy: false,
-        kind: "interactive",
-      };
-      setSessions((prev) => [...prev, newSession]);
-      setActiveSessionId(result.session_id);
-      setMountedSessions((prev) => {
-        const next = new Set(prev);
-        next.add(result.session_id);
-        return next;
-      });
-    } catch (e) {
-      console.error("Failed to create session:", e);
-    }
-  }, [agentId]);
-
-  const handleKillSession = useCallback(
-    async (sessionId: string) => {
-      try {
-        await killSession(agentId, sessionId);
-        // Refresh sessions to get updated state
-        const info = await listAgentSessions(agentId);
-        setSessions(info.sessions);
-        setInteractiveCount(info.interactive_count ?? 0);
-      } catch (e) {
-        console.error("Failed to kill session:", e);
-      }
-    },
-    [agentId]
-  );
-
-  const handleDeleteSession = useCallback(
-    async (sessionId: string) => {
-      try {
-        const result = await deleteAgentSession(agentId, sessionId);
-        setSessions((prev) => prev.filter((s) => s.session_id !== sessionId));
-        setMountedSessions((prev) => {
-          const next = new Set(prev);
-          next.delete(sessionId);
-          return next;
-        });
-        if (activeSessionId === sessionId) {
-          setActiveSessionId(result.active_session);
-          setMountedSessions((prev) => {
-            const next = new Set(prev);
-            next.add(result.active_session);
-            return next;
-          });
-        }
-      } catch (e) {
-        console.error("Failed to delete session:", e);
-      }
-    },
-    [agentId, activeSessionId]
-  );
-
-  const handleDragStart = useCallback(
+  const handleDividerMouseDown = useCallback(
     (e: React.MouseEvent) => {
       e.preventDefault();
-      dragRef.current = { startX: e.clientX, startW: configWidth };
+      const container = containerRef.current;
+      if (!container) return;
+      const startX = e.clientX;
+      const totalWidth = container.getBoundingClientRect().width;
+      const startChatFrac = chatFlex / (chatFlex + filesFlex);
 
       const onMove = (ev: MouseEvent) => {
-        if (!dragRef.current) return;
-        // Dragging left = making config wider (since config is on right)
-        const delta = dragRef.current.startX - ev.clientX;
-        const newW = Math.min(
-          MAX_CONFIG_WIDTH,
-          Math.max(MIN_CONFIG_WIDTH, dragRef.current.startW + delta)
-        );
-        setConfigWidth(newW);
+        const dx = ev.clientX - startX;
+        let newChatFrac = startChatFrac + dx / totalWidth;
+        // enforce minimums
+        const minChatFrac = MIN_CHAT_WIDTH / totalWidth;
+        const maxChatFrac = 1 - MIN_FILES_WIDTH / totalWidth;
+        newChatFrac = Math.max(minChatFrac, Math.min(maxChatFrac, newChatFrac));
+        setChatFlex(newChatFrac);
+        setFilesFlex(1 - newChatFrac);
       };
-
       const onUp = () => {
-        dragRef.current = null;
+        document.removeEventListener("mousemove", onMove);
+        document.removeEventListener("mouseup", onUp);
         document.body.style.cursor = "";
         document.body.style.userSelect = "";
-        window.removeEventListener("mousemove", onMove);
-        window.removeEventListener("mouseup", onUp);
       };
-
       document.body.style.cursor = "col-resize";
       document.body.style.userSelect = "none";
-      window.addEventListener("mousemove", onMove);
-      window.addEventListener("mouseup", onUp);
+      document.addEventListener("mousemove", onMove);
+      document.addEventListener("mouseup", onUp);
     },
-    [configWidth]
+    [chatFlex, filesFlex]
   );
 
   return (
-    <div className="agent-detail">
-      <div className="agent-detail-main">
-        <SessionTabBar
-          sessions={sessions}
-          activeSessionId={activeSessionId}
-          onSelectSession={handleSelectSession}
-          onNewSession={handleNewSession}
-          onDeleteSession={handleDeleteSession}
-          onKillSession={handleKillSession}
-          interactiveCount={interactiveCount}
-          maxSessions={maxSessions}
-        />
-        <div className="agent-detail-terminals">
-          {[...mountedSessions].map((sessionId) => {
-            const session = sessions.find((s) => s.session_id === sessionId);
-            const isFlowRun = session?.kind === "flow_run";
-            if (!isFlowRun && sessionId === activeSessionId) {
-              console.log(`[RECONNECT-DEBUG] AgentDetailView: rendering AgentChatView sessionId=${sessionId} busy=${session?.busy}`);
-            }
-
-            return (
-              <div
-                key={sessionId}
-                style={{
-                  display: sessionId === activeSessionId ? "flex" : "none",
-                  flex: 1,
-                  flexDirection: "column",
-                  minHeight: 0,
-                }}
-              >
-                {isFlowRun ? (
-                  <FlowRunChatView
-                    agentId={agentId}
-                    sessionId={sessionId}
-                    busy={session?.busy ?? false}
-                    flowRun={session?.flow_run}
-                  />
-                ) : (
-                  <AgentChatView
-                    agentId={agentId}
-                    sessionId={sessionId}
-                    busy={session?.busy ?? false}
-                  />
-                )}
-              </div>
-            );
-          })}
-        </div>
+    <div className="agent-detail" ref={containerRef}>
+      <div className="agent-detail-chat" style={{ flex: chatFlex }}>
+        <AgentChatView chat={chat} />
       </div>
-      {configCollapsed ? (
-        <div className="agent-config-collapsed" onClick={() => setConfigCollapsed(false)}>
-          <span className="agent-config-collapsed-icon">◧</span>
-          <span className="agent-config-collapsed-label">Config</span>
-        </div>
-      ) : (
-        <>
-          <div
-            className="agent-detail-divider"
-            onMouseDown={handleDragStart}
-          />
-          <div className="agent-detail-config" style={{ width: configWidth }}>
-            <div className="agent-config-topbar">
-              <span className="agent-config-title">Config</span>
-              <button
-                className="agent-config-collapse-btn"
-                onClick={() => setConfigCollapsed(true)}
-                title="Collapse config"
-              >
-                ◨
-              </button>
-            </div>
-            <AgentEditor
-              key={agentId}
-              agentId={agentId}
-              onClose={() => {}}
-              onDeleted={onDeleted}
-            />
-          </div>
-        </>
-      )}
+      <div className="agent-detail-divider" onMouseDown={handleDividerMouseDown} />
+      <div className="agent-detail-files" style={{ flex: filesFlex }}>
+        <FileViewer agentId={agentId} sessionId={sessionId} changedFiles={chat.changedFiles} />
+      </div>
     </div>
   );
 }

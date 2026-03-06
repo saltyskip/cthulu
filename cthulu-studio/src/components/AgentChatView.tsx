@@ -1,15 +1,13 @@
 import { useAgentChat } from "./chat/useAgentChat";
 import AgentChatThread from "./chat/AgentChatThread";
 
+export type AgentChatHandle = ReturnType<typeof useAgentChat>;
+
 interface AgentChatViewProps {
-  agentId: string;
-  sessionId: string;
-  busy?: boolean;
+  chat: AgentChatHandle;
 }
 
-export default function AgentChatView({ agentId, sessionId }: AgentChatViewProps) {
-  const chat = useAgentChat(agentId, sessionId);
-
+export default function AgentChatView({ chat }: AgentChatViewProps) {
   return (
     <AgentChatThread
       messages={chat.messages}
@@ -29,6 +27,10 @@ export default function AgentChatView({ agentId, sessionId }: AgentChatViewProps
       onClear={chat.clearMessages}
       onInjectAssistant={chat.injectAssistantMessage}
       gitSnapshot={chat.gitSnapshot}
+      pendingPermissions={chat.pendingPermissions}
+      onPermissionResponse={chat.handlePermissionResponse}
     />
   );
 }
+
+export { useAgentChat };

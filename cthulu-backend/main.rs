@@ -344,12 +344,14 @@ async fn run_server(start_disabled: bool) -> Result<(), Box<dyn Error>> {
         data_dir: base_dir.clone(),
         static_dir,
         live_processes: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
-        pty_processes: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
         sandbox_provider,
         oauth_token: Arc::new(tokio::sync::RwLock::new(oauth_token)),
         session_streams,
         chat_event_buffers: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
         sdk_sessions: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
+        pending_permissions: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
+        hook_streams: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
+        server_port: config.port,
     };
 
     // Start file change watcher (keeps caches in sync with external edits)
@@ -362,7 +364,6 @@ async fn run_server(start_disabled: bool) -> Result<(), Box<dyn Error>> {
     )
     .context("failed to start file change watcher")?;
 
-    let pty_processes = app_state.pty_processes.clone();
     let live_processes = app_state.live_processes.clone();
     let sdk_sessions = app_state.sdk_sessions.clone();
 
@@ -378,14 +379,8 @@ async fn run_server(start_disabled: bool) -> Result<(), Box<dyn Error>> {
         .with_graceful_shutdown(shutdown_signal())
         .await?;
 
-    // Server has stopped — kill all child processes then exit immediately.
-    // We can't wait for spawn_blocking PTY reader threads (they hold cloned fds
-    // and block on read()), so we kill children and force-exit.
+    // Server has stopped — kill all child processes then exit.
     tracing::info!("shutting down: killing child processes");
-    {
-        let mut pool = pty_processes.lock().await;
-        pool.clear(); // Drop triggers PtyProcess::drop which calls child.kill()
-    }
     {
         let mut pool = live_processes.lock().await;
         for (key, mut proc) in pool.drain() {

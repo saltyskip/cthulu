@@ -2,6 +2,7 @@ pub mod agents;
 pub mod auth;
 pub mod changes;
 pub mod flows;
+pub mod hooks;
 
 pub mod middleware;
 pub mod prompts;
@@ -259,34 +260,6 @@ pub fn save_sessions(
     }
 }
 
-/// A PTY-based Claude Code process for interactive terminal sessions.
-/// Spawned via `portable_pty` so Claude runs in a real TTY with full TUI output.
-pub struct PtyProcess {
-    /// The master side of the PTY (read/write bytes).
-    pub master: Box<dyn portable_pty::MasterPty + Send>,
-    /// The child process handle (for kill/wait).
-    pub child: Box<dyn portable_pty::Child + Send + Sync>,
-    /// The Claude session ID this PTY is running.
-    pub session_id: String,
-    /// PTY writer, taken once at spawn time and shared across reconnects.
-    /// Wrapped in Arc<std::sync::Mutex> so multiple WS connections can write.
-    pub writer: std::sync::Arc<std::sync::Mutex<Box<dyn std::io::Write + Send>>>,
-    /// Broadcast channel for PTY output — a single persistent reader task writes here,
-    /// and each WS connection subscribes. Avoids duplicate readers on reconnect.
-    pub output_tx: broadcast::Sender<Vec<u8>>,
-}
-
-impl Drop for PtyProcess {
-    fn drop(&mut self) {
-        if let Err(e) = self.child.kill() {
-            // ESRCH (no such process) is expected if the child already exited
-            tracing::trace!(session_id = %self.session_id, error = %e, "PTY child kill on drop");
-        } else {
-            tracing::info!(session_id = %self.session_id, "killed PTY child process on drop");
-        }
-    }
-}
-
 /// A persistent Claude CLI process kept alive between messages.
 /// Uses `--input-format stream-json` so we can write multiple prompts to stdin.
 pub struct LiveClaudeProcess {
@@ -332,8 +305,6 @@ pub struct AppState {
     pub static_dir: PathBuf,
     /// Persistent Claude CLI processes keyed by session key (flow_id::node_id).
     pub live_processes: Arc<Mutex<HashMap<String, LiveClaudeProcess>>>,
-    /// PTY-based Claude Code processes keyed by agent key (agent::{agent_id}).
-    pub pty_processes: Arc<Mutex<HashMap<String, PtyProcess>>>,
     /// Sandbox provider for isolated executor runs.
     pub sandbox_provider: Arc<dyn SandboxProvider>,
     /// Claude OAuth access token (read from macOS Keychain or CLAUDE_CODE_OAUTH_TOKEN env).
@@ -348,6 +319,15 @@ pub struct AppState {
     /// Agent SDK sessions (feature-flagged via AGENT_SDK_ENABLED env var).
     /// Key: process_key (agent::{id}::session::{sid}), Value: AgentSession wrapping ClaudeSDKClient.
     pub sdk_sessions: Arc<Mutex<HashMap<String, AgentSession>>>,
+    /// Pending permission requests from Claude Code hooks.
+    /// Key: request_id (UUID), Value: oneshot sender to resolve the decision.
+    pub pending_permissions: Arc<Mutex<HashMap<String, tokio::sync::oneshot::Sender<hooks::routes::PermissionDecision>>>>,
+    /// Persistent broadcast channels for hook events (permission requests, file changes, stop).
+    /// Key: "agent::{agent_id}::session::{session_id}", Value: sender for SSE hook events.
+    /// Unlike session_streams (tied to chat message lifecycle), these persist as long as a subscriber exists.
+    pub hook_streams: Arc<Mutex<HashMap<String, broadcast::Sender<String>>>>,
+    /// The port the server is listening on (used in hook URLs).
+    pub server_port: u16,
 }
 
 impl AppState {

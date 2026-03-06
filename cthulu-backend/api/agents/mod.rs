@@ -1,6 +1,5 @@
 pub mod chat;
 pub mod handlers;
-pub mod terminal;
 
 use axum::routing::{delete, get, post};
 use axum::Router;
@@ -52,6 +51,18 @@ pub fn router() -> Router<AppState> {
         )
         .route("/agents/{id}/chat", post(chat::chat))
         .route("/agents/{id}/chat/stop", post(chat::stop_chat))
-        // PTY terminal WebSocket
-        .route("/agents/{id}/terminal", get(terminal::terminal_ws))
+        // File explorer (read-only)
+        .route(
+            "/agents/{id}/sessions/{session_id}/files",
+            get(handlers::list_session_files),
+        )
+        .route(
+            "/agents/{id}/sessions/{session_id}/files/read",
+            get(handlers::read_session_file),
+        )
+        // Persistent SSE for hook events (permissions, file changes, stop)
+        .route(
+            "/agents/{id}/sessions/{session_id}/hooks/stream",
+            get(chat::hook_event_stream),
+        )
 }

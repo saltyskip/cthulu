@@ -37,12 +37,6 @@ export function getServerUrl(): string {
   return getBaseUrl();
 }
 
-export function getTerminalWsUrl(agentId: string, sessionId?: string): string {
-  const wsBase = getBaseUrl().replace(/^http/, "ws");
-  const base = `${wsBase}/api/agents/${agentId}/terminal`;
-  return sessionId ? `${base}?session_id=${encodeURIComponent(sessionId)}` : base;
-}
-
 async function apiFetch<T>(
   path: string,
   options: RequestInit = {}
@@ -244,6 +238,104 @@ export async function killSession(
   await apiFetch(`/agents/${agentId}/sessions/${sessionId}/kill`, {
     method: "POST",
   });
+}
+
+// ---------------------------------------------------------------------------
+// Hooks / Permissions
+// ---------------------------------------------------------------------------
+
+/** Respond to a pending permission request (Allow or Deny). */
+export async function respondToPermission(
+  requestId: string,
+  decision: "allow" | "deny"
+): Promise<{ ok: boolean }> {
+  return apiFetch<{ ok: boolean }>("/hooks/permission-response", {
+    method: "POST",
+    body: JSON.stringify({ request_id: requestId, decision }),
+  });
+}
+
+/** Subscribe to persistent hook event SSE stream for a session.
+ *  Returns an AbortController to close the connection. */
+export function subscribeHookEvents(
+  agentId: string,
+  sessionId: string,
+  onEvent: (event: { type: string; data: string }) => void,
+  onError?: (err: unknown) => void,
+): AbortController {
+  const controller = new AbortController();
+  const url = `${getBaseUrl()}/api/agents/${agentId}/sessions/${sessionId}/hooks/stream`;
+
+  (async () => {
+    try {
+      const res = await fetch(url, { signal: controller.signal });
+      if (!res.ok || !res.body) return;
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let currentEvent = "message";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+
+        for (const line of lines) {
+          if (line.startsWith("event:")) {
+            currentEvent = line.slice(6).trim();
+          } else if (line.startsWith("data:")) {
+            const data = line.slice(5).trim();
+            if (data && currentEvent !== "connected") {
+              onEvent({ type: currentEvent, data });
+            }
+            currentEvent = "message";
+          } else if (line.startsWith(":")) {
+            // comment / keepalive, ignore
+          } else if (line === "") {
+            currentEvent = "message";
+          }
+        }
+      }
+    } catch (err) {
+      if (!controller.signal.aborted) {
+        onError?.(err);
+      }
+    }
+  })();
+
+  return controller;
+}
+
+// ---------------------------------------------------------------------------
+// File Explorer
+// ---------------------------------------------------------------------------
+
+export interface FileTreeEntry {
+  name: string;
+  path: string;
+  type: "file" | "directory";
+  size?: number;
+  children?: FileTreeEntry[];
+}
+
+/** List files in a session's working directory. */
+export async function listSessionFiles(
+  agentId: string,
+  sessionId: string
+): Promise<{ tree: FileTreeEntry[]; root: string }> {
+  return apiFetch(`/agents/${agentId}/sessions/${sessionId}/files`);
+}
+
+/** Read a file from a session's working directory (read-only). */
+export async function readSessionFile(
+  agentId: string,
+  sessionId: string,
+  path: string
+): Promise<{ path: string; content: string; size: number }> {
+  return apiFetch(`/agents/${agentId}/sessions/${sessionId}/files/read?path=${encodeURIComponent(path)}`);
 }
 
 /** Fetch git status snapshot for a session. Returns null if no git integration. */

@@ -63,11 +63,11 @@ Record corrections, mistakes, and insights here so future sessions can avoid rep
 - **Mistake**: Added `display: flex` to `.property-panel`. Fragments don't create DOM elements, so flex layout couldn't see the children properly.
 - **Fix**: Avoid `display: flex` on containers whose direct children are React Fragments. Use a wrapper `<div>` inside the Fragment, or restructure so flex children are real DOM elements.
 
-## 2026-02-24 - AppState must derive Clone for Axum
+## 2026-02-24 - AppState must derive Clone for Axum — use Arc for non-Clone fields
 
 - **Context**: Axum requires `Clone` on the state type passed to `Router::with_state()`.
 - **Mistake**: Removed `#[derive(Clone)]` from `AppState` while fixing `LiveClaudeProcess`. All route handlers broke with `the trait Clone is not implemented for AppState`.
-- **Fix**: `AppState` must always derive `Clone`. Since all its fields are `Arc<...>`, `PathBuf`, or `broadcast::Sender` (all Clone), it works even when inner types (like `LiveClaudeProcess`) are not Clone.
+- **Fix**: `AppState` must always derive `Clone`. Any non-Clone field needs to be wrapped in `Arc`. Example: `sandbox_provider: Arc<dyn SandboxProvider>`. Since all AppState fields are `Arc<...>`, `PathBuf`, or `broadcast::Sender` (all Clone), it works even when inner types (like `LiveClaudeProcess`) are not Clone.
 
 ## 2026-02-25 - AppState needs both generic trait and specific provider for sandbox
 
@@ -85,25 +85,26 @@ Record corrections, mistakes, and insights here so future sessions can avoid rep
 
 - **Context**: Web terminal (ttyd) runs on a dynamic port on the VM Manager host. Needed to embed it in BottomPanel.
 - **Mistake**: Considered proxying the WebSocket through Cthulu backend — this adds complexity and latency.
-- **Fix**: Iframe `src` points directly to the VM Manager's `web_terminal` URL (e.g., `http://host:PORT`). No proxy. Simpler, lower latency. Trade-off: user's browser must be able to reach the VM Manager host directly.
+- **Fix**: Iframe `src` points directly to the VM Manager's `web_terminal` URL (e.g., `http://34.100.130.60:PORT`). No proxy. Simpler, lower latency.
+- **Implication**: The user's browser must be able to reach the VM Manager host directly. If the VM Manager is behind a firewall or NAT, the dynamic web terminal ports must be accessible. This is a deployment consideration, not a code issue.
 
 ## 2026-02-25 - shell_escape must use single-quote-with-replacement
 
-- **Context**: PR review found shell injection in 6+ locations where user strings were interpolated into shell commands.
+- **Context**: PR review found 6+ shell injection vulnerabilities where user-supplied strings (sandbox names, file paths) were interpolated into shell commands without escaping.
 - **Mistake**: Used `format!("'{}'", s)` which breaks if the string contains single quotes.
-- **Fix**: Proper shell escape: wrap in single quotes, replace internal `'` with `'\''`. Example: `O'Brien` → `'O'\''Brien'`. This is the standard POSIX pattern.
+- **Fix**: `shell_escape()` wraps the string in single quotes and replaces any internal `'` with `'\''` (end quote, escaped quote, start quote). This is the standard POSIX shell escaping pattern. Example: `O'Brien` becomes `'O'\''Brien'`.
 
-## 2026-02-25 - SandboxCapabilities::default_safe() must return Disabled
+## 2026-02-25 - SandboxCapabilities::default_safe() must return Disabled, not AllowAll
 
-- **Context**: Creating default sandbox capabilities.
-- **Mistake**: `default_safe()` returned `AllowAll` — no restrictions by default. Security hole.
-- **Fix**: Return `Disabled` for all capabilities (network, filesystem, exec). Must be explicitly granted.
+- **Context**: `SandboxCapabilities::default_safe()` was returning `AllowAll` for network, filesystem, and exec capabilities. This meant new sandboxes had no restrictions by default — a security hole.
+- **Mistake**: `default_safe()` returned `AllowAll` — no restrictions by default.
+- **Fix**: Changed to return `Disabled` for all capabilities. Sandboxes now have no capabilities until explicitly granted. Security-first default.
 
-## 2026-02-25 - exec_stream Exit event must wait for stdout/stderr drain
+## 2026-02-25 - exec_stream race condition — await stdout/stderr before Exit
 
-- **Context**: `ProcessExecStream` in the sandbox process supervisor.
+- **Context**: In `ProcessExecStream`, the exit monitoring task could detect process exit and send the `Exit` event while stdout/stderr reading tasks still had buffered data. This caused truncated output.
 - **Mistake**: Exit monitoring task sent `Exit` event as soon as the process exited, while stdout/stderr tasks still had buffered data.
-- **Fix**: Exit task now `await`s stdout/stderr `JoinHandle`s before sending `Exit`. Guarantees all output is yielded before stream completes.
+- **Fix**: The exit task now `await`s the stdout and stderr `JoinHandle`s before sending the `Exit` event. This guarantees all output is drained before the stream signals completion.
 
 ## 2026-02-25 - Missing npm dependency breaks Studio build
 
@@ -111,7 +112,7 @@ Record corrections, mistakes, and insights here so future sessions can avoid rep
 - **Mistake**: Assumed all dependencies were already declared. Build failed on a fresh checkout.
 - **Fix**: `npm install @uiw/react-md-editor`. Always run `npx nx build cthulu-studio` to catch missing deps.
 
-## 2026-02-25 - Nested KVM on Apple Silicon is a dead end
+## 2026-02-25 - Nested KVM does NOT work on Apple Silicon
 
 - **Context**: Tried to run Firecracker inside Lima VM on macOS (both vz and qemu backends).
 - **Mistake**: Spent significant time trying to get `/dev/kvm` working.
