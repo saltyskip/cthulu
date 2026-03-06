@@ -358,6 +358,10 @@ pub(crate) async fn session_status(
         "process_alive": process_alive,
         "message_count": session.message_count,
         "total_cost": session.total_cost,
+        "created_at": session.created_at,
+        "working_dir": session.working_dir,
+        "worktree_group": session.worktree_group,
+        "skills_dir": session.skills_dir,
     })))
 }
 
