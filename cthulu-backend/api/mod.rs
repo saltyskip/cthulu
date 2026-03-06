@@ -324,7 +324,7 @@ pub struct AppState {
     )>>>,
     /// Global broadcast channel for hook events (permissions, file changes, stop).
     /// Single channel — frontend subscribes once at App mount. Works across all sessions.
-    pub global_hook_tx: Arc<Mutex<broadcast::Sender<String>>>,
+    pub global_hook_tx: Arc<broadcast::Sender<String>>,
     /// The port the server is listening on (used in hook URLs).
     pub server_port: u16,
 }

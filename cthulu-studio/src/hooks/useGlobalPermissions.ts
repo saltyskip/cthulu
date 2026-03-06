@@ -1,7 +1,10 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import { getServerUrl } from "../api/client";
 import type { DebugEvent } from "../components/chat/useAgentChat";
 
-const API = "http://localhost:8081/api";
+function getApi() {
+  return `${getServerUrl()}/api`;
+}
 
 const MAX_HOOK_DEBUG_EVENTS = 200;
 
@@ -23,7 +26,7 @@ export interface GlobalPermissionState {
 
 async function fetchPending(): Promise<PendingPermission[]> {
   try {
-    const res = await fetch(`${API}/hooks/pending`);
+    const res = await fetch(`${getApi()}/hooks/pending`);
     if (!res.ok) return [];
     const data = await res.json();
     return data.pending ?? [];
@@ -55,7 +58,7 @@ export function useGlobalPermissions(): GlobalPermissionState {
     const controller = new AbortController();
 
     function connect() {
-      fetch(`${API}/hooks/stream`, {
+      fetch(`${getApi()}/hooks/stream`, {
         signal: controller.signal,
         headers: { Accept: "text/event-stream" },
       })
@@ -66,10 +69,17 @@ export function useGlobalPermissions(): GlobalPermissionState {
 
           pushHookDebug("hook_connected", "{}");
 
-          // On connect, fetch any pending requests we may have missed
+          // On connect, merge any pending requests we may have missed
           const pending = await fetchPending();
           if (pending.length > 0) {
-            setPermissions(pending);
+            setPermissions((prev) => {
+              const ids = new Set(prev.map((p) => p.request_id));
+              const merged = [...prev];
+              for (const p of pending) {
+                if (!ids.has(p.request_id)) merged.push(p);
+              }
+              return merged;
+            });
           }
 
           const reader = res.body.getReader();
@@ -131,11 +141,10 @@ export function useGlobalPermissions(): GlobalPermissionState {
 
   const respondToPermission = useCallback(
     async (requestId: string, decision: "allow" | "deny") => {
-      // Optimistically remove from UI
       setPermissions((prev) => prev.filter((p) => p.request_id !== requestId));
 
       try {
-        await fetch(`${API}/hooks/permission-response`, {
+        await fetch(`${getApi()}/hooks/permission-response`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ request_id: requestId, decision }),
@@ -150,7 +159,7 @@ export function useGlobalPermissions(): GlobalPermissionState {
   const permissionsForSession = useCallback(
     (agentId: string, sessionId: string) => {
       return permissions.filter(
-        (p) => p.agent_id === agentId || p.session_id === sessionId
+        (p) => p.agent_id === agentId && p.session_id === sessionId
       );
     },
     [permissions]

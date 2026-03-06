@@ -134,19 +134,16 @@ pub async fn pre_tool_use(
     }
 
     // Broadcast to the global hook stream
-    let has_listener = {
-        let global_tx = state.global_hook_tx.lock().await;
-        if global_tx.receiver_count() > 0 {
-            let sse_data = serde_json::to_string(&json!({
-                "type": "permission_request",
-                "data": event,
-            }))
-            .unwrap_or_default();
-            let _ = global_tx.send(sse_data);
-            true
-        } else {
-            false
-        }
+    let has_listener = if state.global_hook_tx.receiver_count() > 0 {
+        let sse_data = serde_json::to_string(&json!({
+            "type": "permission_request",
+            "data": event,
+        }))
+        .unwrap_or_default();
+        let _ = state.global_hook_tx.send(sse_data);
+        true
+    } else {
+        false
     };
 
     if !has_listener {
@@ -181,8 +178,7 @@ pub async fn pre_tool_use(
             pending.remove(&request_id);
 
             // Notify frontend of timeout
-            let global_tx = state.global_hook_tx.lock().await;
-            let _ = global_tx.send(
+            let _ = state.global_hook_tx.send(
                 serde_json::to_string(&json!({
                     "type": "permission_timeout",
                     "data": { "request_id": request_id }
@@ -273,8 +269,7 @@ pub async fn post_tool_use(
             tool_input: body.tool_input.unwrap_or(json!({})),
         };
 
-        let global_tx = state.global_hook_tx.lock().await;
-        let _ = global_tx.send(
+        let _ = state.global_hook_tx.send(
             serde_json::to_string(&json!({
                 "type": "file_change",
                 "data": event,
@@ -300,8 +295,7 @@ pub async fn stop(
         "stop hook received"
     );
 
-    let global_tx = state.global_hook_tx.lock().await;
-    let _ = global_tx.send(
+    let _ = state.global_hook_tx.send(
         serde_json::to_string(&json!({
             "type": "hook_stop",
             "data": {
@@ -320,10 +314,7 @@ pub async fn stop(
 pub async fn global_hook_stream(
     State(state): State<AppState>,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
-    let rx = {
-        let global_tx = state.global_hook_tx.lock().await;
-        global_tx.subscribe()
-    };
+    let rx = state.global_hook_tx.subscribe();
 
     tracing::info!("global hook stream connected");
 
