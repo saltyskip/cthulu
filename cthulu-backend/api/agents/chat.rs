@@ -476,22 +476,59 @@ pub(crate) async fn chat(
         None
     };
 
+    // Pre-create worktree group if this agent has no sessions yet (outside write lock)
+    let needs_new_entry = {
+        let sessions = state.interact_sessions.read().await;
+        !sessions.contains_key(&key)
+    };
+    let pre_session_id = Uuid::new_v4().to_string();
+    let prepared_worktree: Option<(String, crate::git::WorktreeGroupMeta)> = if needs_new_entry {
+        match crate::git::create_worktree_group(
+            std::path::Path::new(&default_working_dir),
+            &pre_session_id,
+        ) {
+            Ok(group) => {
+                let meta = crate::git::WorktreeGroupMeta::from(&group);
+                let wt_dir = group.shadow_root.to_string_lossy().to_string();
+                tracing::info!(
+                    session_id = %pre_session_id,
+                    shadow_root = %wt_dir,
+                    repos = group.repos.len(),
+                    single_repo = group.single_repo,
+                    "created worktree group for auto-created session"
+                );
+                Some((wt_dir, meta))
+            }
+            Err(e) => {
+                tracing::debug!(error = %e, "no git repos for auto-created session");
+                None
+            }
+        }
+    } else {
+        None
+    };
+
     // Look up or create the session
     let (target_session_id, is_new, working_dir) = {
         let mut all_sessions = state.interact_sessions.write().await;
+        let mut used_prepared_worktree = false;
 
         let flow_sessions = all_sessions
             .entry(key.clone())
             .or_insert_with(|| {
-                let sid = Uuid::new_v4().to_string();
+                used_prepared_worktree = true;
+                let (wdir, wt_group) = match &prepared_worktree {
+                    Some((dir, meta)) => (dir.clone(), Some(meta.clone())),
+                    None => (default_working_dir.clone(), None),
+                };
                 FlowSessions {
                     flow_name: agent.name.clone(),
-                    active_session: sid.clone(),
+                    active_session: pre_session_id.clone(),
                     sessions: vec![InteractSession {
-                        session_id: sid,
+                        session_id: pre_session_id.clone(),
                         summary: make_summary(&prompt),
                         node_id: None,
-                        working_dir: default_working_dir.clone(),
+                        working_dir: wdir,
                         active_pid: None,
                         busy: false,
                         busy_since: None,
@@ -501,10 +538,19 @@ pub(crate) async fn chat(
                         skills_dir: None,
                         kind: "interactive".to_string(),
                         flow_run: None,
-                        worktree_group: None,
+                        worktree_group: wt_group,
                     }],
                 }
             });
+
+        // Race condition: if another request created the entry between our read
+        // and write locks, clean up the unused worktree group
+        if !used_prepared_worktree {
+            if let Some((_, ref meta)) = prepared_worktree {
+                let group = meta.to_worktree_group();
+                let _ = crate::git::remove_worktree_group(&group);
+            }
+        }
 
         let target_sid = body.session_id
             .unwrap_or_else(|| flow_sessions.active_session.clone());

@@ -1,11 +1,12 @@
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useMemo } from "react";
 import AgentChatView, { useAgentChat } from "./AgentChatView";
 import FileViewer from "./FileViewer";
 import DebugPanel from "./DebugPanel";
-import type { PendingPermission } from "../hooks/useGlobalPermissions";
+import ChangesPanel from "./ChangesPanel";
+import type { PendingPermission, FileChangeData } from "../hooks/useGlobalPermissions";
 import type { DebugEvent } from "./chat/useAgentChat";
 
-export type ReferenceTab = "files" | "debug";
+export type ReferenceTab = "files" | "changes" | "debug";
 
 interface AgentDetailViewProps {
   agentId: string;
@@ -16,6 +17,7 @@ interface AgentDetailViewProps {
   hookDebugEvents: DebugEvent[];
   onClearHookDebug: () => void;
   onDeleted: () => void;
+  fileChanges: FileChangeData[];
 }
 
 const MIN_CHAT_WIDTH = 320;
@@ -30,12 +32,26 @@ export default function AgentDetailView({
   hookDebugEvents,
   onClearHookDebug,
   onDeleted: _onDeleted,
+  fileChanges,
 }: AgentDetailViewProps) {
   const chat = useAgentChat(agentId, sessionId);
   const [chatFlex, setChatFlex] = useState(1);
   const [filesFlex, setFilesFlex] = useState(1);
   const [referenceTab, setReferenceTab] = useState<ReferenceTab>("files");
   const containerRef = useRef<HTMLDivElement>(null);
+
+  // Derive hookChangedFiles from fileChanges filtered by this agent/session
+  const hookChangedFiles = useMemo(() => {
+    const paths = new Set<string>();
+    for (const fc of fileChanges) {
+      if (fc.agent_id === agentId && fc.session_id === sessionId) {
+        const input = fc.tool_input;
+        const filePath = (input.file_path ?? input.path ?? input.filename) as string | undefined;
+        if (filePath) paths.add(filePath);
+      }
+    }
+    return Array.from(paths);
+  }, [fileChanges, agentId, sessionId]);
 
   const handleDividerMouseDown = useCallback(
     (e: React.MouseEvent) => {
@@ -82,7 +98,14 @@ export default function AgentDetailView({
       <div className="agent-detail-files" style={{ flex: filesFlex }}>
         <div className="ref-content">
           {referenceTab === "files" ? (
-            <FileViewer agentId={agentId} sessionId={sessionId} changedFiles={chat.changedFiles} />
+            <FileViewer agentId={agentId} sessionId={sessionId} changedFiles={hookChangedFiles} />
+          ) : referenceTab === "changes" ? (
+            <ChangesPanel
+              agentId={agentId}
+              sessionId={sessionId}
+              gitSnapshot={chat.gitSnapshot}
+              hookChangedFiles={hookChangedFiles}
+            />
           ) : (
             <DebugPanel
               chatEvents={chat.debugEvents}
@@ -100,6 +123,15 @@ export default function AgentDetailView({
           >
             <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
               <path d="M1.5 1h5l1 1H14.5a.5.5 0 0 1 .5.5v11a.5.5 0 0 1-.5.5h-13a.5.5 0 0 1-.5-.5v-12A.5.5 0 0 1 1.5 1zm0 1v11h13V3H7.25l-1-1H1.5z"/>
+            </svg>
+          </button>
+          <button
+            className={`ref-toolbar-btn ${referenceTab === "changes" ? "ref-toolbar-btn-active" : ""}`}
+            onClick={() => setReferenceTab("changes")}
+            title="Changes"
+          >
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+              <path d="M11.75 2.5a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5zm-2.25.75a2.25 2.25 0 1 1 3 2.122V6A2.5 2.5 0 0 1 10 8.5H6A1.5 1.5 0 0 0 4.5 10v1.128a2.251 2.251 0 1 1-1.5 0V5.372a2.25 2.25 0 1 1 1.5 0v1.836A2.99 2.99 0 0 1 6 7h4a1.5 1.5 0 0 0 1.5-1.5v-.628A2.25 2.25 0 0 1 9.5 3.25zM4.25 12a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5zM3.5 3.25a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0z"/>
             </svg>
           </button>
           <button

@@ -34,6 +34,10 @@ pub fn router() -> Router<AppState> {
             get(chat::git_status),
         )
         .route(
+            "/agents/{id}/sessions/{session_id}/git/diff",
+            get(handlers::git_diff),
+        )
+        .route(
             "/agents/{id}/sessions/{session_id}/kill",
             post(chat::kill_session),
         )

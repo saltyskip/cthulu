@@ -195,6 +195,66 @@ pub(crate) async fn delete_agent(
 }
 
 // ---------------------------------------------------------------------------
+// Git diff
+// ---------------------------------------------------------------------------
+
+#[derive(Deserialize)]
+pub struct GitDiffQuery {
+    pub path: String,
+    pub repo_root: Option<String>,
+}
+
+/// GET /agents/{id}/sessions/{session_id}/git/diff?path=...&repo_root=...
+pub(crate) async fn git_diff(
+    State(state): State<AppState>,
+    Path((id, session_id)): Path<(String, String)>,
+    Query(query): Query<GitDiffQuery>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let key = format!("agent::{id}");
+    let sessions = state.interact_sessions.read().await;
+    let flow_sessions = sessions.get(&key).ok_or_else(|| {
+        (StatusCode::NOT_FOUND, Json(json!({ "error": "no sessions for this agent" })))
+    })?;
+    let session = flow_sessions.get_session(&session_id).ok_or_else(|| {
+        (StatusCode::NOT_FOUND, Json(json!({ "error": "session not found" })))
+    })?;
+
+    let wt_meta = session.worktree_group.as_ref().ok_or_else(|| {
+        (StatusCode::NOT_FOUND, Json(json!({ "error": "no git integration for this session" })))
+    })?;
+
+    // Find the correct repo entry
+    let entry = if wt_meta.single_repo {
+        wt_meta.repos.first()
+    } else {
+        let target_root = query.repo_root.as_deref().unwrap_or(".");
+        wt_meta.repos.iter().find(|r| {
+            // Match by checking if worktree_path ends with repo_root
+            let wt = std::path::Path::new(&r.worktree_path);
+            let shadow = std::path::Path::new(&wt_meta.shadow_root);
+            if let Ok(rel) = wt.strip_prefix(shadow) {
+                rel.to_string_lossy() == target_root
+            } else {
+                false
+            }
+        }).or_else(|| wt_meta.repos.first())
+    };
+
+    let entry = entry.ok_or_else(|| {
+        (StatusCode::NOT_FOUND, Json(json!({ "error": "no repos in worktree group" })))
+    })?;
+
+    let worktree_path = std::path::Path::new(&entry.worktree_path);
+    let diff = crate::git::diff_file(worktree_path, &query.path);
+
+    Ok(Json(json!({
+        "diff": diff.unwrap_or_default(),
+        "path": query.path,
+        "repo_root": query.repo_root.unwrap_or_else(|| ".".to_string()),
+    })))
+}
+
+// ---------------------------------------------------------------------------
 // File explorer (read-only)
 // ---------------------------------------------------------------------------
 

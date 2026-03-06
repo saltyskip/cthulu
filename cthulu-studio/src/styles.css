@@ -4951,3 +4951,167 @@ button:disabled {
   margin: 0;
   line-height: 1.4;
 }
+
+/* ------------------------------------------------------------------ */
+/* Changes Panel                                                       */
+/* ------------------------------------------------------------------ */
+
+.changes-panel {
+  display: flex;
+  height: 100%;
+  overflow: hidden;
+}
+
+.changes-file-list {
+  width: 50%;
+  min-width: 180px;
+  overflow-y: auto;
+  border-right: 1px solid var(--border);
+  padding: 4px 0;
+}
+
+.changes-repo-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px 4px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+.changes-branch-name {
+  color: var(--accent);
+  font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
+  font-size: 10px;
+}
+
+.changes-repo-root {
+  color: var(--text-secondary);
+  font-size: 10px;
+  opacity: 0.7;
+}
+
+.changes-dirty-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--warning);
+  flex-shrink: 0;
+}
+
+.changes-empty-repo {
+  padding: 4px 10px 4px 28px;
+  font-size: 10px;
+  color: var(--text-secondary);
+}
+
+.changes-file {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px 3px 16px;
+  font-size: 11px;
+  color: var(--text);
+  cursor: pointer;
+  border-radius: 3px;
+  margin: 0 4px;
+}
+
+.changes-file:hover {
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+}
+
+.changes-file-active {
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+}
+
+.changes-status-badge {
+  font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
+  font-size: 10px;
+  font-weight: 700;
+  width: 14px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.changes-file-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+  font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
+  font-size: 11px;
+}
+
+.changes-file-stats {
+  font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
+  font-size: 10px;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.changes-empty {
+  padding: 24px 12px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  text-align: center;
+}
+
+.changes-diff-view {
+  flex: 1;
+  overflow: auto;
+  min-width: 0;
+}
+
+.changes-diff-placeholder {
+  padding: 24px 12px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  text-align: center;
+}
+
+.changes-diff-content {
+  margin: 0;
+  padding: 4px 0;
+  font-size: 11px;
+  font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
+  line-height: 1.5;
+  white-space: pre;
+  color: var(--text);
+}
+
+.changes-diff-add {
+  background: color-mix(in srgb, var(--success) 15%, transparent);
+  padding: 0 8px;
+}
+
+.changes-diff-del {
+  background: color-mix(in srgb, var(--danger) 15%, transparent);
+  padding: 0 8px;
+}
+
+.changes-diff-hunk {
+  color: var(--accent);
+  font-style: italic;
+  padding: 0 8px;
+}
+
+.changes-diff-meta {
+  color: var(--text-secondary);
+  opacity: 0.7;
+  padding: 0 8px;
+}
+
+.changes-diff-ctx {
+  padding: 0 8px;
+}
+.changes-diff-prefix {
+  display: inline-block;
+  width: 1.2em;
+  text-align: center;
+  flex-shrink: 0;
+  user-select: none;
+  opacity: 0.6;
+}

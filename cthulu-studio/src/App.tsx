@@ -415,6 +415,7 @@ export default function App() {
               onPermissionResponse={globalPermissions.respondToPermission}
               hookDebugEvents={globalPermissions.hookDebugEvents}
               onClearHookDebug={globalPermissions.clearHookDebugEvents}
+              fileChanges={globalPermissions.fileChanges}
               onDeleted={() => {
                 setVisitedAgents((prev) => { const next = new Map(prev); next.delete(agentId); return next; });
                 setSelectedAgentId(null);
