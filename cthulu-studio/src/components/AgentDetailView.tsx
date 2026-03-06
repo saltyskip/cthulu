@@ -1,9 +1,10 @@
-import { useState, useRef, useCallback, useMemo } from "react";
+import { useState, useRef, useCallback, useMemo, useEffect } from "react";
 import AgentChatView, { useAgentChat } from "./AgentChatView";
 import FileViewer from "./FileViewer";
 import DebugPanel from "./DebugPanel";
 import ChangesPanel from "./ChangesPanel";
 import SessionInfoPanel from "./SessionInfoPanel";
+import { getSessionStatus } from "../api/client";
 import type { PendingPermission, FileChangeData } from "../hooks/useGlobalPermissions";
 import type { DebugEvent } from "./chat/useAgentChat";
 
@@ -40,6 +41,21 @@ export default function AgentDetailView({
   const [filesFlex, setFilesFlex] = useState(1);
   const [referenceTab, setReferenceTab] = useState<ReferenceTab>("files");
   const containerRef = useRef<HTMLDivElement>(null);
+  const [infoBadge, setInfoBadge] = useState(0);
+
+  // Poll session status for info badge (message count)
+  useEffect(() => {
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const s = await getSessionStatus(agentId, sessionId);
+        if (!cancelled) setInfoBadge(s.message_count);
+      } catch { /* ignore */ }
+    };
+    poll();
+    const interval = setInterval(poll, 5000);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, [agentId, sessionId]);
 
   // Derive hookChangedFiles from fileChanges filtered by this agent/session
   const hookChangedFiles = useMemo(() => {
@@ -158,6 +174,9 @@ export default function AgentDetailView({
             <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
               <path d="M8 1a7 7 0 1 0 0 14A7 7 0 0 0 8 1zm0 1a6 6 0 1 1 0 12A6 6 0 0 1 8 2zm-.5 3h1v1h-1V5zm0 2h1v5h-1V7z"/>
             </svg>
+            {infoBadge > 0 && referenceTab !== "info" && (
+              <span className="ref-toolbar-badge">{infoBadge}</span>
+            )}
           </button>
         </div>
       </div>

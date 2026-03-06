@@ -213,6 +213,19 @@ export async function stopAgentChat(
   });
 }
 
+export interface WorktreeEntryMeta {
+  repo_root: string;
+  worktree_path: string;
+  branch: string;
+}
+
+export interface WorktreeGroupMeta {
+  shadow_root: string;
+  source_dir: string;
+  single_repo: boolean;
+  repos: WorktreeEntryMeta[];
+}
+
 export interface SessionStatus {
   session_id: string;
   busy: boolean;
@@ -220,6 +233,10 @@ export interface SessionStatus {
   process_alive: boolean;
   message_count: number;
   total_cost: number;
+  created_at: string | null;
+  working_dir: string | null;
+  worktree_group: WorktreeGroupMeta | null;
+  skills_dir: string | null;
 }
 
 export async function getSessionStatus(

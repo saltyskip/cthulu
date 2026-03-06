@@ -942,6 +942,7 @@ button:disabled {
   flex-shrink: 0;
 }
 .ref-toolbar-btn {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -5125,6 +5126,14 @@ button:disabled {
   padding: 12px;
   gap: 16px;
 }
+.session-info-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 12px;
+  overflow-y: auto;
+  height: 100%;
+}
 .session-info-section {
   display: flex;
   flex-direction: column;
@@ -5255,4 +5264,153 @@ button:disabled {
 .session-info-loading {
   font-size: 11px;
   color: var(--text-secondary);
+}
+
+/* Copy button */
+.session-info-copy-btn {
+  font-size: 9px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  border: 1px solid var(--border);
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background 0.1s, color 0.1s;
+}
+.session-info-copy-btn:hover {
+  background: var(--bg-tertiary, var(--bg-secondary));
+  color: var(--text);
+}
+
+/* Inline edit input */
+.session-info-inline-input {
+  font-size: 11px;
+  padding: 1px 4px;
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  background: var(--bg);
+  color: var(--text);
+  outline: none;
+  min-width: 80px;
+  max-width: 180px;
+}
+
+/* Pencil edit button */
+.session-info-edit-btn {
+  font-size: 10px;
+  padding: 0 3px;
+  border: none;
+  background: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  opacity: 0.5;
+  transition: opacity 0.1s;
+}
+.session-info-edit-btn:hover {
+  opacity: 1;
+  color: var(--accent);
+}
+
+/* Permission toggle editor */
+.session-info-perm-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.session-info-perm-toggles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.session-info-perm-toggle {
+  font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  border: 1px solid var(--border);
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background 0.1s, border-color 0.1s, color 0.1s;
+}
+.session-info-perm-toggle:hover {
+  border-color: var(--accent);
+}
+.session-info-perm-toggle-on {
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.session-info-perm-actions {
+  display: flex;
+  gap: 6px;
+}
+
+/* Clickable heading toggle */
+.session-info-heading-toggle {
+  cursor: pointer;
+  user-select: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.session-info-heading-toggle:hover {
+  color: var(--text);
+}
+
+/* Hooks badge */
+.session-info-hooks-badge {
+  font-size: 9px;
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--accent);
+}
+
+/* Git repo block */
+.session-info-git-repo {
+  padding: 4px 0 4px 8px;
+  border-left: 2px solid var(--border);
+  margin-top: 4px;
+}
+
+/* Prompt display blocks */
+.session-info-prompt-block {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.session-info-prompt-pre {
+  font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
+  font-size: 10px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 6px 8px;
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 160px;
+  overflow-y: auto;
+}
+
+/* Toolbar badge */
+.ref-toolbar-badge {
+  position: absolute;
+  top: -2px;
+  right: -4px;
+  font-size: 8px;
+  min-width: 14px;
+  height: 14px;
+  border-radius: 7px;
+  background: var(--accent);
+  color: var(--bg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 3px;
+  font-weight: 600;
+  line-height: 1;
 }
