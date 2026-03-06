@@ -1,6 +1,6 @@
 pub mod routes;
 
-use axum::routing::post;
+use axum::routing::{get, post};
 use axum::Router;
 
 use crate::api::AppState;
@@ -10,8 +10,7 @@ pub fn router() -> Router<AppState> {
         .route("/hooks/pre-tool-use", post(routes::pre_tool_use))
         .route("/hooks/post-tool-use", post(routes::post_tool_use))
         .route("/hooks/stop", post(routes::stop))
-        .route(
-            "/hooks/permission-response",
-            post(routes::permission_response),
-        )
+        .route("/hooks/permission-response", post(routes::permission_response))
+        .route("/hooks/pending", get(routes::list_pending))
+        .route("/hooks/stream", get(routes::global_hook_stream))
 }

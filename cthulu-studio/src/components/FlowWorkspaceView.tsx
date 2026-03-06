@@ -6,7 +6,7 @@ import { X, EyeOff, Plus } from "lucide-react";
 import Canvas, { type CanvasHandle } from "./Canvas";
 import FlowEditor, { type FlowEditorHandle } from "./FlowEditor";
 import RunLog from "./RunLog";
-import AgentChatView from "./AgentChatView";
+import AgentChatView, { useAgentChat } from "./AgentChatView";
 import NodeConfigPanel from "./NodeConfigPanel";
 import ErrorBoundary from "./ErrorBoundary";
 
@@ -432,9 +432,8 @@ export default function FlowWorkspaceView({
                 />
               )}
               {bottomTab === "terminal" && studioSessionId && (
-                <AgentChatView
-                  key={`workspace-chat:${STUDIO_ASSISTANT_ID}`}
-                  agentId={STUDIO_ASSISTANT_ID}
+                <StudioAssistantChat
+                  key={`workspace-chat:${STUDIO_ASSISTANT_ID}::${studioSessionId}`}
                   sessionId={studioSessionId}
                 />
               )}
@@ -501,4 +500,12 @@ export default function FlowWorkspaceView({
       )}
     </div>
   );
+}
+
+/** Wrapper so useAgentChat can be called unconditionally */
+function StudioAssistantChat({ sessionId }: { sessionId: string }) {
+  const chat = useAgentChat(STUDIO_ASSISTANT_ID, sessionId);
+  const emptyPerms: never[] = [];
+  const noop = () => {};
+  return <AgentChatView chat={chat} pendingPermissions={emptyPerms} onPermissionResponse={noop} />;
 }

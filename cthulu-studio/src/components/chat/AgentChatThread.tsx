@@ -15,7 +15,8 @@ import { FilePreviewContext } from "./FilePreviewContext";
 import type { MultiRepoSnapshot } from "./FilePreviewContext";
 import { extractLatestTodos } from "./chatUtils";
 import StickyTodoPanel from "./StickyTodoPanel";
-import type { ImageAttachment, DebugEvent, PendingPermission } from "./useAgentChat";
+import type { ImageAttachment, DebugEvent } from "./useAgentChat";
+import type { PendingPermission } from "../../hooks/useGlobalPermissions";
 
 function prettyJson(raw: string): string {
   try {
@@ -70,34 +71,34 @@ function PermissionBanner({
   return (
     <div className="fr-permission-banner">
       {permissions.map((p) => (
-        <div key={p.requestId} className="fr-permission-item">
+        <div key={p.request_id} className="fr-permission-item">
           <div className="fr-permission-header">
             <span className="fr-permission-icon">🔐</span>
-            <span className="fr-permission-tool">{p.toolName}</span>
+            <span className="fr-permission-tool">{p.tool_name}</span>
             <span className="fr-permission-label">wants permission</span>
             <button
               className="fr-permission-toggle"
-              onClick={() => setExpandedId(expandedId === p.requestId ? null : p.requestId)}
+              onClick={() => setExpandedId(expandedId === p.request_id ? null : p.request_id)}
             >
-              {expandedId === p.requestId ? "▾" : "▸"}
+              {expandedId === p.request_id ? "▾" : "▸"}
             </button>
             <span className="fr-permission-spacer" />
             <button
               className="fr-permission-btn fr-permission-allow"
-              onClick={() => onRespond(p.requestId, "allow")}
+              onClick={() => onRespond(p.request_id, "allow")}
             >
               Allow
             </button>
             <button
               className="fr-permission-btn fr-permission-deny"
-              onClick={() => onRespond(p.requestId, "deny")}
+              onClick={() => onRespond(p.request_id, "deny")}
             >
               Deny
             </button>
           </div>
-          {expandedId === p.requestId && (
+          {expandedId === p.request_id && (
             <pre className="fr-permission-input">
-              {JSON.stringify(p.toolInput, null, 2)}
+              {JSON.stringify(p.tool_input, null, 2)}
             </pre>
           )}
         </div>

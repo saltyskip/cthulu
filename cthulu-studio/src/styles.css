@@ -933,13 +933,21 @@ button:disabled {
 
 /* Left: file tree */
 .fv-tree {
-  width: 200px;
-  min-width: 140px;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  border-right: 1px solid var(--border);
   overflow: hidden;
+}
+
+.fv-tree-divider {
+  width: 3px;
+  flex-shrink: 0;
+  cursor: col-resize;
+  background: var(--border);
+  transition: background 0.15s;
+}
+.fv-tree-divider:hover {
+  background: var(--accent);
 }
 
 .fv-tree-header {

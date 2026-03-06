@@ -1,11 +1,14 @@
 import { useState, useRef, useCallback } from "react";
 import AgentChatView, { useAgentChat } from "./AgentChatView";
 import FileViewer from "./FileViewer";
+import type { PendingPermission } from "../hooks/useGlobalPermissions";
 
 interface AgentDetailViewProps {
   agentId: string;
   agentName: string;
   sessionId: string;
+  pendingPermissions: PendingPermission[];
+  onPermissionResponse: (requestId: string, decision: "allow" | "deny") => void;
   onDeleted: () => void;
 }
 
@@ -16,6 +19,8 @@ export default function AgentDetailView({
   agentId,
   agentName: _agentName,
   sessionId,
+  pendingPermissions,
+  onPermissionResponse,
   onDeleted: _onDeleted,
 }: AgentDetailViewProps) {
   const chat = useAgentChat(agentId, sessionId);
@@ -35,7 +40,6 @@ export default function AgentDetailView({
       const onMove = (ev: MouseEvent) => {
         const dx = ev.clientX - startX;
         let newChatFrac = startChatFrac + dx / totalWidth;
-        // enforce minimums
         const minChatFrac = MIN_CHAT_WIDTH / totalWidth;
         const maxChatFrac = 1 - MIN_FILES_WIDTH / totalWidth;
         newChatFrac = Math.max(minChatFrac, Math.min(maxChatFrac, newChatFrac));
@@ -59,7 +63,11 @@ export default function AgentDetailView({
   return (
     <div className="agent-detail" ref={containerRef}>
       <div className="agent-detail-chat" style={{ flex: chatFlex }}>
-        <AgentChatView chat={chat} />
+        <AgentChatView
+          chat={chat}
+          pendingPermissions={pendingPermissions}
+          onPermissionResponse={onPermissionResponse}
+        />
       </div>
       <div className="agent-detail-divider" onMouseDown={handleDividerMouseDown} />
       <div className="agent-detail-files" style={{ flex: filesFlex }}>

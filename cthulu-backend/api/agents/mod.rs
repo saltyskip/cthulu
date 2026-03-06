@@ -60,9 +60,4 @@ pub fn router() -> Router<AppState> {
             "/agents/{id}/sessions/{session_id}/files/read",
             get(handlers::read_session_file),
         )
-        // Persistent SSE for hook events (permissions, file changes, stop)
-        .route(
-            "/agents/{id}/sessions/{session_id}/hooks/stream",
-            get(chat::hook_event_stream),
-        )
 }

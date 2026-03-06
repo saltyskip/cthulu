@@ -88,6 +88,7 @@ export default function FileViewer({ agentId, sessionId, changedFiles }: FileVie
   const [fileContent, setFileContent] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [treeWidth, setTreeWidth] = useState(200);
   const treeRef = useRef<HTMLDivElement>(null);
 
   const shikiTheme = appTheme.shikiTheme;
@@ -209,11 +210,32 @@ export default function FileViewer({ agentId, sessionId, changedFiles }: FileVie
     el?.scrollIntoView({ block: "nearest" });
   }, [focusedPath]);
 
+  const handleTreeResize = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startW = treeWidth;
+    const onMove = (ev: MouseEvent) => {
+      const w = Math.max(120, Math.min(500, startW + ev.clientX - startX));
+      setTreeWidth(w);
+    };
+    const onUp = () => {
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+  }, [treeWidth]);
+
   return (
     <div className="fv">
       {/* Left: file tree */}
       <div
         className="fv-tree"
+        style={{ width: treeWidth }}
         tabIndex={0}
         onKeyDown={handleKeyDown}
         ref={treeRef}
@@ -260,6 +282,7 @@ export default function FileViewer({ agentId, sessionId, changedFiles }: FileVie
         </div>
       </div>
 
+      <div className="fv-tree-divider" onMouseDown={handleTreeResize} />
       {/* Right: rendered content */}
       <div className="fv-content">
         {!selectedPath ? (

@@ -1,17 +1,10 @@
 import { useState, useRef, useCallback, useMemo, useEffect } from "react";
 import type { ThreadMessageLike } from "@assistant-ui/react";
 import { startAgentChat, reconnectAgentChat } from "../../api/interactStream";
-import { stopAgentChat, getSessionStatus, getSessionLog, getGitSnapshot, respondToPermission, subscribeHookEvents } from "../../api/client";
+import { stopAgentChat, getSessionStatus, getSessionLog, getGitSnapshot } from "../../api/client";
 import { replayLogLines, type ContentPart, type ToolCallPart } from "./chatParser";
 import { fileToBase64 } from "./chatUtils";
 import type { MultiRepoSnapshot } from "./FilePreviewContext";
-
-export interface PendingPermission {
-  requestId: string;
-  toolName: string;
-  toolInput: Record<string, unknown>;
-  timestamp: number;
-}
 
 export interface DebugEvent {
   ts: number;
@@ -44,10 +37,6 @@ function applySSEEvent(
   partsRef: React.MutableRefObject<ContentPart[]>,
   setResultMeta: (meta: { cost: number; turns: number }) => void,
   setGitSnapshot?: (snapshot: MultiRepoSnapshot) => void,
-  onPermissionRequest?: (perm: PendingPermission) => void,
-  onPermissionTimeout?: (requestId: string) => void,
-  onFileChange?: (data: { toolName: string; toolInput: Record<string, unknown> }) => void,
-  onHookStop?: () => void,
 ): boolean {
   try {
     const data = JSON.parse(event.data);
@@ -89,36 +78,13 @@ function applySSEEvent(
       if (setGitSnapshot) {
         setGitSnapshot(data as MultiRepoSnapshot);
       }
-      return false; // no parts to flush
+      return false;
     } else if (event.type === "result") {
       const hasText = partsRef.current.some((p) => p.type === "text");
       if (data.text && !hasText) {
         partsRef.current = [...partsRef.current, { type: "text", text: data.text }];
       }
       setResultMeta({ cost: data.cost || 0, turns: data.turns || 0 });
-      return true;
-    } else if (event.type === "permission_request" && onPermissionRequest) {
-      const permData = data.data || data;
-      onPermissionRequest({
-        requestId: permData.request_id,
-        toolName: permData.tool_name || "unknown",
-        toolInput: permData.tool_input || {},
-        timestamp: Date.now(),
-      });
-      return true;
-    } else if (event.type === "permission_timeout" && onPermissionTimeout) {
-      const timeoutData = data.data || data;
-      onPermissionTimeout(timeoutData.request_id);
-      return true;
-    } else if (event.type === "file_change" && onFileChange) {
-      const changeData = data.data || data;
-      onFileChange({
-        toolName: changeData.tool_name || "",
-        toolInput: changeData.tool_input || {},
-      });
-      return false;
-    } else if (event.type === "hook_stop" && onHookStop) {
-      onHookStop();
       return true;
     }
   } catch {
@@ -154,10 +120,7 @@ export function useAgentChat(agentId: string, sessionId: string) {
   // Git snapshot state — updated via SSE events and initial fetch
   const [gitSnapshot, setGitSnapshot] = useState<MultiRepoSnapshot | null>(null);
 
-  // Permission requests from Claude Code hooks
-  const [pendingPermissions, setPendingPermissions] = useState<PendingPermission[]>([]);
-
-  // File changes tracked via PostToolUse hooks
+  // File changes tracked via PostToolUse hooks (received from global hook stream)
   const [changedFiles, setChangedFiles] = useState<string[]>([]);
 
   // Debug mode: capture raw SSE events for inspection
@@ -180,30 +143,6 @@ export function useAgentChat(agentId: string, sessionId: string) {
   const clearDebugEvents = useCallback(() => {
     debugEventsRef.current = [];
     setDebugEvents([]);
-  }, []);
-
-  const handlePermissionRequest = useCallback((perm: PendingPermission) => {
-    setPendingPermissions((prev) => [...prev, perm]);
-  }, []);
-
-  const handlePermissionTimeout = useCallback((requestId: string) => {
-    setPendingPermissions((prev) => prev.filter((p) => p.requestId !== requestId));
-  }, []);
-
-  const handlePermissionResponse = useCallback(async (requestId: string, decision: "allow" | "deny") => {
-    setPendingPermissions((prev) => prev.filter((p) => p.requestId !== requestId));
-    try {
-      await respondToPermission(requestId, decision);
-    } catch (e) {
-      console.error("Failed to respond to permission:", e);
-    }
-  }, []);
-
-  const handleFileChange = useCallback((data: { toolName: string; toolInput: Record<string, unknown> }) => {
-    const filePath = (data.toolInput.file_path || data.toolInput.path || "") as string;
-    if (filePath) {
-      setChangedFiles((prev) => prev.includes(filePath) ? prev : [...prev, filePath]);
-    }
   }, []);
 
   // When debug mode is toggled on, flush any buffered events
@@ -323,7 +262,7 @@ export function useAgentChat(agentId: string, sessionId: string) {
           (event) => {
             if (cancelled) return;
             pushDebugEvent(event);
-            const needsFlush = applySSEEvent(event, partsRef, setResultMeta, setGitSnapshot, handlePermissionRequest, handlePermissionTimeout, handleFileChange);
+            const needsFlush = applySSEEvent(event, partsRef, setResultMeta, setGitSnapshot);
             if (needsFlush) {
               setStreamingParts([...partsRef.current]);
             } else {
@@ -347,48 +286,7 @@ export function useAgentChat(agentId: string, sessionId: string) {
     })();
 
     return () => { cancelled = true; };
-  }, [agentId, sessionId, scheduleFlush, finalizeParts, resetStreaming, handlePermissionRequest, handlePermissionTimeout, handleFileChange]);
-
-  // Subscribe to persistent hook event SSE stream (permissions, file changes, stop).
-  // This stays open regardless of chat streaming state.
-  useEffect(() => {
-    const controller = subscribeHookEvents(
-      agentId,
-      sessionId,
-      (event) => {
-        // Parse the SSE data as JSON and dispatch to appropriate handler
-        try {
-          const parsed = JSON.parse(event.data);
-          const innerData = parsed.data || parsed;
-
-          if (event.type === "permission_request") {
-            handlePermissionRequest({
-              requestId: innerData.request_id,
-              toolName: innerData.tool_name || "unknown",
-              toolInput: innerData.tool_input || {},
-              timestamp: Date.now(),
-            });
-          } else if (event.type === "permission_timeout") {
-            handlePermissionTimeout(innerData.request_id);
-          } else if (event.type === "file_change") {
-            handleFileChange({
-              toolName: innerData.tool_name || "",
-              toolInput: innerData.tool_input || {},
-            });
-          } else if (event.type === "hook_stop") {
-            // Stop events are informational for now
-          }
-        } catch {
-          // Ignore malformed events
-        }
-      },
-      (err) => {
-        console.warn("Hook event stream error:", err);
-      },
-    );
-
-    return () => controller.abort();
-  }, [agentId, sessionId, handlePermissionRequest, handlePermissionTimeout, handleFileChange]);
+  }, [agentId, sessionId, scheduleFlush, finalizeParts, resetStreaming]);
 
   const handleSend = useCallback(
     async (message: { content: unknown; role?: string }) => {
@@ -435,7 +333,7 @@ export function useAgentChat(agentId: string, sessionId: string) {
         sessionId,
         (event) => {
           pushDebugEvent(event);
-          const needsFlush = applySSEEvent(event, partsRef, setResultMeta, setGitSnapshot, handlePermissionRequest, handlePermissionTimeout, handleFileChange);
+          const needsFlush = applySSEEvent(event, partsRef, setResultMeta, setGitSnapshot);
           if (needsFlush) {
             setStreamingParts([...partsRef.current]);
           } else {
@@ -466,7 +364,7 @@ export function useAgentChat(agentId: string, sessionId: string) {
 
       abortRef.current = controller;
     },
-    [agentId, sessionId, attachments, scheduleFlush, finalizeParts, resetStreaming, pushDebugEvent, handlePermissionRequest, handlePermissionTimeout, handleFileChange]
+    [agentId, sessionId, attachments, scheduleFlush, finalizeParts, resetStreaming, pushDebugEvent]
   );
 
   const handleCancel = useCallback(() => {
@@ -516,8 +414,6 @@ export function useAgentChat(agentId: string, sessionId: string) {
     debugEvents,
     clearDebugEvents,
     gitSnapshot,
-    pendingPermissions,
-    handlePermissionResponse,
     changedFiles,
   };
 }

@@ -611,7 +611,7 @@ pub(crate) async fn chat(
                 "hooks": [{
                     "type": "http",
                     "url": format!("{hook_base}/pre-tool-use?session_id={sid}"),
-                    "timeout": 120
+                    "timeout": 130
                 }]
             }],
             "PostToolUse": [{
@@ -1757,83 +1757,3 @@ fn build_workflow_context_md(flow: &Flow, node_id: &str) -> String {
     )
 }
 
-// ---------------------------------------------------------------------------
-// Persistent SSE endpoint for hook events (permission requests, file changes, stop)
-// ---------------------------------------------------------------------------
-
-/// GET /agents/{id}/sessions/{session_id}/hooks/stream
-///
-/// Long-lived SSE connection that delivers hook events for a session.
-/// Unlike chat streams, this stays open as long as the frontend is subscribed.
-pub async fn hook_event_stream(
-    State(state): State<AppState>,
-    Path((agent_id, session_id)): Path<(String, String)>,
-) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
-    let hook_key = format!("agent::{agent_id}::session::{session_id}");
-
-    // Get or create a broadcast channel for this session's hook events
-    let rx = {
-        let mut streams = state.hook_streams.lock().await;
-        let tx = streams
-            .entry(hook_key.clone())
-            .or_insert_with(|| {
-                let (tx, _) = broadcast::channel::<String>(256);
-                tx
-            });
-        tx.subscribe()
-    };
-
-    tracing::info!(
-        hook_key = %hook_key,
-        "hook event stream connected"
-    );
-
-    let hook_streams = state.hook_streams.clone();
-    let hook_key_cleanup = hook_key.clone();
-
-    let stream = async_stream::stream! {
-        let mut rx = rx;
-
-        // Send an initial keepalive/connected event
-        yield Ok(Event::default().event("connected").data(
-            serde_json::to_string(&json!({"session_id": session_id})).unwrap_or_default()
-        ));
-
-        loop {
-            match rx.recv().await {
-                Ok(data) => {
-                    // Parse to extract event type, or send as generic hook event
-                    if let Ok(parsed) = serde_json::from_str::<Value>(&data) {
-                        let event_type = parsed.get("type")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("hook");
-                        yield Ok(Event::default().event(event_type).data(data));
-                    } else {
-                        yield Ok(Event::default().event("hook").data(data));
-                    }
-                }
-                Err(broadcast::error::RecvError::Lagged(n)) => {
-                    tracing::warn!(hook_key = %hook_key_cleanup, lagged = n, "hook stream lagged");
-                    continue;
-                }
-                Err(broadcast::error::RecvError::Closed) => {
-                    tracing::info!(hook_key = %hook_key_cleanup, "hook stream closed");
-                    break;
-                }
-            }
-        }
-
-        // Cleanup: remove from hook_streams if no more subscribers
-        {
-            let mut streams = hook_streams.lock().await;
-            if let Some(tx) = streams.get(&hook_key_cleanup) {
-                if tx.receiver_count() == 0 {
-                    streams.remove(&hook_key_cleanup);
-                    tracing::info!(hook_key = %hook_key_cleanup, "cleaned up hook stream (no subscribers)");
-                }
-            }
-        }
-    };
-
-    Sse::new(stream).keep_alive(KeepAlive::default())
-}
