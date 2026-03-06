@@ -302,33 +302,17 @@ button:disabled {
 }
 .toon-ascii {
   font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
-  font-size: 11px;
-  line-height: 1.15;
   margin: 0;
   padding: 0;
   white-space: pre;
-  color: var(--text);
+  overflow: hidden;
 }
-.toon-ascii .ascii-line {
-  display: block;
+.toon-ascii-roadrunner {
+  font-size: 4.2px;
+  line-height: 1.2;
+  color: var(--accent);
+  letter-spacing: 0.3px;
 }
-.toon-ascii .ascii-char {
-  display: inline-block;
-}
-/* Character part colors */
-.ascii-ear { color: #a0a4aa; }
-.ascii-face { color: var(--text); }
-.ascii-body { color: #7a7e85; }
-.ascii-tuft { color: #555; }
-.ascii-feet { color: #e8a832; }
-.ascii-hat { color: #b57530; }
-/* Road Runner colors */
-.ascii-crest { color: #7b5ec6; }
-.ascii-rr-face { color: #5b8dd9; }
-.ascii-rr-beak { color: #e8a832; }
-.ascii-rr-body { color: #5b8dd9; }
-.ascii-rr-legs { color: #e8a832; }
-.ascii-rr-dust { color: #888; }
 .toon-char-name {
   font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
   font-size: 8px;
