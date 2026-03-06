@@ -123,21 +123,16 @@ export function useAgentChat(agentId: string, sessionId: string) {
   // File changes tracked via PostToolUse hooks (received from global hook stream)
   const [changedFiles, setChangedFiles] = useState<string[]>([]);
 
-  // Debug mode: capture raw SSE events for inspection
-  const [debugMode, setDebugMode] = useState(false);
+  // Debug: capture raw SSE events for inspection
   const [debugEvents, setDebugEvents] = useState<DebugEvent[]>([]);
   const debugEventsRef = useRef<DebugEvent[]>([]);
-  const debugModeRef = useRef(false);
-  debugModeRef.current = debugMode;
 
   const pushDebugEvent = useCallback((event: SSEEvent, error?: boolean) => {
     const entry: DebugEvent = { ts: Date.now(), type: event.type, data: event.data, error };
     const buf = debugEventsRef.current;
     buf.push(entry);
     if (buf.length > MAX_DEBUG_EVENTS) buf.shift();
-    if (debugModeRef.current) {
-      setDebugEvents([...buf]);
-    }
+    setDebugEvents([...buf]);
   }, []);
 
   const clearDebugEvents = useCallback(() => {
@@ -145,12 +140,6 @@ export function useAgentChat(agentId: string, sessionId: string) {
     setDebugEvents([]);
   }, []);
 
-  // When debug mode is toggled on, flush any buffered events
-  useEffect(() => {
-    if (debugMode && debugEventsRef.current.length > 0) {
-      setDebugEvents([...debugEventsRef.current]);
-    }
-  }, [debugMode]);
 
   const addFiles = useCallback((files: FileList | File[]) => {
     const imageFiles = Array.from(files).filter((f) => f.type.startsWith("image/"));
@@ -409,8 +398,6 @@ export function useAgentChat(agentId: string, sessionId: string) {
     injectAssistantMessage,
     addFiles,
     removeAttachment,
-    debugMode,
-    setDebugMode,
     debugEvents,
     clearDebugEvents,
     gitSnapshot,
