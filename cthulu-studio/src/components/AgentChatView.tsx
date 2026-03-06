@@ -8,11 +8,9 @@ interface AgentChatViewProps {
   chat: AgentChatHandle;
   pendingPermissions: PendingPermission[];
   onPermissionResponse: (requestId: string, decision: "allow" | "deny") => void;
-  onToggleDebug?: () => void;
-  debugActive?: boolean;
 }
 
-export default function AgentChatView({ chat, pendingPermissions, onPermissionResponse, onToggleDebug, debugActive }: AgentChatViewProps) {
+export default function AgentChatView({ chat, pendingPermissions, onPermissionResponse }: AgentChatViewProps) {
   return (
     <AgentChatThread
       messages={chat.messages}
@@ -25,8 +23,6 @@ export default function AgentChatView({ chat, pendingPermissions, onPermissionRe
       onAddFiles={chat.addFiles}
       onRemoveAttachment={chat.removeAttachment}
       fileInputRef={chat.fileInputRef}
-      onToggleDebug={onToggleDebug}
-      debugActive={debugActive ?? false}
       onClear={chat.clearMessages}
       onInjectAssistant={chat.injectAssistantMessage}
       gitSnapshot={chat.gitSnapshot}

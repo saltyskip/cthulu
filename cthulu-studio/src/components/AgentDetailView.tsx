@@ -37,10 +37,6 @@ export default function AgentDetailView({
   const [referenceTab, setReferenceTab] = useState<ReferenceTab>("files");
   const containerRef = useRef<HTMLDivElement>(null);
 
-  const handleToggleDebug = useCallback(() => {
-    setReferenceTab((prev) => (prev === "debug" ? "files" : "debug"));
-  }, []);
-
   const handleDividerMouseDown = useCallback(
     (e: React.MouseEvent) => {
       e.preventDefault();
@@ -80,36 +76,42 @@ export default function AgentDetailView({
           chat={chat}
           pendingPermissions={pendingPermissions}
           onPermissionResponse={onPermissionResponse}
-          onToggleDebug={handleToggleDebug}
-          debugActive={referenceTab === "debug"}
         />
       </div>
       <div className="agent-detail-divider" onMouseDown={handleDividerMouseDown} />
       <div className="agent-detail-files" style={{ flex: filesFlex }}>
-        <div className="ref-tabs">
+        <div className="ref-content">
+          {referenceTab === "files" ? (
+            <FileViewer agentId={agentId} sessionId={sessionId} changedFiles={chat.changedFiles} />
+          ) : (
+            <DebugPanel
+              chatEvents={chat.debugEvents}
+              hookEvents={hookDebugEvents}
+              onClearChat={chat.clearDebugEvents}
+              onClearHook={onClearHookDebug}
+            />
+          )}
+        </div>
+        <div className="ref-toolbar">
           <button
-            className={`ref-tab ${referenceTab === "files" ? "ref-tab-active" : ""}`}
+            className={`ref-toolbar-btn ${referenceTab === "files" ? "ref-toolbar-btn-active" : ""}`}
             onClick={() => setReferenceTab("files")}
+            title="Files"
           >
-            Files
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+              <path d="M1.5 1h5l1 1H14.5a.5.5 0 0 1 .5.5v11a.5.5 0 0 1-.5.5h-13a.5.5 0 0 1-.5-.5v-12A.5.5 0 0 1 1.5 1zm0 1v11h13V3H7.25l-1-1H1.5z"/>
+            </svg>
           </button>
           <button
-            className={`ref-tab ${referenceTab === "debug" ? "ref-tab-active" : ""}`}
+            className={`ref-toolbar-btn ${referenceTab === "debug" ? "ref-toolbar-btn-active" : ""}`}
             onClick={() => setReferenceTab("debug")}
+            title="Debug"
           >
-            Debug
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+              <path d="M4.5 3A2.5 2.5 0 0 1 7 .5h2A2.5 2.5 0 0 1 11.5 3v.07a5 5 0 0 1 2.18 1.49l1.82-1.06.5.87-1.81 1.04A5 5 0 0 1 14.5 7H16v1h-1.5a5 5 0 0 1-.31 1.59l1.81 1.04-.5.87-1.82-1.06A5 5 0 0 1 11.5 12v1a2.5 2.5 0 0 1-2.5 2.5H7A2.5 2.5 0 0 1 4.5 13v-1a5 5 0 0 1-2.18-1.56L.5 11.5l-.5-.87 1.81-1.04A5 5 0 0 1 1.5 8H0V7h1.5a5 5 0 0 1 .31-1.59L.5 4.37l.5-.87 1.82 1.06A5 5 0 0 1 4.5 3.07V3zm1 0v.34l-.44.2A4 4 0 0 0 4 8a4 4 0 0 0 1.06 2.71l.44.42V13A1.5 1.5 0 0 0 7 14.5h2a1.5 1.5 0 0 0 1.5-1.5v-1.87l.44-.42A4 4 0 0 0 12 8a4 4 0 0 0-1.06-2.46l-.44-.2V3A1.5 1.5 0 0 0 9 1.5H7A1.5 1.5 0 0 0 5.5 3z"/>
+            </svg>
           </button>
         </div>
-        {referenceTab === "files" ? (
-          <FileViewer agentId={agentId} sessionId={sessionId} changedFiles={chat.changedFiles} />
-        ) : (
-          <DebugPanel
-            chatEvents={chat.debugEvents}
-            hookEvents={hookDebugEvents}
-            onClearChat={chat.clearDebugEvents}
-            onClearHook={onClearHookDebug}
-          />
-        )}
       </div>
     </div>
   );

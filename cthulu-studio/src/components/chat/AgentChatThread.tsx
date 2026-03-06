@@ -91,8 +91,6 @@ interface AgentChatThreadProps {
   onAddFiles: (files: FileList | File[]) => void;
   onRemoveAttachment: (id: string) => void;
   fileInputRef: React.RefObject<HTMLInputElement | null>;
-  onToggleDebug?: () => void;
-  debugActive: boolean;
   gitSnapshot: MultiRepoSnapshot | null;
   pendingPermissions: PendingPermission[];
   onPermissionResponse: (requestId: string, decision: "allow" | "deny") => void;
@@ -111,8 +109,6 @@ export default function AgentChatThread({
   onAddFiles,
   onRemoveAttachment,
   fileInputRef,
-  onToggleDebug,
-  debugActive,
   gitSnapshot,
   pendingPermissions,
   onPermissionResponse,
@@ -276,18 +272,6 @@ export default function AgentChatThread({
     // File preview now handled externally
   }, []);
 
-  // Keyboard shortcut: Cmd/Ctrl+Shift+D to toggle debug panel
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === "D") {
-        e.preventDefault();
-        onToggleDebug?.();
-      }
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [onToggleDebug]);
-
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
@@ -397,14 +381,6 @@ export default function AgentChatThread({
               </div>
             )}
             <ComposerPrimitive.Root>
-              <button
-                className={`ac-btn ac-btn-debug ${debugActive ? "ac-btn-debug-active" : ""}`}
-                onClick={() => onToggleDebug?.()}
-                title="Toggle debug panel (Cmd+Shift+D)"
-                type="button"
-              >
-                🐛
-              </button>
               <button
                 className="ac-btn ac-btn-attach"
                 onClick={() => fileInputRef.current?.click()}
