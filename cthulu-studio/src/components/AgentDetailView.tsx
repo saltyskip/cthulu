@@ -3,10 +3,11 @@ import AgentChatView, { useAgentChat } from "./AgentChatView";
 import FileViewer from "./FileViewer";
 import DebugPanel from "./DebugPanel";
 import ChangesPanel from "./ChangesPanel";
+import SessionInfoPanel from "./SessionInfoPanel";
 import type { PendingPermission, FileChangeData } from "../hooks/useGlobalPermissions";
 import type { DebugEvent } from "./chat/useAgentChat";
 
-export type ReferenceTab = "files" | "changes" | "debug";
+export type ReferenceTab = "files" | "changes" | "debug" | "info";
 
 interface AgentDetailViewProps {
   agentId: string;
@@ -31,7 +32,7 @@ export default function AgentDetailView({
   onPermissionResponse,
   hookDebugEvents,
   onClearHookDebug,
-  onDeleted: _onDeleted,
+  onDeleted,
   fileChanges,
 }: AgentDetailViewProps) {
   const chat = useAgentChat(agentId, sessionId);
@@ -106,12 +107,18 @@ export default function AgentDetailView({
               gitSnapshot={chat.gitSnapshot}
               hookChangedFiles={hookChangedFiles}
             />
-          ) : (
+          ) : referenceTab === "debug" ? (
             <DebugPanel
               chatEvents={chat.debugEvents}
               hookEvents={hookDebugEvents}
               onClearChat={chat.clearDebugEvents}
               onClearHook={onClearHookDebug}
+            />
+          ) : (
+            <SessionInfoPanel
+              agentId={agentId}
+              sessionId={sessionId}
+              onSessionDeleted={onDeleted}
             />
           )}
         </div>
@@ -141,6 +148,15 @@ export default function AgentDetailView({
           >
             <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
               <path d="M4.5 3A2.5 2.5 0 0 1 7 .5h2A2.5 2.5 0 0 1 11.5 3v.07a5 5 0 0 1 2.18 1.49l1.82-1.06.5.87-1.81 1.04A5 5 0 0 1 14.5 7H16v1h-1.5a5 5 0 0 1-.31 1.59l1.81 1.04-.5.87-1.82-1.06A5 5 0 0 1 11.5 12v1a2.5 2.5 0 0 1-2.5 2.5H7A2.5 2.5 0 0 1 4.5 13v-1a5 5 0 0 1-2.18-1.56L.5 11.5l-.5-.87 1.81-1.04A5 5 0 0 1 1.5 8H0V7h1.5a5 5 0 0 1 .31-1.59L.5 4.37l.5-.87 1.82 1.06A5 5 0 0 1 4.5 3.07V3zm1 0v.34l-.44.2A4 4 0 0 0 4 8a4 4 0 0 0 1.06 2.71l.44.42V13A1.5 1.5 0 0 0 7 14.5h2a1.5 1.5 0 0 0 1.5-1.5v-1.87l.44-.42A4 4 0 0 0 12 8a4 4 0 0 0-1.06-2.46l-.44-.2V3A1.5 1.5 0 0 0 9 1.5H7A1.5 1.5 0 0 0 5.5 3z"/>
+            </svg>
+          </button>
+          <button
+            className={`ref-toolbar-btn ${referenceTab === "info" ? "ref-toolbar-btn-active" : ""}`}
+            onClick={() => setReferenceTab("info")}
+            title="Session Info"
+          >
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+              <path d="M8 1a7 7 0 1 0 0 14A7 7 0 0 0 8 1zm0 1a6 6 0 1 1 0 12A6 6 0 0 1 8 2zm-.5 3h1v1h-1V5zm0 2h1v5h-1V7z"/>
             </svg>
           </button>
         </div>
