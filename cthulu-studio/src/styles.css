@@ -272,21 +272,32 @@ button:disabled {
   background: var(--bg-tertiary);
 }
 
+/* ---- Road Runner mascot (collapsible) ---- */
 .sidebar-toon-dancer {
-  padding: 12px 8px 8px;
+  padding: 4px 8px;
   border-bottom: 1px solid var(--border);
   background: var(--bg);
   text-align: center;
   overflow: hidden;
   transition: background 0.2s;
-  min-height: 260px;
 }
 .sidebar-toon-dancer:hover {
   background: var(--bg-secondary);
 }
-.sidebar-toon-dancer.toon-poked {
-  background: var(--accent);
-  transition: background 0s;
+.toon-collapse-btn {
+  font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
+  font-size: 9px;
+  color: var(--text-secondary);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 2px 4px;
+  width: 100%;
+  text-align: left;
+  letter-spacing: 0.3px;
+}
+.toon-collapse-btn:hover {
+  color: var(--accent);
 }
 .toon-ascii-container {
   display: flex;
@@ -294,6 +305,7 @@ button:disabled {
   cursor: pointer;
   transition: filter 0.15s;
   user-select: none;
+  margin-top: 4px;
 }
 .toon-ascii-container:hover {
   filter: drop-shadow(0 0 6px var(--accent));
@@ -314,15 +326,6 @@ button:disabled {
   color: var(--accent);
   letter-spacing: 0.3px;
 }
-.toon-char-name {
-  font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
-  font-size: 8px;
-  font-weight: 600;
-  color: var(--accent);
-  margin-top: 4px;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
 .toon-dialog {
   font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
   font-size: 9px;
@@ -335,11 +338,6 @@ button:disabled {
   transition: all 0.2s;
   max-width: 100%;
   word-break: break-word;
-}
-.toon-dialog-poke {
-  color: var(--accent);
-  border-color: var(--accent);
-  font-weight: 600;
 }
 .toon-poke-counter {
   font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;

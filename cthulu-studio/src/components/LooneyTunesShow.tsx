@@ -4,7 +4,7 @@ import type { Scope } from "animejs";
 
 /* ------------------------------------------------------------------ */
 /*  Road Runner ASCII Art                                              */
-/*  Adapted from classic ASCII art — fits sidebar at font-size: 5px   */
+/*  Adapted from classic ASCII art — fits sidebar at font-size: 3.8px */
 /* ------------------------------------------------------------------ */
 
 const ROAD_RUNNER_IDLE = `\
@@ -97,25 +97,6 @@ const ROAD_RUNNER_RUN = `\
               <(_______.._______)>`;
 
 /* ------------------------------------------------------------------ */
-/*  "Meep Meep" sound via MP3 file                                     */
-/* ------------------------------------------------------------------ */
-
-let meepAudio: HTMLAudioElement | null = null;
-
-function playMeepMeep() {
-  try {
-    if (!meepAudio) {
-      meepAudio = new Audio("/meep-meep.mp3");
-      meepAudio.volume = 0.7;
-    }
-    meepAudio.currentTime = 0;
-    meepAudio.play().catch(() => {});
-  } catch {
-    // Audio not available
-  }
-}
-
-/* ------------------------------------------------------------------ */
 /*  Main Component                                                     */
 /* ------------------------------------------------------------------ */
 
@@ -123,12 +104,29 @@ export default function LooneyTunesShow() {
   const containerRef = useRef<HTMLDivElement>(null);
   const artRef = useRef<HTMLPreElement>(null);
   const scopeRef = useRef<Scope | null>(null);
+  const timelineRef = useRef<ReturnType<typeof createTimeline> | null>(null);
+  const meepAudioRef = useRef<HTMLAudioElement | null>(null);
   const [isRunning, setIsRunning] = useState(false);
   const [pokeCount, setPokeCount] = useState(0);
+  const [collapsed, setCollapsed] = useState(false);
+
+  // Play meep meep MP3 — audio scoped to component via ref
+  const playMeepMeep = useCallback(() => {
+    try {
+      if (!meepAudioRef.current) {
+        meepAudioRef.current = new Audio("/meep-meep.mp3");
+        meepAudioRef.current.volume = 0.7;
+      }
+      meepAudioRef.current.currentTime = 0;
+      meepAudioRef.current.play().catch(() => {});
+    } catch {
+      // Audio not available
+    }
+  }, []);
 
   // Idle animation — springy floating bob
   useEffect(() => {
-    if (!artRef.current || isRunning) return;
+    if (!artRef.current || isRunning || collapsed) return;
 
     if (scopeRef.current) {
       scopeRef.current.revert();
@@ -153,7 +151,7 @@ export default function LooneyTunesShow() {
         scopeRef.current = null;
       }
     };
-  }, [isRunning]);
+  }, [isRunning, collapsed]);
 
   // Handle click — meep meep + smooth run away + spring pop back
   const handleClick = useCallback(() => {
@@ -177,9 +175,12 @@ export default function LooneyTunesShow() {
       onComplete: () => {
         el.style.transform = "";
         el.style.opacity = "1";
+        timelineRef.current = null;
         setIsRunning(false);
       },
     });
+
+    timelineRef.current = tl;
 
     // 1. Squish anticipation (crouching before takeoff)
     tl.add(el, {
@@ -231,11 +232,15 @@ export default function LooneyTunesShow() {
       },
       3000,
     );
-  }, [isRunning]);
+  }, [isRunning, playMeepMeep]);
 
-  // Cleanup on unmount
+  // Cleanup on unmount — cancel running timeline + revert scope
   useEffect(() => {
     return () => {
+      if (timelineRef.current) {
+        timelineRef.current.pause();
+        timelineRef.current = null;
+      }
       if (scopeRef.current) {
         scopeRef.current.revert();
         scopeRef.current = null;
@@ -251,17 +256,27 @@ export default function LooneyTunesShow() {
       className="sidebar-toon-dancer"
       title="Click for MEEP MEEP!"
     >
-      <div className="toon-ascii-container" onClick={handleClick}>
-        <pre ref={artRef} className="toon-ascii toon-ascii-roadrunner">
-          {asciiArt}
-        </pre>
-      </div>
-      <div className="toon-char-name">Road Runner</div>
-      <div className="toon-dialog">
-        {isRunning ? "MEEP MEEP! *zooooom*" : "Click me... if you can!"}
-      </div>
-      {pokeCount > 0 && (
-        <div className="toon-poke-counter">Meeps: {pokeCount}</div>
+      <button
+        className="toon-collapse-btn"
+        onClick={() => setCollapsed((c) => !c)}
+        title={collapsed ? "Show mascot" : "Hide mascot"}
+      >
+        {collapsed ? "▶ Road Runner" : "▼ Road Runner"}
+      </button>
+      {!collapsed && (
+        <>
+          <div className="toon-ascii-container" onClick={handleClick}>
+            <pre ref={artRef} className="toon-ascii toon-ascii-roadrunner">
+              {asciiArt}
+            </pre>
+          </div>
+          <div className="toon-dialog">
+            {isRunning ? "MEEP MEEP! *zooooom*" : "Click me... if you can!"}
+          </div>
+          {pokeCount > 0 && (
+            <div className="toon-poke-counter">Meeps: {pokeCount}</div>
+          )}
+        </>
       )}
     </div>
   );
