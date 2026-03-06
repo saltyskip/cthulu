@@ -413,6 +413,8 @@ export default function App() {
               sessionId={sessionId}
               pendingPermissions={globalPermissions.permissionsForSession(agentId, sessionId)}
               onPermissionResponse={globalPermissions.respondToPermission}
+              hookDebugEvents={globalPermissions.hookDebugEvents}
+              onClearHookDebug={globalPermissions.clearHookDebugEvents}
               onDeleted={() => {
                 setVisitedAgents((prev) => { const next = new Map(prev); next.delete(agentId); return next; });
                 setSelectedAgentId(null);

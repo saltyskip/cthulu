@@ -1,7 +1,11 @@
 import { useState, useRef, useCallback } from "react";
 import AgentChatView, { useAgentChat } from "./AgentChatView";
 import FileViewer from "./FileViewer";
+import DebugPanel from "./DebugPanel";
 import type { PendingPermission } from "../hooks/useGlobalPermissions";
+import type { DebugEvent } from "./chat/useAgentChat";
+
+export type ReferenceTab = "files" | "debug";
 
 interface AgentDetailViewProps {
   agentId: string;
@@ -9,6 +13,8 @@ interface AgentDetailViewProps {
   sessionId: string;
   pendingPermissions: PendingPermission[];
   onPermissionResponse: (requestId: string, decision: "allow" | "deny") => void;
+  hookDebugEvents: DebugEvent[];
+  onClearHookDebug: () => void;
   onDeleted: () => void;
 }
 
@@ -21,12 +27,19 @@ export default function AgentDetailView({
   sessionId,
   pendingPermissions,
   onPermissionResponse,
+  hookDebugEvents,
+  onClearHookDebug,
   onDeleted: _onDeleted,
 }: AgentDetailViewProps) {
   const chat = useAgentChat(agentId, sessionId);
   const [chatFlex, setChatFlex] = useState(1);
   const [filesFlex, setFilesFlex] = useState(1);
+  const [referenceTab, setReferenceTab] = useState<ReferenceTab>("files");
   const containerRef = useRef<HTMLDivElement>(null);
+
+  const handleToggleDebug = useCallback(() => {
+    setReferenceTab((prev) => (prev === "debug" ? "files" : "debug"));
+  }, []);
 
   const handleDividerMouseDown = useCallback(
     (e: React.MouseEvent) => {
@@ -67,11 +80,36 @@ export default function AgentDetailView({
           chat={chat}
           pendingPermissions={pendingPermissions}
           onPermissionResponse={onPermissionResponse}
+          onToggleDebug={handleToggleDebug}
+          debugActive={referenceTab === "debug"}
         />
       </div>
       <div className="agent-detail-divider" onMouseDown={handleDividerMouseDown} />
       <div className="agent-detail-files" style={{ flex: filesFlex }}>
-        <FileViewer agentId={agentId} sessionId={sessionId} changedFiles={chat.changedFiles} />
+        <div className="ref-tabs">
+          <button
+            className={`ref-tab ${referenceTab === "files" ? "ref-tab-active" : ""}`}
+            onClick={() => setReferenceTab("files")}
+          >
+            Files
+          </button>
+          <button
+            className={`ref-tab ${referenceTab === "debug" ? "ref-tab-active" : ""}`}
+            onClick={() => setReferenceTab("debug")}
+          >
+            Debug
+          </button>
+        </div>
+        {referenceTab === "files" ? (
+          <FileViewer agentId={agentId} sessionId={sessionId} changedFiles={chat.changedFiles} />
+        ) : (
+          <DebugPanel
+            chatEvents={chat.debugEvents}
+            hookEvents={hookDebugEvents}
+            onClearChat={chat.clearDebugEvents}
+            onClearHook={onClearHookDebug}
+          />
+        )}
       </div>
     </div>
   );

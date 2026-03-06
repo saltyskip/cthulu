@@ -1,6 +1,9 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import type { DebugEvent } from "../components/chat/useAgentChat";
 
 const API = "http://localhost:8081/api";
+
+const MAX_HOOK_DEBUG_EVENTS = 200;
 
 export interface PendingPermission {
   request_id: string;
@@ -14,6 +17,8 @@ export interface GlobalPermissionState {
   pendingPermissions: PendingPermission[];
   respondToPermission: (requestId: string, decision: "allow" | "deny") => void;
   permissionsForSession: (agentId: string, sessionId: string) => PendingPermission[];
+  hookDebugEvents: DebugEvent[];
+  clearHookDebugEvents: () => void;
 }
 
 async function fetchPending(): Promise<PendingPermission[]> {
@@ -29,7 +34,22 @@ async function fetchPending(): Promise<PendingPermission[]> {
 
 export function useGlobalPermissions(): GlobalPermissionState {
   const [permissions, setPermissions] = useState<PendingPermission[]>([]);
+  const [hookDebugEvents, setHookDebugEvents] = useState<DebugEvent[]>([]);
+  const hookDebugRef = useRef<DebugEvent[]>([]);
   const retryRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const pushHookDebug = useCallback((type: string, data: string) => {
+    const entry: DebugEvent = { ts: Date.now(), type, data };
+    const buf = hookDebugRef.current;
+    buf.push(entry);
+    if (buf.length > MAX_HOOK_DEBUG_EVENTS) buf.shift();
+    setHookDebugEvents([...buf]);
+  }, []);
+
+  const clearHookDebugEvents = useCallback(() => {
+    hookDebugRef.current = [];
+    setHookDebugEvents([]);
+  }, []);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -43,6 +63,8 @@ export function useGlobalPermissions(): GlobalPermissionState {
           if (!res.ok || !res.body) {
             throw new Error(`Hook stream HTTP ${res.status}`);
           }
+
+          pushHookDebug("hook_connected", "{}");
 
           // On connect, fetch any pending requests we may have missed
           const pending = await fetchPending();
@@ -67,6 +89,8 @@ export function useGlobalPermissions(): GlobalPermissionState {
               const raw = line.slice(6).trim();
               if (!raw || raw === "{}") continue;
 
+              pushHookDebug("hook", raw);
+
               try {
                 const msg = JSON.parse(raw);
                 if (msg.type === "permission_request" && msg.data) {
@@ -87,6 +111,7 @@ export function useGlobalPermissions(): GlobalPermissionState {
         })
         .catch((err) => {
           if (controller.signal.aborted) return;
+          pushHookDebug("hook_error", String(err));
           console.warn("Hook stream error, reconnecting in 3s:", err);
         })
         .finally(() => {
@@ -102,7 +127,7 @@ export function useGlobalPermissions(): GlobalPermissionState {
       controller.abort();
       if (retryRef.current) clearTimeout(retryRef.current);
     };
-  }, []);
+  }, [pushHookDebug]);
 
   const respondToPermission = useCallback(
     async (requestId: string, decision: "allow" | "deny") => {
@@ -131,5 +156,11 @@ export function useGlobalPermissions(): GlobalPermissionState {
     [permissions]
   );
 
-  return { pendingPermissions: permissions, respondToPermission, permissionsForSession };
+  return {
+    pendingPermissions: permissions,
+    respondToPermission,
+    permissionsForSession,
+    hookDebugEvents,
+    clearHookDebugEvents,
+  };
 }

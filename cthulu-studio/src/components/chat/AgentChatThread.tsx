@@ -15,37 +15,8 @@ import { FilePreviewContext } from "./FilePreviewContext";
 import type { MultiRepoSnapshot } from "./FilePreviewContext";
 import { extractLatestTodos } from "./chatUtils";
 import StickyTodoPanel from "./StickyTodoPanel";
-import type { ImageAttachment, DebugEvent } from "./useAgentChat";
+import type { ImageAttachment } from "./useAgentChat";
 import type { PendingPermission } from "../../hooks/useGlobalPermissions";
-
-function prettyJson(raw: string): string {
-  try {
-    return JSON.stringify(JSON.parse(raw), null, 2);
-  } catch {
-    return raw;
-  }
-}
-
-function DebugEventRow({ ev }: { ev: DebugEvent }) {
-  const [expanded, setExpanded] = useState(false);
-  return (
-    <div className={`fr-debug-event ${ev.error ? "fr-debug-event-error" : ""}`}>
-      <div className="fr-debug-event-row" onClick={() => setExpanded((v) => !v)}>
-        <span className="fr-debug-expand">{expanded ? "▾" : "▸"}</span>
-        <span className="fr-debug-ts">{new Date(ev.ts).toLocaleTimeString()}</span>
-        <span className={`fr-debug-badge fr-debug-badge-${ev.type}`}>{ev.type}</span>
-        {!expanded && (
-          <span className="fr-debug-preview">
-            {ev.data.length > 80 ? ev.data.slice(0, 80) + "…" : ev.data}
-          </span>
-        )}
-      </div>
-      {expanded && (
-        <pre className="fr-debug-json">{prettyJson(ev.data)}</pre>
-      )}
-    </div>
-  );
-}
 
 /* ── Slash command registry ──────────────────────────────────────── */
 
@@ -120,10 +91,8 @@ interface AgentChatThreadProps {
   onAddFiles: (files: FileList | File[]) => void;
   onRemoveAttachment: (id: string) => void;
   fileInputRef: React.RefObject<HTMLInputElement | null>;
-  debugMode: boolean;
-  debugEvents: DebugEvent[];
-  onToggleDebug: () => void;
-  onClearDebug: () => void;
+  onToggleDebug?: () => void;
+  debugActive: boolean;
   gitSnapshot: MultiRepoSnapshot | null;
   pendingPermissions: PendingPermission[];
   onPermissionResponse: (requestId: string, decision: "allow" | "deny") => void;
@@ -142,10 +111,8 @@ export default function AgentChatThread({
   onAddFiles,
   onRemoveAttachment,
   fileInputRef,
-  debugMode,
-  debugEvents,
   onToggleDebug,
-  onClearDebug,
+  debugActive,
   gitSnapshot,
   pendingPermissions,
   onPermissionResponse,
@@ -309,24 +276,17 @@ export default function AgentChatThread({
     // File preview now handled externally
   }, []);
 
-  // Keyboard shortcut: Cmd/Ctrl+Shift+D to toggle debug mode
+  // Keyboard shortcut: Cmd/Ctrl+Shift+D to toggle debug panel
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === "D") {
         e.preventDefault();
-        onToggleDebug();
+        onToggleDebug?.();
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, [onToggleDebug]);
-
-  const debugScrollRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (debugMode && debugScrollRef.current) {
-      debugScrollRef.current.scrollTop = debugScrollRef.current.scrollHeight;
-    }
-  }, [debugMode, debugEvents]);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -438,9 +398,9 @@ export default function AgentChatThread({
             )}
             <ComposerPrimitive.Root>
               <button
-                className={`ac-btn ac-btn-debug ${debugMode ? "ac-btn-debug-active" : ""}`}
-                onClick={onToggleDebug}
-                title="Toggle debug mode (Cmd+Shift+D)"
+                className={`ac-btn ac-btn-debug ${debugActive ? "ac-btn-debug-active" : ""}`}
+                onClick={() => onToggleDebug?.()}
+                title="Toggle debug panel (Cmd+Shift+D)"
                 type="button"
               >
                 🐛
