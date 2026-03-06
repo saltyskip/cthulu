@@ -4,6 +4,18 @@ This guide is the entry point for AI assistants working in this monorepo. It pro
 
 ---
 
+## Mandatory Reading Order
+
+1. **`.claude/rules/RULES.md`** — Universal agent behavioral rules (plan-first, verify, efficiency)
+2. **`.claude/rules/SECURITY.md`** — Security requirements (shell injection, default-deny, credentials)
+3. **`.claude/rules/CODE_QUALITY.md`** — Code quality standards (state management, async, errors)
+4. **This file (`CLAUDE.md`)** — Project-specific context, architecture, and workflows
+5. **Relevant `.claude/skills/*.skill.md`** for the task domain
+
+> **Generic rules in `.claude/rules/` apply to ALL tasks as baseline defaults. Project-specific rules in this file take precedence when they conflict**, since they encode domain-specific constraints (e.g., React Flow node merging, Axum param syntax) that generic rules cannot anticipate.
+
+---
+
 ## Quick Reference
 
 ### Tech Stack
@@ -35,8 +47,8 @@ This guide is the entry point for AI assistants working in this monorepo. It pro
 9. **Atomic YAML persistence**: Always write sessions via temp file + rename (`path.with_extension("yaml.tmp")` then `std::fs::rename`).
 10. **Claude CLI stream-json**: Correct message format is `{"type":"user","message":{"role":"user","content":"..."}}`. Must use `--verbose` with `--output-format stream-json`.
 11. **Manual Run always works**: The run button must work even when a flow is disabled (manual override policy).
-12. **Plan-First Workflow**: For non-trivial tasks, explore first and plan before writing code. See [docs/AI-WORKFLOW.md](docs/AI-WORKFLOW.md).
-13. **Verify Before Done**: Always run `cargo check` (Rust) or `npm run build` (Studio) before marking a task complete. See [docs/AI-WORKFLOW.md](docs/AI-WORKFLOW.md).
+12. **Plan-First Workflow**: For non-trivial tasks, explore first and plan before writing code. See [`.claude/rules/RULES.md`](.claude/rules/RULES.md) and [docs/AI-WORKFLOW.md](docs/AI-WORKFLOW.md).
+13. **Verify Before Done**: Always run `cargo check` (Rust) or `npm run build` (Studio) before marking a task complete. See [`.claude/rules/RULES.md`](.claude/rules/RULES.md).
 
 ### Essential Commands
 
@@ -153,8 +165,9 @@ cthulu/
 │   ├── AGENTS.md                   # Site-specific AI docs
 │   └── CLAUDE.md                   # Symlink -> AGENTS.md
 ├── .claude/
+│   ├── rules/                      # Generic agent rules (RULES.md, SECURITY.md, CODE_QUALITY.md)
 │   ├── skills/                     # Shared skills (Rust, React Flow, Nx, Claude CLI)
-│   └── LESSONS.md                  # Lessons learned (self-improvement)
+│   └── lessons.md                  # Lessons learned (self-improvement)
 ├── docs/
 │   ├── AI-WORKFLOW.md              # How agents should work
 │   └── TROUBLESHOOTING.md          # Common errors and fixes
@@ -186,13 +199,15 @@ Sessions (sessions.yaml, local state)
 
 | Area | Documentation |
 |------|---------------|
+| **Generic Rules** | [.claude/rules/](.claude/rules/) -- RULES.md, SECURITY.md, CODE_QUALITY.md |
 | Studio (React Flow) | [cthulu-studio/AGENTS.md](cthulu-studio/AGENTS.md) |
 | Site (Next.js) | [cthulu-site/AGENTS.md](cthulu-site/AGENTS.md) |
-| AI Workflow | [docs/AI-WORKFLOW.md](docs/AI-WORKFLOW.md) -- plan-first, verification, self-improvement |
+| AI Workflow | [docs/AI-WORKFLOW.md](docs/AI-WORKFLOW.md) -- project-specific verification, VM sandbox, templates |
 | Troubleshooting | [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) -- common errors and fixes |
 | Agent Rules | [AGENT.md](AGENT.md) -- rules for executor agents running inside workflows |
 | Skills | [.claude/skills/](.claude/skills/) -- Rust/Axum, React Flow, Nx, Claude CLI |
-| Lessons | [.claude/LESSONS.md](.claude/LESSONS.md) -- recorded mistakes and insights |
+| Lessons | [.claude/lessons.md](.claude/lessons.md) -- recorded mistakes and insights |
+| Dead Ends | [NOPE.md](NOPE.md) -- approaches that don't work |
 
 ---
 

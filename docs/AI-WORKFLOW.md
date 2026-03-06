@@ -1,19 +1,17 @@
 # AI Workflow Guide
 
-How AI agents should work in this monorepo. The root [CLAUDE.md](../CLAUDE.md) covers **what the rules are**; this document covers **how to work**.
+How AI agents should work in this monorepo. The root [CLAUDE.md](../CLAUDE.md) covers **what the rules are**; this document covers **project-specific workflow details**.
 
----
+> **Universal rules** (planning, verification, efficiency, bug fixing) are in [`.claude/rules/RULES.md`](../.claude/rules/RULES.md). Read those first.
 
-## Plan Before You Code
+## Planning & Process
 
-For any non-trivial task (more than a few lines, multiple files, or unclear scope):
-
-1. **Explore first** -- read the files you'll change, understand existing patterns
-2. **Write a plan** with specific files, changes, and verification steps
-3. **Get approval** before implementing
-4. **Re-plan on failure** -- if your approach doesn't work, stop and re-plan instead of brute-forcing
-
-**Skip planning for**: typo fixes, single-line changes, tasks with very specific instructions.
+See [`.claude/rules/RULES.md`](../.claude/rules/RULES.md) for universal rules on:
+- Plan-first workflow (explore → plan → approve → execute → verify)
+- Self-improvement loop (fix → check siblings → record lesson)
+- Autonomous bug fixing (reproduce → root cause → fix → prove → check siblings)
+- Task tracking (create upfront → mark progress → one at a time)
+- Staff-engineer bar
 
 ---
 
@@ -25,27 +23,6 @@ Use subagents to parallelize work and protect context:
 - **One task per subagent** -- keep scopes narrow and focused
 - **Run independent agents in parallel** -- don't serialize what can be parallelized
 - **Don't duplicate work** -- if you delegate research to a subagent, don't also search yourself
-
----
-
-## Self-Improvement Loop
-
-After receiving a correction or discovering a mistake:
-
-1. Fix the immediate issue
-2. Check if the lesson applies elsewhere in the current task
-3. Record the lesson in `.claude/LESSONS.md` if it's likely to recur
-
-**Format for lessons**:
-
-```markdown
-## [Date] - Brief title
-- **Context**: What you were doing
-- **Mistake**: What went wrong
-- **Fix**: What the correct approach is
-```
-
-At the start of each session, review `.claude/LESSONS.md` for recent entries.
 
 ---
 
@@ -75,35 +52,8 @@ Never mark a task as complete without verifying your work:
 
 ### Staff-Engineer Bar
 
-Before submitting, ask yourself:
+See [`.claude/rules/RULES.md`](../.claude/rules/RULES.md) §3.
 
-- Would a staff engineer approve this without comments?
-- Is this the **simplest correct approach**?
-- Are there any edge cases I haven't handled?
-- Did I leave orphaned code, dead imports, or `// TODO` comments?
-
----
-
-## Autonomous Bug Fixing
-
-When fixing bugs:
-
-1. **Reproduce first** -- understand the exact failure before changing code
-2. **Find root cause** -- don't patch symptoms
-3. **Prove the fix works** -- run the relevant build/lint/test command
-4. **Check for siblings** -- does the same bug pattern exist elsewhere?
-5. **Zero hand-holding** -- the fix should be complete; no TODOs or "the user should also..."
-
----
-
-## Task Tracking
-
-For multi-step work:
-
-1. **Create tasks upfront** -- break the work into trackable units before starting
-2. **Mark progress** -- set tasks to `in_progress` when starting, `completed` when done
-3. **Capture discoveries** -- if you find additional work needed, create new tasks
-4. **One in-progress at a time** -- complete current task before starting the next
 
 ---
 
@@ -206,8 +156,9 @@ If Claude CLI inside a VM shows the login prompt even after token injection, the
 
 At the beginning of each session:
 
-1. Review `.claude/LESSONS.md` for recent lessons
-2. Read `CLAUDE.md` for project rules and architecture
-3. For non-trivial tasks, plan before coding
-4. Run `cargo check` to ensure the codebase compiles before making changes
-5. If working on sandbox: review `.claude/skills/sandbox-module.md` for architecture and file map
+1. Review `.claude/rules/` for universal rules (RULES.md, SECURITY.md, CODE_QUALITY.md)
+2. Review `.claude/lessons.md` for recent lessons
+3. Read `CLAUDE.md` for project rules and architecture
+4. For non-trivial tasks, plan before coding
+5. Run `cargo check` to ensure the codebase compiles before making changes
+6. If working on sandbox: review `.claude/skills/sandbox-module.md` for architecture and file map

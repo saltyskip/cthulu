@@ -6,6 +6,9 @@ planning research (1961-2026) to Cthulu's flow runner and executor architecture.
 This is not academic — every recommendation maps to a specific file, struct, or
 runtime behavior in the codebase.
 
+> **Prerequisite**: Read the universal agent rules in [`.claude/rules/`](../.claude/rules/) first.
+> This document maps those generic concepts to cthulu-specific implementation.
+
 ---
 
 > **Note on code references**: This document references specific components in the Cthulu codebase. For maintainability, it uses structural location markers (like `// ── 1. SOURCES`) rather than hardcoded line numbers where possible, as line numbers frequently go stale.
@@ -24,7 +27,7 @@ tasks (Tree-of-Thought, PDDL).
 | 2 | Explicit Contracts | STRIPS pre/postconditions (1971) | Prompt template structure, `CLAUDE.md` rules |
 | 3 | Hierarchical Decomposition | HTN Planning (1994) + WBS (1962) | Flow DAG: Trigger -> Source -> Filter -> Executor -> Sink |
 | 4 | Verified Execution Loop | ReAct (2022) + OODA (1976) | `execute_inner()` 5-stage pipeline |
-| 5 | Bounded Retry with Reflection | Reflexion (2023) + CSP (1977) | `NOPE.md`, `LESSONS.md`, error handling per stage |
+| 5 | Bounded Retry with Reflection | Reflexion (2023) + CSP (1977) | `NOPE.md`, `.claude/lessons.md`, error handling per stage |
 
 ---
 
@@ -323,8 +326,8 @@ is a reasonable default but should eventually be configurable per-flow.
 
 Cthulu implements reflexion at the organizational level through two files:
 
-**`LESSONS.md`** — Records what went wrong and why. Each lesson is tagged with a
-date and captures the root cause. Development agents read this on session start
+**`LESSONS.md`** (`.claude/lessons.md`) — Records what went wrong and why. Each lesson captures
+the root cause. Development agents read this on session start
 (per `AI-WORKFLOW.md`). Example:
 
 ```markdown
@@ -371,7 +374,7 @@ failure information.
 | Pre/postconditions | Stage validation | [`src/flows/runner.rs`](../src/flows/runner.rs) (`execute_inner()`) |
 | HTN decomposition | DAG structure | Flow JSON (nodes + edges) |
 | OODA/ReAct loop | 5-stage pipeline | [`src/flows/runner.rs`](../src/flows/runner.rs) (`execute_inner()`) |
-| Reflexion | Failure recording | `LESSONS.md`, [`NOPE.md`](../NOPE.md) |
+| Reflexion | Failure recording | `.claude/lessons.md`, [`NOPE.md`](../NOPE.md) |
 | Bounded retry | Executor timeout | [`src/tasks/executors/claude_code.rs`](../src/tasks/executors/claude_code.rs) (15-min timeout) |
 | Scope isolation | Per-node context | `.skills/` per executor, `live_processes` pool |
 | Definition of Done | Build verification | [`CLAUDE.md`](../CLAUDE.md) rules, prompt template verification steps |
@@ -398,7 +401,7 @@ failure information.
    pseudocode primitives. Over-decomposition wastes context window.
    Under-decomposition causes hallucination.
 
-4. **Record failures** in `LESSONS.md` and `NOPE.md`. Organizational reflexion
+4. **Record failures** in `.claude/lessons.md` and `NOPE.md`. Organizational reflexion
    prevents every future session from rediscovering the same dead ends.
 
 5. **Let the pipeline handle gathering** (sources + filters). The executor
