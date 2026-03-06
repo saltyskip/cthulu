@@ -272,6 +272,24 @@ button:disabled {
   background: var(--bg-tertiary);
 }
 
+.sidebar-toon-dancer {
+  padding: 8px 8px 4px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+  text-align: center;
+  overflow: hidden;
+}
+.toon-dialog {
+  font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
+  font-size: 9px;
+  color: var(--text-secondary);
+  margin-top: 4px;
+  padding: 2px 6px;
+  border: 1px dashed var(--border);
+  border-radius: 4px;
+  display: inline-block;
+}
+
 .sidebar-collapsed {
   width: 36px;
   min-width: 36px;

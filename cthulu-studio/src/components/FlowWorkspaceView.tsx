@@ -6,7 +6,7 @@ import { X, EyeOff, Plus } from "lucide-react";
 import Canvas, { type CanvasHandle } from "./Canvas";
 import FlowEditor, { type FlowEditorHandle } from "./FlowEditor";
 import RunLog from "./RunLog";
-import AgentChatView from "./AgentChatView";
+import AgentChatView, { useAgentChat } from "./AgentChatView";
 import NodeConfigPanel from "./NodeConfigPanel";
 import ErrorBoundary from "./ErrorBoundary";
 
@@ -100,6 +100,7 @@ export default function FlowWorkspaceView({
   const [bottomTab, setBottomTab] = useState<BottomTab>("log");
 
   const [studioSessionId, setStudioSessionId] = useState<string | null>(null);
+  const studioChat = useAgentChat(STUDIO_ASSISTANT_ID, studioSessionId ?? "");
 
   // Tab visibility: which tabs are shown (VS Code-style toggle)
   const [visibleTabs, setVisibleTabs] = useState<Set<BottomTab>>(
@@ -434,8 +435,7 @@ export default function FlowWorkspaceView({
               {bottomTab === "terminal" && studioSessionId && (
                 <AgentChatView
                   key={`workspace-chat:${STUDIO_ASSISTANT_ID}`}
-                  agentId={STUDIO_ASSISTANT_ID}
-                  sessionId={studioSessionId}
+                  chat={studioChat}
                 />
               )}
             </div>

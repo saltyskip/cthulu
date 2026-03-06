@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
+import anime from "animejs";
 import { STUDIO_ASSISTANT_ID, type FlowSummary, type Flow, type NodeTypeSchema, type AgentSummary, type SavedPrompt, type ActiveView } from "../types/flow";
 import { listAgents, createAgent, deleteAgent, listPrompts, savePrompt, deletePrompt as deletePromptApi, listAgentSessions, newAgentSession } from "../api/client";
 import type { InteractSessionInfo } from "../api/client";
@@ -29,6 +30,251 @@ interface SidebarProps {
   nodeTypes: NodeTypeSchema[];
   onGrab: (nodeType: NodeTypeSchema) => void;
   onCollapse: () => void;
+}
+
+const BUGS_LINES = [
+  "Ehhh... What's up, doc?",
+  "Ain't I a stinker?",
+  "Of course you realize...",
+  "...this means war!",
+  "Watch me paste 'em!",
+  "I knew I shoulda taken",
+  "that left turn at",
+  "Albuquerque...",
+  "What a maroon!",
+  "Th-th-th-that's all folks!",
+];
+
+function BugsBunnyDancer() {
+  const svgRef = useRef<SVGSVGElement>(null);
+  const [line, setLine] = useState(0);
+
+  useEffect(() => {
+    const talk = setInterval(() => setLine((l) => (l + 1) % BUGS_LINES.length), 2200);
+    return () => clearInterval(talk);
+  }, []);
+
+  useEffect(() => {
+    if (!svgRef.current) return;
+
+    // Whole-body bounce (gentle hop)
+    const bounce = anime({
+      targets: svgRef.current.querySelector("#bugs-body"),
+      translateY: [-3, 3],
+      duration: 500,
+      easing: "easeInOutSine",
+      direction: "alternate",
+      loop: true,
+    });
+
+    // Left ear flop
+    const earL = anime({
+      targets: svgRef.current.querySelector("#bugs-ear-l"),
+      rotate: [-10, 10],
+      duration: 700,
+      easing: "easeInOutQuad",
+      direction: "alternate",
+      loop: true,
+    });
+
+    // Right ear flop (offset timing)
+    const earR = anime({
+      targets: svgRef.current.querySelector("#bugs-ear-r"),
+      rotate: [8, -8],
+      duration: 800,
+      easing: "easeInOutQuad",
+      direction: "alternate",
+      loop: true,
+    });
+
+    // Right arm wave (holding carrot)
+    const arm = anime({
+      targets: svgRef.current.querySelector("#bugs-arm-r"),
+      rotate: [0, -20, 0, -20, 0],
+      duration: 1800,
+      easing: "easeInOutSine",
+      loop: true,
+    });
+
+    // Carrot chomp pulse
+    const carrot = anime({
+      targets: svgRef.current.querySelector("#bugs-carrot"),
+      translateY: [0, -2, 0],
+      scale: [1, 0.92, 1],
+      duration: 600,
+      easing: "easeInOutSine",
+      loop: true,
+    });
+
+    // Mouth open/close (chomp)
+    const mouth = anime({
+      targets: svgRef.current.querySelector("#bugs-mouth-open"),
+      scaleY: [1, 0.3, 1],
+      duration: 600,
+      easing: "easeInOutSine",
+      loop: true,
+    });
+
+    // Left foot tap
+    const foot = anime({
+      targets: svgRef.current.querySelector("#bugs-foot-l"),
+      rotate: [-5, 5],
+      duration: 400,
+      easing: "easeInOutSine",
+      direction: "alternate",
+      loop: true,
+    });
+
+    return () => {
+      [bounce, earL, earR, arm, carrot, mouth, foot].forEach((a) => a.pause());
+    };
+  }, []);
+
+  return (
+    <div className="sidebar-toon-dancer">
+      <svg
+        ref={svgRef}
+        viewBox="0 0 120 150"
+        width="96"
+        height="120"
+        xmlns="http://www.w3.org/2000/svg"
+        style={{ display: "block", margin: "0 auto" }}
+      >
+        <defs>
+          {/* Gray fur */}
+          <linearGradient id="fur" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#a0a4aa" />
+            <stop offset="100%" stopColor="#7a7e85" />
+          </linearGradient>
+          {/* Inner ear warm peach/orange */}
+          <linearGradient id="inner-ear" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#f5c78a" />
+            <stop offset="100%" stopColor="#e8a44e" />
+          </linearGradient>
+        </defs>
+
+        <g id="bugs-body">
+          {/* === EARS === */}
+          {/* Left ear */}
+          <g id="bugs-ear-l" style={{ transformOrigin: "44px 30px" }}>
+            <ellipse cx="44" cy="14" rx="7" ry="22"
+              fill="url(#fur)" stroke="#222" strokeWidth="1.2" />
+            <ellipse cx="44" cy="14" rx="3.5" ry="17"
+              fill="url(#inner-ear)" />
+          </g>
+          {/* Right ear */}
+          <g id="bugs-ear-r" style={{ transformOrigin: "68px 30px" }}>
+            <ellipse cx="68" cy="12" rx="7.5" ry="24"
+              fill="url(#fur)" stroke="#222" strokeWidth="1.2" />
+            <ellipse cx="68" cy="12" rx="3.8" ry="19"
+              fill="url(#inner-ear)" />
+          </g>
+
+          {/* === HEAD === */}
+          {/* Head base (gray) */}
+          <ellipse cx="56" cy="48" rx="22" ry="19"
+            fill="url(#fur)" stroke="#222" strokeWidth="1.2" />
+          {/* White muzzle/cheek area */}
+          <ellipse cx="56" cy="54" rx="16" ry="13"
+            fill="#fff" stroke="none" />
+          {/* Cheek puffs */}
+          <ellipse cx="42" cy="52" rx="8" ry="7" fill="#fff" />
+          <ellipse cx="70" cy="52" rx="8" ry="7" fill="#fff" />
+
+          {/* Eyes — classic Bugs half-lidded look */}
+          <ellipse cx="48" cy="44" rx="4" ry="5" fill="#fff" stroke="#222" strokeWidth="0.8" />
+          <ellipse cx="64" cy="44" rx="4" ry="5" fill="#fff" stroke="#222" strokeWidth="0.8" />
+          {/* Pupils (looking slightly to side, classic smug) */}
+          <circle cx="49.5" cy="44.5" r="2" fill="#111" />
+          <circle cx="65.5" cy="44.5" r="2" fill="#111" />
+          {/* Eye highlights */}
+          <circle cx="50.5" cy="43.5" r="0.7" fill="#fff" />
+          <circle cx="66.5" cy="43.5" r="0.7" fill="#fff" />
+          {/* Eyelids (half-lidded) */}
+          <path d="M44 41 Q48 39 52 41" fill="url(#fur)" stroke="#222" strokeWidth="0.6" />
+          <path d="M60 41 Q64 39 68 41" fill="url(#fur)" stroke="#222" strokeWidth="0.6" />
+
+          {/* Nose — pink oval */}
+          <ellipse cx="56" cy="50" rx="3" ry="2.2" fill="#e88" stroke="#222" strokeWidth="0.6" />
+
+          {/* Whiskers */}
+          <line x1="40" y1="50" x2="28" y2="47" stroke="#222" strokeWidth="0.5" />
+          <line x1="40" y1="52" x2="27" y2="52" stroke="#222" strokeWidth="0.5" />
+          <line x1="40" y1="54" x2="28" y2="57" stroke="#222" strokeWidth="0.5" />
+          <line x1="72" y1="50" x2="84" y2="47" stroke="#222" strokeWidth="0.5" />
+          <line x1="72" y1="52" x2="85" y2="52" stroke="#222" strokeWidth="0.5" />
+          <line x1="72" y1="54" x2="84" y2="57" stroke="#222" strokeWidth="0.5" />
+
+          {/* Mouth — open grin */}
+          <g id="bugs-mouth-open" style={{ transformOrigin: "56px 58px" }}>
+            <path d="M47 56 Q52 55 56 56 Q60 55 65 56 Q62 64 56 65 Q50 64 47 56Z"
+              fill="#c0392b" stroke="#222" strokeWidth="0.8" />
+            {/* Tongue */}
+            <ellipse cx="56" cy="62" rx="4" ry="2.5" fill="#e57373" />
+          </g>
+          {/* Buck teeth */}
+          <rect x="52" y="55.5" width="3.5" height="4.5" rx="1" fill="#fff" stroke="#222" strokeWidth="0.5" />
+          <rect x="56" y="55.5" width="3.5" height="4.5" rx="1" fill="#fff" stroke="#222" strokeWidth="0.5" />
+
+          {/* === BODY === */}
+          {/* Torso (gray) */}
+          <ellipse cx="56" cy="82" rx="18" ry="20"
+            fill="url(#fur)" stroke="#222" strokeWidth="1.2" />
+          {/* White belly */}
+          <ellipse cx="56" cy="84" rx="12" ry="15"
+            fill="#fff" stroke="none" />
+
+          {/* === LEFT ARM (resting on hip) === */}
+          <path d="M38 72 Q30 78 28 86 Q27 88 30 88"
+            fill="none" stroke="url(#fur)" strokeWidth="5" strokeLinecap="round" />
+          {/* White glove */}
+          <circle cx="29" cy="87" r="4" fill="#fff" stroke="#222" strokeWidth="0.8" />
+
+          {/* === RIGHT ARM (holding carrot) === */}
+          <g id="bugs-arm-r" style={{ transformOrigin: "74px 72px" }}>
+            <path d="M74 72 Q82 64 84 58"
+              fill="none" stroke="url(#fur)" strokeWidth="5" strokeLinecap="round" />
+            {/* White glove */}
+            <circle cx="84" cy="57" r="4" fill="#fff" stroke="#222" strokeWidth="0.8" />
+            {/* Carrot */}
+            <g id="bugs-carrot" style={{ transformOrigin: "88px 48px" }}>
+              <polygon points="82,54 92,38 86,54"
+                fill="#e67e22" stroke="#222" strokeWidth="0.6" />
+              {/* Carrot top leaves */}
+              <path d="M91 38 Q89 32 86 30" fill="none" stroke="#27ae60" strokeWidth="1.5" strokeLinecap="round" />
+              <path d="M92 38 Q93 33 91 29" fill="none" stroke="#27ae60" strokeWidth="1.5" strokeLinecap="round" />
+              <path d="M92 39 Q96 34 95 30" fill="none" stroke="#2ecc71" strokeWidth="1" strokeLinecap="round" />
+            </g>
+          </g>
+
+          {/* === LEGS === */}
+          {/* Left leg */}
+          <path d="M44 98 Q40 108 38 116"
+            fill="none" stroke="url(#fur)" strokeWidth="6" strokeLinecap="round" />
+          {/* Right leg */}
+          <path d="M68 98 Q72 108 74 116"
+            fill="none" stroke="url(#fur)" strokeWidth="6" strokeLinecap="round" />
+
+          {/* === FEET (big cartoon rabbit feet) === */}
+          <g id="bugs-foot-l" style={{ transformOrigin: "36px 120px" }}>
+            <ellipse cx="32" cy="120" rx="10" ry="4"
+              fill="url(#fur)" stroke="#222" strokeWidth="0.8" />
+            {/* Toe lines */}
+            <line x1="25" y1="119" x2="25" y2="121" stroke="#222" strokeWidth="0.4" />
+            <line x1="28" y1="118" x2="28" y2="122" stroke="#222" strokeWidth="0.4" />
+          </g>
+          <ellipse cx="80" cy="120" rx="10" ry="4"
+            fill="url(#fur)" stroke="#222" strokeWidth="0.8" />
+          <line x1="87" y1="119" x2="87" y2="121" stroke="#222" strokeWidth="0.4" />
+          <line x1="84" y1="118" x2="84" y2="122" stroke="#222" strokeWidth="0.4" />
+
+          {/* Tail (small white puff) */}
+          <circle cx="74" cy="96" r="4" fill="#fff" stroke="#ccc" strokeWidth="0.5" />
+        </g>
+      </svg>
+      <div className="toon-dialog">{BUGS_LINES[line]}</div>
+    </div>
+  );
 }
 
 const typeColors: Record<string, string> = {
@@ -196,6 +442,8 @@ export default function Sidebar({
           onClose={() => setShowGallery(false)}
         />
       )}
+
+      <BugsBunnyDancer />
 
       {/* Agents section (primary, expanded by default) */}
       <Collapsible defaultOpen className="sidebar-section">
