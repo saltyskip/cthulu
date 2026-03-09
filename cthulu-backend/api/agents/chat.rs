@@ -10,7 +10,6 @@ use std::convert::Infallible;
 use std::pin::Pin;
 use uuid::Uuid;
 
-use crate::agent_sdk::config::SessionConfig;
 use crate::api::AppState;
 use crate::api::FlowSessions;
 use crate::api::InteractSession;
@@ -18,7 +17,7 @@ use crate::api::LiveClaudeProcess;
 use crate::flows::{Edge, Flow, Node, NodeType};
 use tokio::sync::broadcast;
 
-/// Boxed SSE stream type — used when multiple code paths (SDK vs legacy) can
+/// Boxed SSE stream type — used when multiple code paths can
 /// produce different concrete stream types.
 type BoxSseStream = Pin<Box<dyn Stream<Item = Result<Event, Infallible>> + Send>>;
 
@@ -68,14 +67,6 @@ fn process_key(agent_id: &str, session_id: &str) -> String {
     format!("agent::{agent_id}::session::{session_id}")
 }
 
-/// Check if the Agent SDK integration is enabled via AGENT_SDK_ENABLED env var.
-/// When enabled, new chat sessions use `AgentSession` (SDK) instead of `LiveClaudeProcess`.
-fn agent_sdk_enabled() -> bool {
-    std::env::var("AGENT_SDK_ENABLED")
-        .map(|v| matches!(v.to_lowercase().as_str(), "1" | "true" | "yes"))
-        .unwrap_or(false)
-}
-
 /// Maximum number of interactive sessions per agent.
 const MAX_INTERACTIVE_SESSIONS: usize = 5;
 
@@ -95,7 +86,6 @@ pub(crate) async fn list_sessions(
     let sessions = state.interact_sessions.read().await;
     if let Some(flow_sessions) = sessions.get(&key) {
         let mut pool = state.live_processes.lock().await;
-        let sdk_pool = state.sdk_sessions.lock().await;
         let interactive_count = flow_sessions.sessions.iter()
             .filter(|s| s.kind == "interactive")
             .count();
@@ -105,11 +95,8 @@ pub(crate) async fn list_sessions(
             .iter()
             .map(|s| {
                 let proc_k = process_key(&id, &s.session_id);
-                // Check both legacy and SDK process pools
                 let process_alive = if let Some(proc) = pool.get_mut(&proc_k) {
                     !matches!(proc.child.try_wait(), Ok(Some(_)))
-                } else if let Some(sdk_session) = sdk_pool.get(&proc_k) {
-                    sdk_session.is_connected()
                 } else {
                     false
                 };
@@ -253,17 +240,6 @@ pub(crate) async fn delete_session(
         pool.remove(&proc_k);
     }
 
-    // Disconnect SDK session if present
-    {
-        let mut sdk_pool = state.sdk_sessions.lock().await;
-        let proc_k = process_key(&id, &session_id);
-        if let Some(mut session) = sdk_pool.remove(&proc_k) {
-            if let Err(e) = session.disconnect().await {
-                tracing::warn!(error = %e, "failed to disconnect SDK session on delete");
-            }
-        }
-    }
-
     let mut all_sessions = state.interact_sessions.write().await;
 
     let active_after = {
@@ -343,17 +319,6 @@ pub(crate) async fn stop_chat(
         pool.remove(&key);
     }
 
-    // Disconnect SDK session if present
-    {
-        let mut sdk_pool = state.sdk_sessions.lock().await;
-        let proc_key = process_key(&id, &sid);
-        if let Some(mut session) = sdk_pool.remove(&proc_key) {
-            if let Err(e) = session.disconnect().await {
-                tracing::warn!(error = %e, "failed to disconnect SDK session on stop");
-            }
-        }
-    }
-
     let mut all_sessions = state.interact_sessions.write().await;
     if let Some(flow_sessions) = all_sessions.get_mut(&key) {
         let sid = target_sid.unwrap_or_else(|| flow_sessions.active_session.clone());
@@ -385,11 +350,8 @@ pub(crate) async fn session_status(
 
     let proc_k = process_key(&id, &session_id);
     let mut pool = state.live_processes.lock().await;
-    let sdk_pool = state.sdk_sessions.lock().await;
     let process_alive = if let Some(proc) = pool.get_mut(&proc_k) {
         !matches!(proc.child.try_wait(), Ok(Some(_)))
-    } else if let Some(sdk_session) = sdk_pool.get(&proc_k) {
-        sdk_session.is_connected()
     } else {
         false
     };
@@ -440,17 +402,6 @@ pub(crate) async fn kill_session(
         pool.remove(&proc_k);
     }
 
-    // Disconnect SDK session if present
-    {
-        let mut sdk_pool = state.sdk_sessions.lock().await;
-        let proc_k = process_key(&id, &session_id);
-        if let Some(mut session) = sdk_pool.remove(&proc_k) {
-            if let Err(e) = session.disconnect().await {
-                tracing::warn!(error = %e, "failed to disconnect SDK session on kill");
-            }
-        }
-    }
-
     // Clear busy flag
     let mut all_sessions = state.interact_sessions.write().await;
     if let Some(flow_sessions) = all_sessions.get_mut(&key) {
@@ -490,293 +441,6 @@ pub(crate) struct ChatRequest {
 #[derive(Deserialize)]
 pub(crate) struct StopRequest {
     pub session_id: Option<String>,
-}
-
-fn build_sdk_config(
-    agent: &crate::agents::Agent,
-    session_id: &str,
-    working_dir: &str,
-    is_new: bool,
-    system_prompt: Option<&str>,
-) -> SessionConfig {
-    let permission_mode = if agent.permissions.is_empty() {
-        Some("bypassPermissions".to_string())
-    } else {
-        Some("default".to_string())
-    };
-
-    SessionConfig {
-        cwd: Some(working_dir.to_string()),
-        system_prompt: system_prompt.map(String::from),
-        allowed_tools: agent.permissions.clone(),
-        permission_mode,
-        session_id: if is_new { Some(session_id.to_string()) } else { None },
-        resume: if !is_new { Some(session_id.to_string()) } else { None },
-        include_partial_messages: true,
-    }
-}
-
-/// SDK-based chat stream. Used when AGENT_SDK_ENABLED=1.
-fn chat_sdk_stream(
-    state: AppState,
-    id: String,
-    prompt: String,
-    target_session_id: String,
-    is_new: bool,
-    working_dir: String,
-    system_prompt: Option<String>,
-    agent: crate::agents::Agent,
-) -> impl Stream<Item = Result<Event, Infallible>> {
-    async_stream::stream! {
-        let key_for_stream = agent_key(&id);
-        let proc_key = process_key(&id, &target_session_id);
-        let sessions_ref = state.interact_sessions.clone();
-        let sessions_path = state.sessions_path.clone();
-        let sdk_sessions = state.sdk_sessions.clone();
-        let session_streams = state.session_streams.clone();
-        let chat_event_buffers = state.chat_event_buffers.clone();
-        let data_dir = state.data_dir.clone();
-
-        // Create or get the SDK session
-        let needs_create = {
-            let pool = sdk_sessions.lock().await;
-            !pool.contains_key(&proc_key) || !pool.get(&proc_key).map_or(false, |s| s.is_connected())
-        };
-
-        if needs_create {
-            let config = build_sdk_config(
-                &agent,
-                &target_session_id,
-                &working_dir,
-                is_new,
-                system_prompt.as_deref(),
-            );
-
-            match crate::agent_sdk::AgentSession::create(
-                config,
-                &id,
-                &target_session_id,
-            ).await {
-                Ok(session) => {
-                    let mut pool = sdk_sessions.lock().await;
-                    // Remove old disconnected session if present
-                    pool.remove(&proc_key);
-                    pool.insert(proc_key.clone(), session);
-
-                    yield Ok(Event::default().event("system").data(
-                        serde_json::to_string(&json!({"message": "Session started (SDK)"})).unwrap()
-                    ));
-                }
-                Err(e) => {
-                    tracing::error!(error = %e, "failed to create AgentSession");
-                    let mut all_sessions = sessions_ref.write().await;
-                    if let Some(fs) = all_sessions.get_mut(&key_for_stream) {
-                        if let Some(s) = fs.get_session_mut(&target_session_id) {
-                            s.busy = false;
-                            s.busy_since = None;
-                        }
-                    }
-                    yield Ok(Event::default().event("error").data(
-                        serde_json::to_string(&json!({"message": format!("failed to create SDK session: {e}")})).unwrap()
-                    ));
-                    return;
-                }
-            }
-        } else {
-            yield Ok(Event::default().event("system").data(
-                serde_json::to_string(&json!({"message": "Ready (SDK)"})).unwrap()
-            ));
-        }
-
-        // Create broadcast channel + event buffer for reconnection support
-        let (bc_tx, _) = broadcast::channel::<String>(1024);
-        {
-            let mut streams = session_streams.lock().await;
-            streams.insert(proc_key.clone(), bc_tx.clone());
-        }
-        {
-            let mut buffers = chat_event_buffers.lock().await;
-            buffers.insert(proc_key.clone(), Vec::new());
-        }
-
-        let logs_dir = data_dir.join("session_logs");
-        let _ = std::fs::create_dir_all(&logs_dir);
-        let log_path = logs_dir.join(format!("{target_session_id}.jsonl"));
-
-        {
-            let bc_tx = bc_tx.clone();
-            let sdk_sessions = sdk_sessions.clone();
-            let sessions_ref = sessions_ref.clone();
-            let session_streams = session_streams.clone();
-            let chat_event_buffers = chat_event_buffers.clone();
-            let proc_key = proc_key.clone();
-            let key_for_bg = key_for_stream.clone();
-            let sid_for_bg = target_session_id.clone();
-            let sessions_path = sessions_path.clone();
-            let log_path = log_path.clone();
-
-            tokio::spawn(async move {
-                let mut session_cost: f64 = 0.0;
-
-                let append_log = |line: &str| {
-                    use std::io::Write;
-                    if let Ok(mut f) = std::fs::OpenOptions::new()
-                        .create(true)
-                        .append(true)
-                        .open(&log_path)
-                    {
-                        let _ = writeln!(f, "{}", line);
-                    }
-                };
-                append_log(&format!("user:{}", serde_json::to_string(&json!({"text": prompt})).unwrap_or_default()));
-                let result = {
-                    let mut pool = sdk_sessions.lock().await;
-                    if let Some(session) = pool.get_mut(&proc_key) {
-                        match session.send_message(&prompt).await {
-                            Ok(mut rx) => {
-                                drop(pool);
-                                loop {
-                                    match rx.recv().await {
-                                        Ok(sse_event) => {
-                                            let event_str = format!("{}:{}", sse_event.event_type,
-                                                serde_json::to_string(&sse_event.data).unwrap_or_default());
-
-                                            if sse_event.event_type == "result" {
-                                                session_cost = sse_event.data.get("cost")
-                                                    .and_then(|v| v.as_f64())
-                                                    .unwrap_or(0.0);
-                                            }
-
-                                            let _ = bc_tx.send(event_str.clone());
-                                            append_log(&event_str);
-                                            {
-                                                let mut buffers = chat_event_buffers.lock().await;
-                                                if let Some(buf) = buffers.get_mut(&proc_key) {
-                                                    buf.push(event_str);
-                                                }
-                                            }
-
-                                            if sse_event.event_type == "done" {
-                                                break;
-                                            }
-                                        }
-                                        Err(broadcast::error::RecvError::Lagged(n)) => {
-                                            tracing::warn!(skipped = n, "SDK event receiver lagged");
-                                        }
-                                        Err(broadcast::error::RecvError::Closed) => {
-                                            break;
-                                        }
-                                    }
-                                }
-                                Ok(())
-                            }
-                            Err(e) => {
-                                drop(pool);
-                                Err(e)
-                            }
-                        }
-                    } else {
-                        Err(anyhow::anyhow!("SDK session not found in pool"))
-                    }
-                };
-
-                if let Err(e) = result {
-                    tracing::error!(error = %e, "SDK send_message failed");
-                    let error_event = format!("error:{}", serde_json::to_string(&json!({"message": e.to_string()})).unwrap_or_default());
-                    let _ = bc_tx.send(error_event.clone());
-                    append_log(&error_event);
-                    {
-                        let mut buffers = chat_event_buffers.lock().await;
-                        if let Some(buf) = buffers.get_mut(&proc_key) {
-                            buf.push(error_event);
-                        }
-                    }
-                }
-
-                // Send git snapshot after completion
-                {
-                    let sessions = sessions_ref.read().await;
-                    if let Some(fs) = sessions.get(&key_for_bg) {
-                        if let Some(s) = fs.get_session(&sid_for_bg) {
-                            if let Some(ref wt_meta) = s.worktree_group {
-                                let snapshot = crate::git::snapshot_from_meta(wt_meta);
-                                if let Ok(snap_json) = serde_json::to_string(&snapshot) {
-                                    let git_event = format!("git_snapshot:{snap_json}");
-                                    let _ = bc_tx.send(git_event.clone());
-                                    append_log(&git_event);
-                                    let mut buffers = chat_event_buffers.lock().await;
-                                    if let Some(buf) = buffers.get_mut(&proc_key) {
-                                        buf.push(git_event);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // Send done event
-                let done_data = serde_json::to_string(&json!({"exit_code": 0})).unwrap();
-                let done_event = format!("done:{done_data}");
-                let _ = bc_tx.send(done_event.clone());
-                append_log(&done_event);
-                {
-                    let mut buffers = chat_event_buffers.lock().await;
-                    if let Some(buf) = buffers.get_mut(&proc_key) {
-                        buf.push(done_event);
-                    }
-                }
-
-                // Update session state
-                {
-                    let mut all_sessions = sessions_ref.write().await;
-                    if let Some(fs) = all_sessions.get_mut(&key_for_bg) {
-                        if let Some(s) = fs.get_session_mut(&sid_for_bg) {
-                            s.busy = false;
-                            s.busy_since = None;
-                            s.message_count += 1;
-                            s.total_cost += session_cost;
-                        }
-                    }
-                    let sessions_snapshot = all_sessions.clone();
-                    drop(all_sessions);
-                    crate::api::save_sessions(&sessions_path, &sessions_snapshot);
-                }
-
-                // Cleanup after delay
-                tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
-                {
-                    let mut streams = session_streams.lock().await;
-                    streams.remove(&proc_key);
-                }
-                {
-                    let mut buffers = chat_event_buffers.lock().await;
-                    buffers.remove(&proc_key);
-                }
-            });
-        }
-
-        // Subscribe to the broadcast channel and yield events as SSE
-        let mut rx = bc_tx.subscribe();
-        loop {
-            match rx.recv().await {
-                Ok(event_str) => {
-                    if let Some((event_type, data)) = event_str.split_once(':') {
-                        yield Ok(Event::default().event(event_type).data(data));
-                        if event_type == "done" {
-                            break;
-                        }
-                    }
-                }
-                Err(broadcast::error::RecvError::Lagged(n)) => {
-                    tracing::warn!(skipped = n, "agent chat SDK broadcast subscriber lagged");
-                    continue;
-                }
-                Err(broadcast::error::RecvError::Closed) => {
-                    break;
-                }
-            }
-        }
-    }
 }
 
 /// POST /agents/{id}/chat — SSE stream for agent chat
@@ -918,17 +582,10 @@ pub(crate) async fn chat(
                     // Process exists — check if it's actually dead
                     matches!(proc.child.try_wait(), Ok(Some(_)))
                 } else {
-                    // Check SDK sessions
-                    let sdk_pool = state.sdk_sessions.lock().await;
-                    if let Some(sdk_session) = sdk_pool.get(&proc_k) {
-                        // SDK session exists — it's stale if disconnected
-                        !sdk_session.is_connected()
-                    } else {
-                        // No process in any pool — check if it's been busy too long
-                        session.busy_since
-                            .map(|since| chrono::Utc::now().signed_duration_since(since).to_std().unwrap_or_default() > STALE_BUSY_TIMEOUT)
-                            .unwrap_or(true) // No timestamp = definitely stale
-                    }
+                    // No process in pool — check if it's been busy too long
+                    session.busy_since
+                        .map(|since| chrono::Utc::now().signed_duration_since(since).to_std().unwrap_or_default() > STALE_BUSY_TIMEOUT)
+                        .unwrap_or(true) // No timestamp = definitely stale
                 }
             };
 
@@ -942,10 +599,6 @@ pub(crate) async fn chat(
                 let mut pool = state.live_processes.lock().await;
                 pool.remove(&proc_k);
                 drop(pool);
-                // Also clean up SDK session
-                let mut sdk_pool = state.sdk_sessions.lock().await;
-                sdk_pool.remove(&proc_k);
-                drop(sdk_pool);
                 session.busy = false;
                 session.busy_since = None;
                 session.active_pid = None;
@@ -1147,28 +800,7 @@ pub(crate) async fn chat(
     };
 
     // -----------------------------------------------------------------------
-    // SDK path: when AGENT_SDK_ENABLED=1, use AgentSession instead of
-    // LiveClaudeProcess. Returns early with the SDK stream.
-    // -----------------------------------------------------------------------
-    if agent_sdk_enabled() {
-        let stream = chat_sdk_stream(
-            state,
-            id,
-            prompt,
-            target_session_id,
-            is_new,
-            working_dir,
-            system_prompt,
-            agent,
-        );
-        let boxed: BoxSseStream = Box::pin(stream);
-        return Ok(Sse::new(boxed).keep_alive(
-            KeepAlive::new().interval(std::time::Duration::from_secs(15)),
-        ));
-    }
-
-    // -----------------------------------------------------------------------
-    // Legacy path: LiveClaudeProcess (stdin/stdout subprocess)
+    // LiveClaudeProcess (stdin/stdout subprocess)
     // -----------------------------------------------------------------------
 
     let key_for_stream = key.clone();

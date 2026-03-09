@@ -41,9 +41,6 @@ clap = { version = "4.5.60", features = ["derive"] }
 notify = "7"
 notify-debouncer-mini = "0.5"
 
-# Claude Agent SDK
-claude-agent-sdk-rust = { version = "1", features = ["tracing-support"] }
-
 # Tracing
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.22", features = ["env-filter", "fmt", "json", "time", "local-time"] }

@@ -17,6 +17,7 @@ import { extractLatestTodos } from "./chatUtils";
 import StickyTodoPanel from "./StickyTodoPanel";
 import type { ImageAttachment } from "./useAgentChat";
 import type { PendingPermission } from "../../hooks/useGlobalPermissions";
+import { useVoiceChat, isVoiceSupported } from "./useVoiceChat";
 
 /* ── Slash command registry ──────────────────────────────────────── */
 
@@ -114,6 +115,36 @@ export default function AgentChatThread({
   onPermissionResponse,
 }: AgentChatThreadProps) {
   const [dragOver, setDragOver] = useState(false);
+
+  /* ── Voice chat ── */
+  const voice = useVoiceChat({
+    onTranscript: useCallback((text: string) => {
+      onNew({ content: text });
+    }, [onNew]),
+  });
+
+  // Auto-speak when agent finishes responding (voice mode only)
+  const prevIsDoneRef = useRef(false);
+  useEffect(() => {
+    if (isDone && !prevIsDoneRef.current && voice.isVoiceMode) {
+      // Find last assistant message text
+      const lastMsg = messages[messages.length - 1];
+      if (lastMsg && lastMsg.role === "assistant") {
+        const content = lastMsg.content;
+        let text = "";
+        if (typeof content === "string") {
+          text = content;
+        } else if (Array.isArray(content)) {
+          text = (content as Array<Record<string, unknown>>)
+            .filter((p) => p.type === "text" && p.text)
+            .map((p) => p.text as string)
+            .join(" ");
+        }
+        if (text) voice.speak(text);
+      }
+    }
+    prevIsDoneRef.current = isDone;
+  }, [isDone, voice.isVoiceMode, messages]);
 
   /* ── Slash command state ── */
   const [slashFilter, setSlashFilter] = useState<string | null>(null);
@@ -403,11 +434,22 @@ export default function AgentChatThread({
               <ComposerPrimitive.Input
                 ref={composerInputRef}
                 rows={1}
-                placeholder="Send a message..."
+                placeholder={voice.isListening ? "Listening..." : "Send a message..."}
                 autoFocus
                 onChange={handleComposerChange}
                 onKeyDown={handleSlashKeyDown}
+                value={voice.transcript || undefined}
               />
+              {isVoiceSupported && (
+                <button
+                  className={`ac-btn ac-btn-voice${voice.isVoiceMode ? " ac-voice-active" : ""}${voice.isListening ? " ac-voice-listening" : ""}${voice.isSpeaking ? " ac-voice-speaking" : ""}`}
+                  onClick={voice.toggleVoiceMode}
+                  title={voice.isVoiceMode ? "Turn off voice mode" : "Turn on voice mode"}
+                  type="button"
+                >
+                  {voice.isSpeaking ? "🔊" : voice.isListening ? "🎙" : "🎤"}
+                </button>
+              )}
               {isStreaming ? (
                 <button className="ac-btn ac-btn-stop" onClick={onCancel}>
                   Stop
