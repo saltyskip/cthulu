@@ -296,6 +296,18 @@ export async function getGitSnapshot(
   }
 }
 
+/** Fetch unified diff for a single file in a git session. */
+export async function getGitDiff(
+  agentId: string,
+  sessionId: string,
+  path: string,
+  repoRoot?: string
+): Promise<{ diff: string; path: string; repo_root: string }> {
+  const params = new URLSearchParams({ path });
+  if (repoRoot && repoRoot !== ".") params.set("repo_root", repoRoot);
+  return apiFetch(`/agents/${agentId}/sessions/${sessionId}/git/diff?${params}`);
+}
+
 /** Fetch the full JSONL log for a completed flow-run session. */
 export async function getSessionLog(
   agentId: string,

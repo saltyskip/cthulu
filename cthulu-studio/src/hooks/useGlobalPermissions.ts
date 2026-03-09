@@ -16,12 +16,23 @@ export interface PendingPermission {
   tool_input: Record<string, unknown>;
 }
 
+export interface FileChangeData {
+  agent_id: string;
+  session_id: string;
+  tool_name: string;
+  tool_input: Record<string, unknown>;
+}
+
+const MAX_FILE_CHANGES = 500;
+
 export interface GlobalPermissionState {
   pendingPermissions: PendingPermission[];
   respondToPermission: (requestId: string, decision: "allow" | "deny") => void;
   permissionsForSession: (agentId: string, sessionId: string) => PendingPermission[];
   hookDebugEvents: DebugEvent[];
   clearHookDebugEvents: () => void;
+  fileChanges: FileChangeData[];
+  clearFileChanges: () => void;
 }
 
 async function fetchPending(): Promise<PendingPermission[]> {
@@ -39,6 +50,8 @@ export function useGlobalPermissions(): GlobalPermissionState {
   const [permissions, setPermissions] = useState<PendingPermission[]>([]);
   const [hookDebugEvents, setHookDebugEvents] = useState<DebugEvent[]>([]);
   const hookDebugRef = useRef<DebugEvent[]>([]);
+  const [fileChanges, setFileChanges] = useState<FileChangeData[]>([]);
+  const fileChangesRef = useRef<FileChangeData[]>([]);
   const retryRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const pushHookDebug = useCallback((type: string, data: string) => {
@@ -52,6 +65,11 @@ export function useGlobalPermissions(): GlobalPermissionState {
   const clearHookDebugEvents = useCallback(() => {
     hookDebugRef.current = [];
     setHookDebugEvents([]);
+  }, []);
+
+  const clearFileChanges = useCallback(() => {
+    fileChangesRef.current = [];
+    setFileChanges([]);
   }, []);
 
   useEffect(() => {
@@ -112,6 +130,11 @@ export function useGlobalPermissions(): GlobalPermissionState {
                   setPermissions((prev) =>
                     prev.filter((p) => p.request_id !== msg.data.request_id)
                   );
+                } else if (msg.type === "file_change" && msg.data) {
+                  const buf = fileChangesRef.current;
+                  buf.push(msg.data as FileChangeData);
+                  if (buf.length > MAX_FILE_CHANGES) buf.splice(0, buf.length - MAX_FILE_CHANGES);
+                  setFileChanges([...buf]);
                 }
               } catch {
                 // ignore parse errors
@@ -171,5 +194,7 @@ export function useGlobalPermissions(): GlobalPermissionState {
     permissionsForSession,
     hookDebugEvents,
     clearHookDebugEvents,
+    fileChanges,
+    clearFileChanges,
   };
 }

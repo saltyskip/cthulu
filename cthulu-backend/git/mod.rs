@@ -582,6 +582,58 @@ pub fn snapshot_from_meta(meta: &WorktreeGroupMeta) -> MultiRepoSnapshot {
 }
 
 // ---------------------------------------------------------------------------
+// Single-file diff
+// ---------------------------------------------------------------------------
+
+/// Get the unified diff for a single file in a worktree directory.
+///
+/// Tries `git diff HEAD -- <path>`, then `git diff --staged HEAD -- <path>`,
+/// and falls back to reading an untracked file as an all-added diff.
+pub fn diff_file(worktree_path: &Path, file_path: &str) -> Option<String> {
+    let dir = worktree_path.to_string_lossy();
+
+    // Try unstaged diff against HEAD
+    let output = Command::new("git")
+        .args(["-C", &dir, "diff", "HEAD", "--", file_path])
+        .output()
+        .ok()?;
+    let diff = String::from_utf8_lossy(&output.stdout).to_string();
+    if !diff.trim().is_empty() {
+        return Some(diff);
+    }
+
+    // Try staged diff against HEAD
+    let output = Command::new("git")
+        .args(["-C", &dir, "diff", "--staged", "HEAD", "--", file_path])
+        .output()
+        .ok()?;
+    let diff = String::from_utf8_lossy(&output.stdout).to_string();
+    if !diff.trim().is_empty() {
+        return Some(diff);
+    }
+
+    // Untracked file: read and format as all-added
+    let full_path = worktree_path.join(file_path);
+    if full_path.is_file() {
+        let content = std::fs::read_to_string(&full_path).ok()?;
+        let lines: Vec<&str> = content.lines().collect();
+        let mut diff = format!(
+            "diff --git a/{f} b/{f}\nnew file mode 100644\n--- /dev/null\n+++ b/{f}\n@@ -0,0 +1,{n} @@\n",
+            f = file_path,
+            n = lines.len()
+        );
+        for line in &lines {
+            diff.push('+');
+            diff.push_str(line);
+            diff.push('\n');
+        }
+        return Some(diff);
+    }
+
+    None
+}
+
+// ---------------------------------------------------------------------------
 // Conversion: WorktreeGroup ↔ WorktreeGroupMeta
 // ---------------------------------------------------------------------------
 
