@@ -386,6 +386,7 @@ async fn run_server(start_disabled: bool) -> Result<(), Box<dyn Error>> {
             }
         }
     }
+    // Force exit — spawn_blocking reader threads can't be stopped gracefully
     std::process::exit(0);
 
     Ok(())

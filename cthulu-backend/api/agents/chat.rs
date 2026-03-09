@@ -7,6 +7,7 @@ use hyper::StatusCode;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::convert::Infallible;
+use std::pin::Pin;
 use uuid::Uuid;
 
 use crate::api::AppState;
@@ -15,6 +16,10 @@ use crate::api::InteractSession;
 use crate::api::LiveClaudeProcess;
 use crate::flows::{Edge, Flow, Node, NodeType};
 use tokio::sync::broadcast;
+
+/// Boxed SSE stream type — used when multiple code paths can
+/// produce different concrete stream types.
+type BoxSseStream = Pin<Box<dyn Stream<Item = Result<Event, Infallible>> + Send>>;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -443,7 +448,10 @@ pub(crate) async fn chat(
     State(state): State<AppState>,
     Path(id): Path<String>,
     Json(body): Json<ChatRequest>,
-) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, (StatusCode, Json<Value>)> {
+) -> Result<
+    Sse<axum::response::sse::KeepAliveStream<BoxSseStream>>,
+    (StatusCode, Json<Value>),
+> {
     let agent = state.agent_repo.get(&id).await.ok_or_else(|| {
         (StatusCode::NOT_FOUND, Json(json!({ "error": "agent not found" })))
     })?;
@@ -790,6 +798,10 @@ pub(crate) async fn chat(
     } else {
         None
     };
+
+    // -----------------------------------------------------------------------
+    // LiveClaudeProcess (stdin/stdout subprocess)
+    // -----------------------------------------------------------------------
 
     let key_for_stream = key.clone();
     let proc_key_for_stream = process_key(&id, &target_session_id);
@@ -1242,7 +1254,8 @@ pub(crate) async fn chat(
         }
     };
 
-    Ok(Sse::new(stream).keep_alive(KeepAlive::new().interval(std::time::Duration::from_secs(15))))
+    let boxed: BoxSseStream = Box::pin(stream);
+    Ok(Sse::new(boxed).keep_alive(KeepAlive::new().interval(std::time::Duration::from_secs(15))))
 }
 
 /// Parse a raw Claude stdout line into a list of (event_type, data_json) pairs

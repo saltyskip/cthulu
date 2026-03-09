@@ -12,7 +12,7 @@ This guide is the entry point for AI assistants working in this monorepo. It pro
 4. **This file (`CLAUDE.md`)** — Project-specific context, architecture, and workflows
 5. **Relevant `.claude/skills/*.skill.md`** for the task domain
 
-> **Generic rules in `.claude/rules/` apply to ALL tasks as baseline defaults. Project-specific rules in this file take precedence when they conflict**, since they encode domain-specific constraints (e.g., React Flow node merging, Axum param syntax) that generic rules cannot anticipate.
+> **Generic rules in `.claude/rules/` apply to ALL tasks and override project-specific guidance when they conflict.**
 
 ---
 

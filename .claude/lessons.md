@@ -114,25 +114,9 @@ Record corrections, mistakes, and insights here so future sessions can avoid rep
 
 ## 2026-02-25 - Nested KVM does NOT work on Apple Silicon
 
-- **Context**: Firecracker requires `/dev/kvm`. We tried two Lima VM backends on macOS Apple Silicon (M-series).
-- **Mistake**: Spent significant time trying to get `/dev/kvm` working in both backends.
-- **vz (Apple Virtualization.framework)**: `/dev/kvm` device node exists (kernel has `CONFIG_KVM=y` built-in), but opening it returns `ENODEV (errno 19)`. The CPU (`implementer: 0x61`, Apple Silicon) doesn't expose ARM virtualization extensions to the guest.
-- **qemu**: Even with `nestedVirtualization: true` in Lima config, `/dev/kvm` doesn't appear at all. QEMU on Apple Silicon doesn't support nested virtualization for aarch64 guests.
-- **Result**: Neither Lima backend gives you working KVM on Apple Silicon. This is a fundamental hardware/hypervisor limitation, not a configuration issue.
-- **Fix**: Use a real Linux server (bare metal or cloud with nested virt) for Firecracker. The `RemoteSsh` transport was built for this — Cthulu on macOS talks to the FC API over TCP, host commands go over SSH. Documented in `NOPE.md`.
-
-**Evidence**:
-```
-# Inside Lima (vz) — device exists but doesn't work
-$ ls -la /dev/kvm
-crw-rw-rw- 1 root root 10, 232 ... /dev/kvm
-$ python3 -c "import os; os.open('/dev/kvm', os.O_RDWR)"
-OSError: [Errno 19] No such device: '/dev/kvm'
-
-# Inside Lima (qemu + nestedVirtualization:true) — device doesn't exist
-$ ls /dev/kvm
-ls: cannot access '/dev/kvm': No such file or directory
-```
+- **Context**: Tried to run Firecracker inside Lima VM on macOS (both vz and qemu backends).
+- **Mistake**: Spent significant time trying to get `/dev/kvm` working.
+- **Fix**: Apple Silicon does not expose ARM virtualization extensions to guest VMs. Neither Lima backend works. Use the VM Manager API on a real Linux server instead. Documented in `NOPE.md`.
 
 ## 2026-03-05 - Add features to the correct component, not the nearest one
 
@@ -166,103 +150,70 @@ ls: cannot access '/dev/kvm': No such file or directory
 
 ---
 
-## Sandbox & Infrastructure Lessons
-
-Hard-won knowledge from building the sandbox/Firecracker integration. Originally tracked in root `LESSONS.md`, consolidated here as the single source of truth.
+## Sandbox Module Lessons (consolidated from root LESSONS.md)
 
 ## 2026-02-25 - FsJail path canonicalization on macOS
 
 - **Context**: `FsJail.resolve()` used `std::fs::canonicalize()` to check path containment.
-- **Mistake**: `canonicalize()` fails on non-existent paths (returns `Err`). On macOS, tempdir paths go through `/var` which is a symlink to `/private/var`. So `canonicalize("/var/folders/...")` returns `/private/var/folders/...` but `starts_with("/var/folders/...")` is false. The FsJail `resolve()` method broke in two ways: (1) paths that don't exist yet can't be canonicalized, (2) symlink resolution changes the prefix, breaking `starts_with` checks.
-- **Fix**: Don't use `canonicalize()`. Instead, manually normalize path components by resolving `.` and `..` segments. This handles both non-existent paths and symlink prefix mismatches.
-- **File**: `src/sandbox/local_host/fs_jail.rs`
+- **Mistake**: `canonicalize()` fails on non-existent paths. On macOS, `/var` → `/private/var` symlink breaks `starts_with` checks.
+- **Fix**: Don't use `canonicalize()`. Manually normalize path components by resolving `.` and `..` segments. File: `src/sandbox/local_host/fs_jail.rs`.
 
-## 2026-02-25 - Lima vz vs qemu — vz is the better choice for everything except KVM
+## 2026-02-25 - FlowRunner construction sites are spread across codebase
 
-- **Context**: Choosing between Lima VM backends on macOS.
-- **Mistake**: Tried qemu first for `nestedVirtualization` support.
-- **Fix**: The `default` Lima instance (vz) is faster, more stable, and has better macOS integration than qemu. The only reason to use qemu is `nestedVirtualization`, and on Apple Silicon it doesn't actually work (see "Nested KVM" lesson). Stick with vz for Lima instances.
-
-## 2026-02-25 - Firecracker kernel image must match guest architecture
-
-- **Context**: Downloading FC kernel/rootfs images from the CI S3 bucket.
-- **Mistake**: Downloaded wrong architecture image. Mismatched arch = instant VM crash with no useful error message.
-- **Fix**: The S3 paths include architecture: `aarch64/vmlinux-6.1` for ARM64, `x86_64/vmlinux-6.1` for Intel/AMD. Always verify the arch matches the host.
-
-## 2026-02-25 - socat for exposing Unix sockets over TCP
-
-- **Context**: Firecracker only speaks Unix domain socket. Need to reach it from another machine (or from macOS host into a Lima VM).
-- **Mistake**: Tried various proxy approaches.
-- **Fix**: Use socat: `socat TCP-LISTEN:8080,fork,reuseaddr UNIX-CONNECT:/tmp/firecracker.sock`. The `fork` flag is essential — without it, socat exits after the first connection. `reuseaddr` prevents "address already in use" errors on restart.
-
-## 2026-02-25 - FlowRunner construction sites are spread across the codebase
-
-- **Context**: Adding a field to `FlowRunner` requires updating 7 construction sites.
-- **Mistake**: Missing one causes a compile error, but it's easy to miss one during refactoring.
-- **Fix**: Grep for `FlowRunner {` or `FlowRunner::new` — 4 in `src/server/flow_routes/mod.rs`, 3 in `src/flows/scheduler.rs`. Check all 7 before compiling.
-
-## 2026-02-25 - Rust edition 2024 implications
-
-- **Context**: `Cargo.toml` specifies `edition = "2024"`.
-- **Mistake**: Assumed standard edition 2021 behavior.
-- **Fix**: Edition 2024 affects `use` declarations (some import rules changed). `async_trait` is still needed since native async traits aren't fully stabilized for dyn dispatch. Check edition-specific behavior when debugging unexpected compiler errors.
+- **Context**: Adding a field to `FlowRunner`.
+- **Mistake**: Missing one of the 7 construction sites caused compile errors.
+- **Fix**: Grep for `FlowRunner {` or `FlowRunner::new` — 4 in `src/server/flow_routes/mod.rs`, 3 in `src/flows/scheduler.rs`.
 
 ## 2026-02-25 - reqwest is already a dependency — use it
 
 - **Context**: Needed an HTTP client for FC TCP transport.
-- **Mistake**: Considered adding a new HTTP client dependency.
-- **Fix**: `reqwest` is already in `Cargo.toml`. Reuse existing deps before adding new ones. The FC TCP transport uses it for `PUT`/`GET`/`PATCH` against the FC REST API.
+- **Mistake**: Considered adding a new dependency.
+- **Fix**: `reqwest` is already in `Cargo.toml`. Reuse existing deps before adding new ones.
 
-## 2026-02-25 - Don't try to build Firecracker inside a Lima VM for development
+## 2026-02-25 - Don't build Firecracker inside Lima VM
 
-- **Context**: Tried building FC from source inside Lima.
-- **Mistake**: Building FC from source inside Lima works but is slow and painful.
-- **Fix**: Download the release binary directly from GitHub releases:
-```bash
-# On the remote Linux server
-ARCH=$(uname -m)  # aarch64 or x86_64
-curl -Lo firecracker https://github.com/firecracker-microvm/firecracker/releases/download/v1.12.0/firecracker-v1.12.0-${ARCH}
-chmod +x firecracker
-sudo mv firecracker /usr/local/bin/
-```
+- **Context**: Tried building FC from source in Lima.
+- **Mistake**: Slow and painful.
+- **Fix**: Download the release binary directly from GitHub releases.
 
-## 2026-02-25 - VM Manager API is the production path — not raw Firecracker
+## 2026-02-25 - VM Manager API is the production path, not raw Firecracker
 
-- **Context**: Choosing between direct Firecracker control (`FirecrackerProvider`) vs VM Manager abstraction (`VmManagerProvider`).
-- **Mistake**: Direct Firecracker control requires SSH access to a Linux server, socat for Unix socket proxying, TAP network setup, rootfs management, and `/dev/kvm` which doesn't work on macOS.
-- **Fix**: The VM Manager is a separate service running on the Linux server that abstracts all of this. Cthulu just makes HTTP calls (`POST /vms`, `GET /vms/{id}`, `DELETE /vms/{id}`). The VM Manager handles Firecracker lifecycle, networking, web terminal (ttyd) setup, and Claude CLI installation inside the VM. `VmManagerProvider` is ~200 lines of straightforward HTTP client code vs. `FirecrackerProvider` which is ~780 lines of complex transport/provisioning logic.
+- **Context**: Choosing between direct FC control vs VM Manager abstraction.
+- **Mistake**: `FirecrackerProvider` is ~780 lines of complex transport/provisioning logic.
+- **Fix**: `VmManagerProvider` is ~200 lines of HTTP client code. Use VM Manager for production.
 
-## 2026-02-25 - VmManagerProvider node_vms is in-memory only — use sessions.yaml as fallback
+## 2026-02-25 - Browser terminal iframe — direct URL, not proxied
 
-- **Context**: `VmManagerProvider.node_vms` is a `HashMap` in memory keyed by `flow_id::node_id`. After a server restart it's empty. Clicking a vm-sandbox node would spin up a brand-new VM even though the user's previous VM was still alive on the VM Manager host, wasting resources and losing the persistent workspace.
-- **Mistake**: `node_vms` HashMap was not persisted. Server restart lost all VM associations.
-- **Fix**: `get_node_vm()` now falls back to `vm_mappings` (persisted in `sessions.yaml`) when the in-memory map misses. It then calls `restore_node_vm(vm_id)` to verify the VM is still alive on the VM Manager, re-seeds the in-memory map, and returns the existing VM. Only if the VM is gone (404 from VM Manager) does it provision a new one.
-- **File**: `src/sandbox/backends/vm_manager.rs` (`get_node_vm`, `restore_node_vm`, `get_or_create_vm_with_persisted`)
+- **Context**: Embedding ttyd web terminal in BottomPanel.
+- **Mistake**: Considered proxying WebSocket through Cthulu — adds complexity and latency.
+- **Fix**: Iframe `src` points directly to VM Manager's `web_terminal` URL. No proxy. User's browser must reach VM Manager host directly.
 
-## 2026-02-25 - inject_oauth_token must write the complete credentials blob
+## 2026-02-25 - VmManagerProvider node_vms is in-memory only
 
-- **Context**: `inject_oauth_token` was writing `~/.claude/.credentials.json` with only `accessToken` and `tokenType`. Claude CLI treated this as an incomplete/invalid session and displayed the login prompt every time a new VM connected, blocking automated use.
-- **Mistake**: Only wrote `accessToken` and `tokenType` — Claude CLI forced re-login.
-- **Fix**: `inject_oauth_token` now writes the complete credentials blob: `accessToken`, `refreshToken`, `expiresAt`, `scopes`, `subscriptionType`, `rateLimitTier`. The server reads all of these from the Keychain via `read_full_credentials()` and passes them through `POST /api/auth/refresh-token` → `inject_oauth_token`. Claude CLI now recognizes the session as fully authenticated.
-- **File**: `src/sandbox/backends/vm_manager.rs` (`inject_oauth_token`), `src/server/auth_routes.rs` (`read_full_credentials`)
+- **Context**: After server restart, clicking vm-sandbox node spun up a new VM, wasting resources.
+- **Mistake**: `node_vms` HashMap was not persisted.
+- **Fix**: Fall back to `vm_mappings` in `sessions.yaml`. Call `restore_node_vm(vm_id)` to verify VM is still alive, re-seed in-memory map. Only provision new if VM returns 404.
 
-## 2026-02-25 - .bashrc CLAUDE_API_KEY sed was skip-if-present — stale token never updated
+## 2026-02-25 - inject_oauth_token must write full credentials blob
 
-- **Context**: `inject_oauth_token` had logic to skip writing `CLAUDE_API_KEY` to `.bashrc` if the line already existed (`if ! grep -q CLAUDE_API_KEY ~/.bashrc`). On token refresh, the old (expired) value was never replaced, so the VM's shell environment kept the stale token.
-- **Mistake**: Had skip-if-present logic. Stale tokens were never updated.
-- **Fix**: Changed to always replace: use `sed -i` to delete any existing `CLAUDE_API_KEY` export line, then append the new value. This is idempotent and always correct.
-- **File**: `src/sandbox/backends/vm_manager.rs` (`inject_oauth_token`)
+- **Context**: Claude CLI inside VMs showing login prompt after token injection.
+- **Mistake**: Only wrote `accessToken` and `tokenType` — Claude CLI treated as incomplete session.
+- **Fix**: Write ALL fields: `accessToken`, `refreshToken`, `expiresAt`, `scopes`, `subscriptionType`, `rateLimitTier`.
 
-## 2026-02-25 - isAuthError false positives on bare "401" substring
+## 2026-02-25 - .bashrc token injection must replace, not skip
 
-- **Context**: `isAuthError()` in `NodeChat.tsx` matched any message containing the string `"401"` — including PR numbers, issue IDs, port numbers, and hash strings. This caused false positives that killed the Claude session mid-task for unrelated reasons.
-- **Mistake**: Bare numeric match on `"401"` was too broad.
-- **Fix**: Tightened the check to only match explicit auth error patterns: HTTP 401 status messages (`"401 Unauthorized"`, `"HTTP 401"`), Claude auth error strings (`"Authentication required"`, `"Invalid API key"`, `"not authenticated"`), and the Claude CLI login prompt (`"claude login"`). Bare numeric matches were removed.
-- **File**: `cthulu-studio/src/components/NodeChat.tsx` (`isAuthError`)
+- **Context**: Token refresh in VM `.bashrc`.
+- **Mistake**: Had skip-if-present logic (`if ! grep -q`). Stale tokens were never updated.
+- **Fix**: Always `sed -i` to delete existing line, then append new value. Idempotent.
+
+## 2026-02-25 - isAuthError false positives on bare "401"
+
+- **Context**: `isAuthError()` in `NodeChat.tsx` killed Claude sessions on false positives.
+- **Mistake**: Matched any message containing `"401"` — including PR numbers, port numbers, hashes.
+- **Fix**: Match specific patterns only: `"401 Unauthorized"`, `"HTTP 401"`, `"Authentication required"`, `"Invalid API key"`, `"not authenticated"`, `"claude login"`.
 
 ## 2026-02-25 - flow_routes.rs was split into a module directory
 
-- **Context**: `src/server/flow_routes.rs` grew too large and was refactored into `src/server/flow_routes/` with sub-modules (`mod.rs`, `crud.rs`, `sandbox.rs`, `interact.rs`, `node_chat.rs`). Some documentation and skill files still referenced the old single-file path.
+- **Context**: `src/server/flow_routes.rs` grew too large.
 - **Mistake**: Documentation still referenced the old single-file path.
-- **Impact**: Any grep for `flow_routes.rs` to find route registration or handler code returns no results. Use `src/server/flow_routes/` instead.
-- **Files affected**: `docs/AGENT_DESIGN.md` code references, `CLAUDE.md` architecture map.
+- **Fix**: Updated to `src/server/flow_routes/` with sub-modules (`mod.rs`, `crud.rs`, `sandbox.rs`, `interact.rs`, `node_chat.rs`).
