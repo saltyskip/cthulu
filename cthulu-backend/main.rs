@@ -1,3 +1,4 @@
+mod agent_sdk;
 mod agents;
 mod config;
 mod flows;
@@ -347,6 +348,7 @@ async fn run_server(start_disabled: bool) -> Result<(), Box<dyn Error>> {
         oauth_token: Arc::new(tokio::sync::RwLock::new(oauth_token)),
         session_streams,
         chat_event_buffers: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
+        sdk_sessions: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
         pending_permissions: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
         global_hook_tx: Arc::new(tokio::sync::broadcast::channel::<String>(256).0),
         server_port: config.port,
@@ -363,6 +365,7 @@ async fn run_server(start_disabled: bool) -> Result<(), Box<dyn Error>> {
     .context("failed to start file change watcher")?;
 
     let live_processes = app_state.live_processes.clone();
+    let sdk_sessions = app_state.sdk_sessions.clone();
 
     let app = api::create_app(app_state)
         .layer(SentryHttpLayer::new().enable_transaction())
@@ -386,6 +389,15 @@ async fn run_server(start_disabled: bool) -> Result<(), Box<dyn Error>> {
             }
         }
     }
+    {
+        let mut pool = sdk_sessions.lock().await;
+        for (key, mut session) in pool.drain() {
+            if let Err(e) = session.disconnect().await {
+                tracing::trace!(key = %key, error = %e, "SDK session disconnect on shutdown");
+            }
+        }
+    }
+    // Force exit — spawn_blocking reader threads can't be stopped gracefully
     std::process::exit(0);
 
     Ok(())
