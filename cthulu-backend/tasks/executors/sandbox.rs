@@ -3,7 +3,7 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use async_trait::async_trait;
 
 use super::{ExecutionResult, Executor};
@@ -150,13 +150,12 @@ impl Executor for SandboxExecutor {
             }
         }
 
-        if let Some(code) = result.exit_code {
-            if code != 0 {
+        if let Some(code) = result.exit_code
+            && code != 0 {
                 let stderr_str = String::from_utf8_lossy(&result.stderr);
                 let _ = handle.destroy().await;
                 anyhow::bail!("claude exited with code {code}: {stderr_str}");
             }
-        }
 
         // Destroy the sandbox to release resources (workspace dirs, VM state, TAP devices).
         // Each execute() provisions a fresh sandbox, so there's nothing to preserve.

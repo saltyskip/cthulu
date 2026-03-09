@@ -163,11 +163,10 @@ impl Serialize for RichTextInline {
                 let mut map = serializer.serialize_map(Some(count))?;
                 map.serialize_entry("type", "text")?;
                 map.serialize_entry("text", text)?;
-                if let Some(s) = style {
-                    if s.has_any() {
+                if let Some(s) = style
+                    && s.has_any() {
                         map.serialize_entry("style", s)?;
                     }
-                }
                 map.end()
             }
             RichTextInline::Link { url, text, style } => {
@@ -185,11 +184,10 @@ impl Serialize for RichTextInline {
                 if let Some(t) = text {
                     map.serialize_entry("text", t)?;
                 }
-                if let Some(s) = style {
-                    if s.has_any() {
+                if let Some(s) = style
+                    && s.has_any() {
                         map.serialize_entry("style", s)?;
                     }
-                }
                 map.end()
             }
             RichTextInline::Emoji { name } => {

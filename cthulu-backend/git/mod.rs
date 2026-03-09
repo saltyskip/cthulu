@@ -373,8 +373,8 @@ fn remove_single_worktree(entry: &WorktreeEntry) -> Result<()> {
         ])
         .output();
 
-    if let Ok(out) = &output {
-        if !out.status.success() {
+    if let Ok(out) = &output
+        && !out.status.success() {
             // If worktree dir is already gone, try prune instead
             let _ = Command::new("git")
                 .args([
@@ -385,7 +385,6 @@ fn remove_single_worktree(entry: &WorktreeEntry) -> Result<()> {
                 ])
                 .output();
         }
-    }
 
     // Delete the branch
     let _ = Command::new("git")

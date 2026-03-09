@@ -382,11 +382,10 @@ pub fn parse_template_yaml(yaml: &str) -> Result<Flow> {
         edges.push(make_edge(&trigger_id, src_id));
     }
     // if no sources, trigger → first executor
-    if source_ids.is_empty() {
-        if let Some(first_exec) = executor_ids.first() {
+    if source_ids.is_empty()
+        && let Some(first_exec) = executor_ids.first() {
             edges.push(make_edge(&trigger_id, first_exec));
         }
-    }
 
     // sources → first executor (fan-in)
     if let Some(first_exec) = executor_ids.first() {

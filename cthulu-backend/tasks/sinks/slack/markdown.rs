@@ -43,8 +43,8 @@ pub fn markdown_to_blocks(text: &str) -> Vec<Block> {
         }
 
         // # Header → Header block with auto emoji
-        if let Some(header_text) = trimmed.strip_prefix("# ") {
-            if !trimmed.starts_with("## ") {
+        if let Some(header_text) = trimmed.strip_prefix("# ")
+            && !trimmed.starts_with("## ") {
                 flush_paragraph(&mut blocks, &mut paragraph_lines);
                 flush_bullets(&mut blocks, &mut bullet_items);
                 let mut h = header_text.trim().to_string();
@@ -64,7 +64,6 @@ pub fn markdown_to_blocks(text: &str) -> Vec<Block> {
                 });
                 continue;
             }
-        }
 
         // ## or ### → bold mrkdwn Section block
         if let Some(header_text) = trimmed
@@ -224,8 +223,8 @@ pub(crate) fn parse_inline_elements(text: &str) -> Vec<RichTextInline> {
 
     while i < chars.len() {
         // **bold**
-        if i + 1 < chars.len() && chars[i] == '*' && chars[i + 1] == '*' {
-            if let Some(end) = find_closing_double_star(&chars, i + 2) {
+        if i + 1 < chars.len() && chars[i] == '*' && chars[i + 1] == '*'
+            && let Some(end) = find_closing_double_star(&chars, i + 2) {
                 if !plain.is_empty() {
                     elements.push(RichTextInline::Text {
                         text: std::mem::take(&mut plain),
@@ -240,11 +239,10 @@ pub(crate) fn parse_inline_elements(text: &str) -> Vec<RichTextInline> {
                 i = end + 2;
                 continue;
             }
-        }
 
         // `code`
-        if chars[i] == '`' {
-            if let Some(end) = find_closing_char(&chars, i + 1, '`') {
+        if chars[i] == '`'
+            && let Some(end) = find_closing_char(&chars, i + 1, '`') {
                 if !plain.is_empty() {
                     elements.push(RichTextInline::Text {
                         text: std::mem::take(&mut plain),
@@ -259,11 +257,10 @@ pub(crate) fn parse_inline_elements(text: &str) -> Vec<RichTextInline> {
                 i = end + 1;
                 continue;
             }
-        }
 
         // [text](url)
-        if chars[i] == '[' {
-            if let Some((link_text, url, end)) = parse_md_link(&chars, i) {
+        if chars[i] == '['
+            && let Some((link_text, url, end)) = parse_md_link(&chars, i) {
                 if !plain.is_empty() {
                     elements.push(RichTextInline::Text {
                         text: std::mem::take(&mut plain),
@@ -278,11 +275,10 @@ pub(crate) fn parse_inline_elements(text: &str) -> Vec<RichTextInline> {
                 i = end;
                 continue;
             }
-        }
 
         // :emoji:
-        if chars[i] == ':' {
-            if let Some((name, end)) = parse_emoji(&chars, i) {
+        if chars[i] == ':'
+            && let Some((name, end)) = parse_emoji(&chars, i) {
                 if !plain.is_empty() {
                     elements.push(RichTextInline::Text {
                         text: std::mem::take(&mut plain),
@@ -293,7 +289,6 @@ pub(crate) fn parse_inline_elements(text: &str) -> Vec<RichTextInline> {
                 i = end;
                 continue;
             }
-        }
 
         plain.push(chars[i]);
         i += 1;

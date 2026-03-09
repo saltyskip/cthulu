@@ -52,14 +52,13 @@ impl FileAgentRepository {
     pub async fn reload_file(&self, filename: &str) -> Option<String> {
         let path = self.dir.join(filename);
         for attempt in 0..2 {
-            if let Ok(content) = std::fs::read_to_string(&path) {
-                if let Ok(agent) = serde_json::from_str::<Agent>(&content) {
+            if let Ok(content) = std::fs::read_to_string(&path)
+                && let Ok(agent) = serde_json::from_str::<Agent>(&content) {
                     let id = agent.id.clone();
                     self.agents.write().await.insert(id.clone(), agent);
                     tracing::debug!(agent_id = %id, filename, "reloaded agent from disk");
                     return Some(id);
                 }
-            }
             if attempt == 0 {
                 tokio::time::sleep(std::time::Duration::from_millis(100)).await;
             }

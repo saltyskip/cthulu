@@ -7,6 +7,7 @@ use hyper::StatusCode;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::convert::Infallible;
+use std::pin::Pin;
 use uuid::Uuid;
 
 use crate::api::AppState;
@@ -15,6 +16,10 @@ use crate::api::InteractSession;
 use crate::api::LiveClaudeProcess;
 use crate::flows::{Edge, Flow, Node, NodeType};
 use tokio::sync::broadcast;
+
+/// Boxed SSE stream type — used when multiple code paths can
+/// produce different concrete stream types.
+type BoxSseStream = Pin<Box<dyn Stream<Item = Result<Event, Infallible>> + Send>>;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -270,11 +275,10 @@ pub(crate) async fn delete_session(
 
         flow_sessions.sessions.retain(|s| s.session_id != session_id);
 
-        if flow_sessions.active_session == session_id {
-            if let Some(last) = flow_sessions.sessions.last() {
+        if flow_sessions.active_session == session_id
+            && let Some(last) = flow_sessions.sessions.last() {
                 flow_sessions.active_session = last.session_id.clone();
             }
-        }
 
         flow_sessions.active_session.clone()
     };
@@ -399,15 +403,14 @@ pub(crate) async fn kill_session(
 
     // Clear busy flag
     let mut all_sessions = state.interact_sessions.write().await;
-    if let Some(flow_sessions) = all_sessions.get_mut(&key) {
-        if let Some(session) = flow_sessions.get_session_mut(&session_id) {
+    if let Some(flow_sessions) = all_sessions.get_mut(&key)
+        && let Some(session) = flow_sessions.get_session_mut(&session_id) {
             if let Some(pid) = session.active_pid.take() {
                 kill_pid(pid);
             }
             session.busy = false;
             session.busy_since = None;
         }
-    }
 
     let sessions_snapshot = all_sessions.clone();
     drop(all_sessions);
@@ -443,7 +446,10 @@ pub(crate) async fn chat(
     State(state): State<AppState>,
     Path(id): Path<String>,
     Json(body): Json<ChatRequest>,
-) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, (StatusCode, Json<Value>)> {
+) -> Result<
+    Sse<axum::response::sse::KeepAliveStream<BoxSseStream>>,
+    (StatusCode, Json<Value>),
+> {
     let agent = state.agent_repo.get(&id).await.ok_or_else(|| {
         (StatusCode::NOT_FOUND, Json(json!({ "error": "agent not found" })))
     })?;
@@ -545,12 +551,11 @@ pub(crate) async fn chat(
 
         // Race condition: if another request created the entry between our read
         // and write locks, clean up the unused worktree group
-        if !used_prepared_worktree {
-            if let Some((_, ref meta)) = prepared_worktree {
+        if !used_prepared_worktree
+            && let Some((_, ref meta)) = prepared_worktree {
                 let group = meta.to_worktree_group();
                 let _ = crate::git::remove_worktree_group(&group);
             }
-        }
 
         let target_sid = body.session_id
             .unwrap_or_else(|| flow_sessions.active_session.clone());
@@ -716,8 +721,8 @@ pub(crate) async fn chat(
 
                 // Sync user-uploaded attachments to .skills/
                 let att_dir = attachments_path(&data_dir, &flow.id, node_id);
-                if att_dir.exists() {
-                    if let Ok(entries) = std::fs::read_dir(&att_dir) {
+                if att_dir.exists()
+                    && let Ok(entries) = std::fs::read_dir(&att_dir) {
                         for entry in entries.flatten() {
                             let p = entry.path();
                             if p.is_file() {
@@ -725,17 +730,15 @@ pub(crate) async fn chat(
                             }
                         }
                     }
-                }
             }
 
             // 3. Store skills_dir path in session
             {
                 let mut all_sessions = state.interact_sessions.write().await;
-                if let Some(fs) = all_sessions.get_mut(&key) {
-                    if let Some(s) = fs.get_session_mut(&target_session_id) {
+                if let Some(fs) = all_sessions.get_mut(&key)
+                    && let Some(s) = fs.get_session_mut(&target_session_id) {
                         s.skills_dir = Some(skills_dir.to_string_lossy().to_string());
                     }
-                }
                 let sessions_snapshot = all_sessions.clone();
                 drop(all_sessions);
                 state.save_sessions_to_disk(&sessions_snapshot);
@@ -762,11 +765,10 @@ pub(crate) async fn chat(
                 agent_name = agent.name,
             );
 
-            if let Some(ref extra) = append_system_prompt {
-                if !extra.is_empty() {
+            if let Some(ref extra) = append_system_prompt
+                && !extra.is_empty() {
                     sys_prompt.push_str(&format!("\n\n{extra}"));
                 }
-            }
 
             Some(sys_prompt)
         } else {
@@ -779,17 +781,20 @@ pub(crate) async fn chat(
                 working_dir = working_dir,
             );
 
-            if let Some(ref extra) = append_system_prompt {
-                if !extra.is_empty() {
+            if let Some(ref extra) = append_system_prompt
+                && !extra.is_empty() {
                     sys_prompt.push_str(&format!("\n\n{extra}"));
                 }
-            }
 
             Some(sys_prompt)
         }
     } else {
         None
     };
+
+    // -----------------------------------------------------------------------
+    // LiveClaudeProcess (stdin/stdout subprocess)
+    // -----------------------------------------------------------------------
 
     let key_for_stream = key.clone();
     let proc_key_for_stream = process_key(&id, &target_session_id);
@@ -864,11 +869,10 @@ pub(crate) async fn chat(
                     Ok(mut child) => {
                         if let Some(pid) = child.id() {
                             let mut all_sessions = sessions_ref.write().await;
-                            if let Some(fs) = all_sessions.get_mut(&key_for_stream) {
-                                if let Some(s) = fs.get_session_mut(&session_id_for_stream) {
+                            if let Some(fs) = all_sessions.get_mut(&key_for_stream)
+                                && let Some(s) = fs.get_session_mut(&session_id_for_stream) {
                                     s.active_pid = Some(pid);
                                 }
-                            }
                         }
 
                         let child_stdin = child.stdin.take().expect("stdin piped");
@@ -917,12 +921,11 @@ pub(crate) async fn chat(
             Some(Err(e)) => {
                 tracing::error!(error = %e, "failed to spawn claude for agent chat");
                 let mut all_sessions = sessions_ref.write().await;
-                if let Some(fs) = all_sessions.get_mut(&key_for_stream) {
-                    if let Some(s) = fs.get_session_mut(&session_id_for_stream) {
+                if let Some(fs) = all_sessions.get_mut(&key_for_stream)
+                    && let Some(s) = fs.get_session_mut(&session_id_for_stream) {
                         s.busy = false;
                         s.busy_since = None;
                     }
-                }
                 yield Ok(Event::default().event("error").data(
                     serde_json::to_string(&json!({"message": format!("failed to spawn claude: {e}")})).unwrap()
                 ));
@@ -976,13 +979,12 @@ pub(crate) async fn chat(
                     tracing::error!(error = %e, "failed to write to persistent claude stdin");
                     pool.remove(&proc_key_for_stream);
                     let mut all_sessions = sessions_ref.write().await;
-                    if let Some(fs) = all_sessions.get_mut(&key_for_stream) {
-                        if let Some(s) = fs.get_session_mut(&session_id_for_stream) {
+                    if let Some(fs) = all_sessions.get_mut(&key_for_stream)
+                        && let Some(s) = fs.get_session_mut(&session_id_for_stream) {
                             s.busy = false;
                             s.busy_since = None;
                             s.active_pid = None;
                         }
-                    }
                     yield Ok(Event::default().event("error").data(
                         serde_json::to_string(&json!({"message": format!("stdin write failed: {e}. Session will restart on next message.")})).unwrap()
                     ));
@@ -1120,9 +1122,9 @@ pub(crate) async fn chat(
                             // Send git snapshot after result (before done)
                             {
                                 let sessions = sessions_ref.read().await;
-                                if let Some(fs) = sessions.get(&key_for_bg) {
-                                    if let Some(s) = fs.get_session(&sid_for_bg) {
-                                        if let Some(ref wt_meta) = s.worktree_group {
+                                if let Some(fs) = sessions.get(&key_for_bg)
+                                    && let Some(s) = fs.get_session(&sid_for_bg)
+                                        && let Some(ref wt_meta) = s.worktree_group {
                                             let snapshot = crate::git::snapshot_from_meta(wt_meta);
                                             if let Ok(snap_json) = serde_json::to_string(&snapshot) {
                                                 let git_event = format!("git_snapshot:{snap_json}");
@@ -1134,8 +1136,6 @@ pub(crate) async fn chat(
                                                 }
                                             }
                                         }
-                                    }
-                                }
                             }
                             break;
                         }
@@ -1163,14 +1163,13 @@ pub(crate) async fn chat(
                 }
                 {
                     let mut all_sessions = sessions_ref.write().await;
-                    if let Some(fs) = all_sessions.get_mut(&key_for_bg) {
-                        if let Some(s) = fs.get_session_mut(&sid_for_bg) {
+                    if let Some(fs) = all_sessions.get_mut(&key_for_bg)
+                        && let Some(s) = fs.get_session_mut(&sid_for_bg) {
                             s.busy = false;
                             s.busy_since = None;
                             s.message_count += 1;
                             s.total_cost += session_cost;
                         }
-                    }
                     let sessions_snapshot = all_sessions.clone();
                     drop(all_sessions);
                     crate::api::save_sessions(&sessions_path, &sessions_snapshot);
@@ -1242,7 +1241,8 @@ pub(crate) async fn chat(
         }
     };
 
-    Ok(Sse::new(stream).keep_alive(KeepAlive::new().interval(std::time::Duration::from_secs(15))))
+    let boxed: BoxSseStream = Box::pin(stream);
+    Ok(Sse::new(boxed).keep_alive(KeepAlive::new().interval(std::time::Duration::from_secs(15))))
 }
 
 /// Parse a raw Claude stdout line into a list of (event_type, data_json) pairs
@@ -1513,15 +1513,14 @@ pub(crate) async fn stream_session_log(
 
     let stream = async_stream::stream! {
         // 1. Replay existing lines from JSONL file (catch-up)
-        if log_path.exists() {
-            if let Ok(content) = tokio::fs::read_to_string(&log_path).await {
+        if log_path.exists()
+            && let Ok(content) = tokio::fs::read_to_string(&log_path).await {
                 for line in content.lines() {
                     if !line.is_empty() {
                         yield Ok(Event::default().event("line").data(line));
                     }
                 }
             }
-        }
 
         // 2. Subscribe to broadcast for live lines (if session is still busy)
         let is_busy = {

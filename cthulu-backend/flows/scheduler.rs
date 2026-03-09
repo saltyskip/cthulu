@@ -78,11 +78,10 @@ impl FlowScheduler {
     pub async fn start_all(&self) {
         let flows = self.flow_repo.list_flows().await;
         for flow in flows {
-            if flow.enabled {
-                if let Err(e) = self.start_flow(&flow.id).await {
+            if flow.enabled
+                && let Err(e) = self.start_flow(&flow.id).await {
                     tracing::error!(flow = %flow.name, error = %e, "Failed to start flow trigger");
                 }
-            }
         }
     }
 

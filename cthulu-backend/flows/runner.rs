@@ -327,9 +327,7 @@ impl FlowRunner {
             .unwrap_or(run);
 
         // If execute_inner itself errored (not just node failures), propagate
-        if let Err(e) = result {
-            return Err(e);
-        }
+        result?;
 
         Ok(run)
     }
@@ -362,11 +360,10 @@ impl FlowRunner {
         let mut outputs: HashMap<String, NodeOutput> = HashMap::new();
 
         // Inject context as trigger output if provided (GitHub PR path)
-        if let Some(ctx) = context {
-            if let Some(trigger) = flow.nodes.iter().find(|n| n.node_type == NodeType::Trigger) {
+        if let Some(ctx) = context
+            && let Some(trigger) = flow.nodes.iter().find(|n| n.node_type == NodeType::Trigger) {
                 outputs.insert(trigger.id.clone(), NodeOutput::Context(ctx));
             }
-        }
 
         let deps = NodeDeps {
             http_client: Arc::clone(&self.http_client),

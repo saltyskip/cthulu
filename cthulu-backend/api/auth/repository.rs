@@ -2,13 +2,11 @@
 /// 1. macOS Keychain (`security find-generic-password -s "Claude Code-credentials"`)
 /// 2. CLAUDE_CODE_OAUTH_TOKEN env var
 pub fn read_oauth_token() -> Option<String> {
-    if let Some(raw) = read_keychain_raw() {
-        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&raw) {
-            if let Some(token) = v["claudeAiOauth"]["accessToken"].as_str() {
+    if let Some(raw) = read_keychain_raw()
+        && let Ok(v) = serde_json::from_str::<serde_json::Value>(&raw)
+            && let Some(token) = v["claudeAiOauth"]["accessToken"].as_str() {
                 return Some(token.to_string());
             }
-        }
-    }
 
     // Fall back to env var
     std::env::var("CLAUDE_CODE_OAUTH_TOKEN")

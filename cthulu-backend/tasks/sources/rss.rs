@@ -106,8 +106,8 @@ fn extract_og_image_from_html(html: &str) -> Option<String> {
         };
         let tag = &lower[abs_pos..=tag_end];
 
-        if tag.contains("og:image") && !tag.contains("og:image:") {
-            if let Some(content_start) = tag.find("content=") {
+        if tag.contains("og:image") && !tag.contains("og:image:")
+            && let Some(content_start) = tag.find("content=") {
                 let rest = &tag[content_start + 8..];
                 let (quote, rest) = if rest.starts_with('"') {
                     ('"', &rest[1..])
@@ -124,7 +124,6 @@ fn extract_og_image_from_html(html: &str) -> Option<String> {
                     }
                 }
             }
-        }
         search_from = tag_end;
     }
     None

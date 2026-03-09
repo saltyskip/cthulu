@@ -222,8 +222,8 @@ fn markdown_to_notion_blocks(text: &str) -> Vec<Value> {
         // Callout: > 🔥 text (blockquote where first char after > is emoji)
         if let Some(rest) = trimmed.strip_prefix("> ") {
             let mut chars = rest.chars();
-            if let Some(first_char) = chars.next() {
-                if is_likely_emoji(first_char) {
+            if let Some(first_char) = chars.next()
+                && is_likely_emoji(first_char) {
                     // Consume trailing variation selector (U+FE0F) if present
                     let mut emoji = first_char.to_string();
                     let remaining = chars.as_str();
@@ -245,7 +245,6 @@ fn markdown_to_notion_blocks(text: &str) -> Vec<Value> {
                     }));
                     continue;
                 }
-            }
 
             // Plain blockquote → quote block
             flush_paragraph(&mut paragraph_lines, &mut blocks);
@@ -271,8 +270,8 @@ fn markdown_to_notion_blocks(text: &str) -> Vec<Value> {
         }
 
         // Bookmark: [Title](url) alone on a line (not an image)
-        if trimmed.starts_with('[') && !trimmed.starts_with("[meme:") {
-            if let Some((link_text, url)) = parse_link_only(trimmed) {
+        if trimmed.starts_with('[') && !trimmed.starts_with("[meme:")
+            && let Some((link_text, url)) = parse_link_only(trimmed) {
                 flush_paragraph(&mut paragraph_lines, &mut blocks);
                 let mut block = json!({
                     "object": "block",
@@ -288,7 +287,6 @@ fn markdown_to_notion_blocks(text: &str) -> Vec<Value> {
                 blocks.push(block);
                 continue;
             }
-        }
 
         // Bulleted list item
         if let Some(rest) = trimmed.strip_prefix("- ").or_else(|| trimmed.strip_prefix("* ")) {
@@ -485,8 +483,8 @@ fn parse_inline(text: &str) -> Vec<Value> {
         let after = &remaining[pos..];
 
         // Bold: **...**
-        if after.starts_with("**") {
-            if let Some(end) = after[2..].find("**") {
+        if after.starts_with("**")
+            && let Some(end) = after[2..].find("**") {
                 let bold_text = &after[2..2 + end];
                 spans.push(json!({
                     "type": "text",
@@ -496,11 +494,10 @@ fn parse_inline(text: &str) -> Vec<Value> {
                 remaining = &after[2 + end + 2..];
                 continue;
             }
-        }
 
         // Code: `...`
-        if after.starts_with('`') {
-            if let Some(end) = after[1..].find('`') {
+        if after.starts_with('`')
+            && let Some(end) = after[1..].find('`') {
                 let code_text = &after[1..1 + end];
                 spans.push(json!({
                     "type": "text",
@@ -510,11 +507,10 @@ fn parse_inline(text: &str) -> Vec<Value> {
                 remaining = &after[1 + end + 1..];
                 continue;
             }
-        }
 
         // Link: [text](url)
-        if after.starts_with('[') {
-            if let Some(close_bracket) = after.find("](") {
+        if after.starts_with('[')
+            && let Some(close_bracket) = after.find("](") {
                 let link_text = &after[1..close_bracket];
                 let url_start = close_bracket + 2;
                 if let Some(close_paren) = after[url_start..].find(')') {
@@ -530,11 +526,10 @@ fn parse_inline(text: &str) -> Vec<Value> {
                     continue;
                 }
             }
-        }
 
         // Color: {color:text}
-        if after.starts_with('{') {
-            if let Some(colon) = after[1..].find(':') {
+        if after.starts_with('{')
+            && let Some(colon) = after[1..].find(':') {
                 let color_name = &after[1..1 + colon];
                 if is_notion_color(color_name) {
                     let inner_start = 1 + colon + 1;
@@ -550,7 +545,6 @@ fn parse_inline(text: &str) -> Vec<Value> {
                     }
                 }
             }
-        }
 
         // Token didn't match a complete pattern — emit the character as plain text
         spans.push(rich_text_plain(&after[..1]));

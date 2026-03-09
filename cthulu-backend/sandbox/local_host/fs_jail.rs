@@ -83,11 +83,10 @@ impl FsJail {
 
     pub fn put_file(&self, req: &PutFileRequest) -> Result<(), SandboxError> {
         let path = self.resolve(&req.path)?;
-        if req.create_parents {
-            if let Some(parent) = path.parent() {
+        if req.create_parents
+            && let Some(parent) = path.parent() {
                 std::fs::create_dir_all(parent)?;
             }
-        }
         std::fs::write(&path, &req.bytes)?;
         #[cfg(unix)]
         if let Some(mode) = req.mode {

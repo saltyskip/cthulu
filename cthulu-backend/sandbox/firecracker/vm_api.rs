@@ -7,7 +7,7 @@
 //! The TCP path is useful when FC's Unix socket is exposed via socat/port-forward
 //! from a Lima VM to the macOS host.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use crate::sandbox::error::SandboxError;
 use crate::sandbox::firecracker::host_transport::HostTransport;
@@ -137,7 +137,7 @@ impl FirecrackerVmApi {
                 let status = resp.status().as_u16();
                 let resp_body = resp.text().await.unwrap_or_default();
 
-                if status >= 200 && status < 300 {
+                if (200..300).contains(&status) {
                     Ok(resp_body)
                 } else {
                     Err(SandboxError::Backend(format!(
@@ -195,7 +195,7 @@ impl FirecrackerVmApi {
                 let status = resp.status().as_u16();
                 let resp_body = resp.text().await.unwrap_or_default();
 
-                if status >= 200 && status < 300 {
+                if (200..300).contains(&status) {
                     Ok(resp_body)
                 } else {
                     Err(SandboxError::Backend(format!(
@@ -252,7 +252,7 @@ impl FirecrackerVmApi {
                 let status = resp.status().as_u16();
                 let resp_body = resp.text().await.unwrap_or_default();
 
-                if status >= 200 && status < 300 {
+                if (200..300).contains(&status) {
                     Ok(resp_body)
                 } else {
                     Err(SandboxError::Backend(format!(
@@ -313,7 +313,7 @@ impl FirecrackerVmApi {
             )));
         }
 
-        if status >= 200 && status < 300 {
+        if (200..300).contains(&status) {
             Ok(body)
         } else {
             Err(SandboxError::Backend(format!(

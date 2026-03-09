@@ -68,12 +68,11 @@ impl ProcessSupervisor {
         let mut child = cmd.spawn().map_err(|e| SandboxError::Exec(format!("spawn failed: {e}")))?;
 
         // Write stdin if provided
-        if let Some(input) = &req.stdin {
-            if let Some(mut stdin) = child.stdin.take() {
+        if let Some(input) = &req.stdin
+            && let Some(mut stdin) = child.stdin.take() {
                 let _ = stdin.write_all(input).await;
                 drop(stdin);
             }
-        }
 
         // Collect stdout
         let stdout_handle = child.stdout.take().unwrap();

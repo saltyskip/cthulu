@@ -4596,6 +4596,29 @@ button:disabled {
 .ac-btn-stop { border-color: var(--danger); color: var(--danger); }
 .ac-btn-stop:hover { background: color-mix(in srgb, var(--danger) 10%, var(--bg-secondary)); }
 
+.ac-btn-voice {
+  font-size: 14px;
+  padding: 4px 6px;
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+  border-radius: 4px;
+  transition: color 0.15s, background 0.15s;
+}
+.ac-btn-voice:hover { color: var(--text); background: var(--bg-tertiary); }
+.ac-voice-active { color: var(--accent); }
+.ac-voice-listening {
+  color: var(--danger);
+  animation: voice-pulse 1s ease-in-out infinite;
+}
+.ac-voice-speaking { color: var(--success); }
+@keyframes voice-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
 .ac-btn-attach {
   font-size: 14px;
   padding: 4px 6px;

@@ -80,7 +80,7 @@ pub(crate) async fn token_status(State(state): State<AppState>) -> impl IntoResp
 /// message spawns a fresh process with the new token), and returns the result.
 pub(crate) async fn refresh_token(State(state): State<AppState>) -> impl IntoResponse {
     let new_token = repository::read_oauth_token();
-    let credentials_json = repository::read_full_credentials();
+    let _credentials_json = repository::read_full_credentials();
 
     match new_token {
         Some(token) => {
@@ -133,4 +133,3 @@ pub(crate) async fn refresh_token(State(state): State<AppState>) -> impl IntoRes
 }
 
 // Re-export for cross-slice access (used by flows/handlers.rs)
-pub use super::repository::read_full_credentials;

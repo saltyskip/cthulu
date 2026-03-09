@@ -362,11 +362,10 @@ async fn find_agent_id_for_session(state: &AppState, session_id: &str) -> Option
     let all_sessions = state.interact_sessions.read().await;
     for (key, flow_sessions) in all_sessions.iter() {
         for session in &flow_sessions.sessions {
-            if session.session_id == session_id {
-                if let Some(agent_id) = key.strip_prefix("agent::") {
+            if session.session_id == session_id
+                && let Some(agent_id) = key.strip_prefix("agent::") {
                     return Some(agent_id.to_string());
                 }
-            }
         }
     }
     None

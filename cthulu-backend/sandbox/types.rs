@@ -88,21 +88,13 @@ pub struct MountSpec {
 }
 
 #[derive(Debug, Clone)]
+#[derive(Default)]
 pub struct LifecyclePolicy {
     pub idle_timeout: Option<Duration>,
     pub auto_sleep: bool,
     pub ttl: Option<Duration>,
 }
 
-impl Default for LifecyclePolicy {
-    fn default() -> Self {
-        Self {
-            idle_timeout: None,
-            auto_sleep: false,
-            ttl: None,
-        }
-    }
-}
 
 // ── Network policy ──────────────────────────────────────────────────
 

@@ -177,12 +177,11 @@ impl GuestAgent for SshGuestAgent {
             .spawn()?;
 
         // Write stdin if provided
-        if let Some(stdin_data) = &req.stdin {
-            if let Some(mut stdin) = child.stdin.take() {
+        if let Some(stdin_data) = &req.stdin
+            && let Some(mut stdin) = child.stdin.take() {
                 stdin.write_all(stdin_data).await?;
                 drop(stdin);
             }
-        }
 
         // Wait with timeout — capture PID before wait_with_output consumes child
         let child_pid = child.id();

@@ -120,11 +120,10 @@ pub async fn run_claude(
         let err_reader = BufReader::new(stderr);
         let mut err_lines = LinesStream::new(err_reader.lines());
         while let Some(line) = err_lines.next().await {
-            if let Ok(text) = line {
-                if !text.is_empty() {
+            if let Ok(text) = line
+                && !text.is_empty() {
                     yield Ok(Event::default().event("stderr").data(text));
                 }
-            }
         }
 
         match child.wait().await {

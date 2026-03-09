@@ -11,7 +11,7 @@ pub mod firecracker;
 mod sprite;
 
 pub use error::SandboxError;
-pub use handle::{ExecStream, SandboxHandle};
+pub use handle::SandboxHandle;
 pub use provider::SandboxProvider;
 pub use types::*;
 

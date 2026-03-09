@@ -129,8 +129,8 @@ pub(crate) async fn update_flow(
     })?;
 
     // Optimistic concurrency: reject stale writes
-    if let Some(client_version) = body.version {
-        if client_version < flow.version {
+    if let Some(client_version) = body.version
+        && client_version < flow.version {
             return Err((
                 StatusCode::CONFLICT,
                 Json(json!({
@@ -139,7 +139,6 @@ pub(crate) async fn update_flow(
                 })),
             ));
         }
-    }
 
     if let Some(name) = body.name {
         flow.name = name;
@@ -237,8 +236,8 @@ pub(crate) async fn trigger_flow(
         serde_json::from_str(&body).ok()
     };
 
-    if let Some(trigger_body) = &trigger_body {
-        if let (Some(repo), Some(pr)) = (&trigger_body.repo, trigger_body.pr) {
+    if let Some(trigger_body) = &trigger_body
+        && let (Some(repo), Some(pr)) = (&trigger_body.repo, trigger_body.pr) {
             let scheduler = state.scheduler.clone();
             let flow_id = id.clone();
             let repo = repo.clone();
@@ -255,7 +254,6 @@ pub(crate) async fn trigger_flow(
                 Json(json!({ "status": "pr_review_started", "flow_id": id, "repo": repo_for_response, "pr": pr })),
             ));
         }
-    }
 
     // Default: one-shot flow execution
     let session_bridge = crate::flows::session_bridge::SessionBridge {

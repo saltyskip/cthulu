@@ -82,14 +82,13 @@ impl FileFlowRepository {
     pub async fn reload_file(&self, filename: &str) -> Option<String> {
         let path = self.flows_dir().join(filename);
         for attempt in 0..2 {
-            if let Ok(content) = std::fs::read_to_string(&path) {
-                if let Ok(flow) = serde_json::from_str::<Flow>(&content) {
+            if let Ok(content) = std::fs::read_to_string(&path)
+                && let Ok(flow) = serde_json::from_str::<Flow>(&content) {
                     let id = flow.id.clone();
                     self.flows.write().await.insert(id.clone(), flow);
                     tracing::debug!(flow_id = %id, filename, "reloaded flow from disk");
                     return Some(id);
                 }
-            }
             if attempt == 0 {
                 tokio::time::sleep(std::time::Duration::from_millis(100)).await;
             }
@@ -113,13 +112,12 @@ impl FileFlowRepository {
         F: FnOnce(&mut FlowRun),
     {
         let mut runs = self.runs.write().await;
-        if let Some(queue) = runs.get_mut(flow_id) {
-            if let Some(run) = queue.iter_mut().find(|r| r.id == run_id) {
+        if let Some(queue) = runs.get_mut(flow_id)
+            && let Some(run) = queue.iter_mut().find(|r| r.id == run_id) {
                 mutate(run);
                 self.flush_run(flow_id, run)?;
                 return Ok(());
             }
-        }
         bail!("run {run_id} not found for flow {flow_id}")
     }
 }

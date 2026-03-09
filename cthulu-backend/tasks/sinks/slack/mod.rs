@@ -112,14 +112,13 @@ async fn post_threaded_blocks(
         .await
         .context("failed to post main message")?;
 
-    if let Some(detail) = thread_text {
-        if !detail.is_empty() {
+    if let Some(detail) = thread_text
+        && !detail.is_empty() {
             let thread_blocks = markdown_to_blocks(detail);
             post_blocks(client, bot_token, channel, &thread_blocks, Some(&ts))
                 .await
                 .context("failed to post thread reply")?;
         }
-    }
 
     tracing::info!("Delivered Block Kit message to Slack");
     Ok(())

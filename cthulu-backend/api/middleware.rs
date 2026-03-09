@@ -17,10 +17,10 @@ pub async fn enrich_current_span_middleware(req: Request<Body>, next: Next) -> R
 
     let current_span = Span::current();
 
-    current_span.record("http.uri", &uri.path());
-    current_span.record("http.host", &host);
+    current_span.record("http.uri", uri.path());
+    current_span.record("http.host", host);
     if let Some(query) = uri.query() {
-        current_span.record("http.query", &query);
+        current_span.record("http.query", query);
     }
 
     next.run(req).await

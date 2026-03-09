@@ -447,8 +447,8 @@ impl SandboxHandle for FirecrackerHandle {
         };
 
         // Ensure parent directory exists in guest
-        if req.create_parents {
-            if let Some(parent) = std::path::Path::new(&guest_path).parent() {
+        if req.create_parents
+            && let Some(parent) = std::path::Path::new(&guest_path).parent() {
                 let mkdir_req = ExecRequest {
                     command: vec![format!("mkdir -p {}", shell_escape(&parent.display().to_string()))],
                     cwd: None,
@@ -460,7 +460,6 @@ impl SandboxHandle for FirecrackerHandle {
                 };
                 self.guest_agent.exec(&mkdir_req).await?;
             }
-        }
 
         self.guest_agent.put_file(&tmp_path, &guest_path).await?;
 
@@ -779,13 +778,11 @@ fn scan_existing_vms(state_dir: &std::path::Path) -> u64 {
     for entry in entries.flatten() {
         let name = entry.file_name().to_string_lossy().to_string();
         // VM dirs are named "fc-{workspace_id}-{seq}"
-        if let Some(rest) = name.strip_prefix("fc-") {
-            if let Some((_, seq_str)) = rest.rsplit_once('-') {
-                if let Ok(seq) = seq_str.parse::<u64>() {
+        if let Some(rest) = name.strip_prefix("fc-")
+            && let Some((_, seq_str)) = rest.rsplit_once('-')
+                && let Ok(seq) = seq_str.parse::<u64>() {
                     max_seq = max_seq.max(seq + 1);
                 }
-            }
-        }
     }
 
     max_seq
