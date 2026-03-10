@@ -68,7 +68,7 @@ export default function Sidebar({
   const refreshAgents = useCallback(async () => {
     try {
       const list = await listAgents();
-      setAgents(list);
+      setAgents(list.filter((a) => !a.subagent_only));
     } catch {
       // Server may not be reachable
     }

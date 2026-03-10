@@ -8,7 +8,7 @@ use uuid::Uuid;
 
 use crate::api::AppState;
 use crate::api::changes::{ChangeType, ResourceChangeEvent, ResourceType};
-use crate::agents::{Agent, AgentHooks, STUDIO_ASSISTANT_ID};
+use crate::agents::{Agent, AgentHooks, SubAgents, STUDIO_ASSISTANT_ID};
 
 pub(crate) async fn list_agents(State(state): State<AppState>) -> Json<Value> {
     let agents = state.agent_repo.list().await;
@@ -22,6 +22,8 @@ pub(crate) async fn list_agents(State(state): State<AppState>) -> Json<Value> {
                 "description": a.description,
                 "permissions": a.permissions,
                 "hooks": a.hooks,
+                "subagent_only": a.subagent_only,
+                "subagent_count": a.subagents.len(),
                 "created_at": a.created_at,
                 "updated_at": a.updated_at,
             })
@@ -60,6 +62,10 @@ pub(crate) struct CreateAgentRequest {
     working_dir: Option<String>,
     #[serde(default)]
     hooks: AgentHooks,
+    #[serde(default)]
+    subagents: SubAgents,
+    #[serde(default)]
+    subagent_only: bool,
 }
 
 pub(crate) async fn create_agent(
@@ -71,7 +77,9 @@ pub(crate) async fn create_agent(
         .description(body.description)
         .prompt(body.prompt)
         .permissions(body.permissions)
-        .hooks(body.hooks);
+        .hooks(body.hooks)
+        .subagents(body.subagents)
+        .subagent_only(body.subagent_only);
     if let Some(s) = body.append_system_prompt {
         builder = builder.append_system_prompt(s);
     }
@@ -114,6 +122,10 @@ pub(crate) struct UpdateAgentRequest {
     working_dir: Option<Option<String>>,
     #[serde(default)]
     hooks: Option<AgentHooks>,
+    #[serde(default)]
+    subagents: Option<SubAgents>,
+    #[serde(default)]
+    subagent_only: Option<bool>,
 }
 
 pub(crate) async fn update_agent(
@@ -148,6 +160,12 @@ pub(crate) async fn update_agent(
     }
     if let Some(hooks) = body.hooks {
         agent.hooks = hooks;
+    }
+    if let Some(subagents) = body.subagents {
+        agent.subagents = subagents;
+    }
+    if let Some(subagent_only) = body.subagent_only {
+        agent.subagent_only = subagent_only;
     }
     agent.updated_at = Utc::now();
 

@@ -1,3 +1,4 @@
+mod agent_sdk;
 mod agents;
 mod config;
 mod flows;
@@ -26,12 +27,7 @@ use tracing_subscriber::util::SubscriberInitExt;
 
 use crate::agents::file_repository::FileAgentRepository;
 use crate::agents::repository::AgentRepository;
-use crate::agents::{
-    STUDIO_ASSISTANT_ID, default_studio_assistant,
-    BUGS_BUNNY_ID, default_bugs_bunny,
-    DAFFY_DUCK_ID, default_daffy_duck,
-    TWEETY_BIRD_ID, default_tweety_bird,
-};
+use crate::agents::{STUDIO_ASSISTANT_ID, default_studio_assistant};
 use crate::api::changes::ResourceChangeEvent;
 use crate::flows::events::RunEvent;
 use crate::flows::file_repository::FileFlowRepository;
@@ -149,19 +145,30 @@ async fn run_server(start_disabled: bool) -> Result<(), Box<dyn Error>> {
         .context("failed to load agent repository")?;
     let agent_repo: Arc<dyn AgentRepository> = file_agent_repo.clone();
 
-    // Seed built-in agents if they don't exist yet
-    let defaults: Vec<(&str, fn() -> crate::agents::Agent)> = vec![
-        (STUDIO_ASSISTANT_ID, default_studio_assistant),
-        (BUGS_BUNNY_ID, default_bugs_bunny),
-        (DAFFY_DUCK_ID, default_daffy_duck),
-        (TWEETY_BIRD_ID, default_tweety_bird),
-    ];
-    for (id, builder) in defaults {
-        if agent_repo.get(id).await.is_none() {
-            tracing::info!(agent_id = %id, "seeding built-in agent");
-            agent_repo.save(builder()).await
-                .context(format!("failed to seed agent {id}"))?;
+    // Seed or migrate the built-in Studio Assistant with sub-agents.
+    // Sub-agents (code-reviewer, bugs-bunny, daffy-duck, tweety-bird) are embedded
+    // in the Studio Assistant's subagents field and passed via --agents to Claude Code.
+    match agent_repo.get(STUDIO_ASSISTANT_ID).await {
+        None => {
+            tracing::info!("seeding built-in Studio Assistant agent with sub-agents");
+            agent_repo
+                .save(default_studio_assistant())
+                .await
+                .with_context(|| "failed to seed Studio Assistant agent")?;
         }
+        Some(existing) if existing.subagents.is_empty() => {
+            // Migration: existing install has Studio Assistant without sub-agents.
+            // Update it with the default sub-agents so the feature works.
+            tracing::info!("migrating Studio Assistant: adding default sub-agents");
+            let mut updated = existing;
+            updated.subagents = crate::agents::default_subagents();
+            updated.updated_at = chrono::Utc::now();
+            agent_repo
+                .save(updated)
+                .await
+                .with_context(|| "failed to migrate Studio Assistant with sub-agents")?;
+        }
+        Some(_) => {} // Already has sub-agents, nothing to do
     }
 
     let (events_tx, _) = tokio::sync::broadcast::channel::<RunEvent>(256);
@@ -358,6 +365,7 @@ async fn run_server(start_disabled: bool) -> Result<(), Box<dyn Error>> {
         oauth_token: Arc::new(tokio::sync::RwLock::new(oauth_token)),
         session_streams,
         chat_event_buffers: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
+        sdk_sessions: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
         pending_permissions: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
         global_hook_tx: Arc::new(tokio::sync::broadcast::channel::<String>(256).0),
         server_port: config.port,
@@ -374,6 +382,7 @@ async fn run_server(start_disabled: bool) -> Result<(), Box<dyn Error>> {
     .context("failed to start file change watcher")?;
 
     let live_processes = app_state.live_processes.clone();
+    let sdk_sessions = app_state.sdk_sessions.clone();
 
     let app = api::create_app(app_state)
         .layer(SentryHttpLayer::new().enable_transaction())
@@ -397,6 +406,15 @@ async fn run_server(start_disabled: bool) -> Result<(), Box<dyn Error>> {
             }
         }
     }
+    {
+        let mut pool = sdk_sessions.lock().await;
+        for (key, mut session) in pool.drain() {
+            if let Err(e) = session.disconnect().await {
+                tracing::trace!(key = %key, error = %e, "SDK session disconnect on shutdown");
+            }
+        }
+    }
+    // Force exit — spawn_blocking reader threads can't be stopped gracefully
     std::process::exit(0);
 
     Ok(())
