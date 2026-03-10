@@ -625,7 +625,11 @@ pub(crate) async fn chat(
     // On first message: generate .skills/ context files and build system prompt
     let data_dir = state.data_dir.clone();
 
-    // Generate .claude/settings.local.json with hook URLs for this session
+    // Generate .claude/settings.local.json with hook URLs for this session.
+    // System hooks (permission gate, file-change broadcast, stop notification) are
+    // always present. Per-agent hooks from agent.hooks are merged in — agent hook
+    // groups are appended *after* the system groups for each event so they can
+    // layer on additional behaviour (e.g. Bugs Bunny's read-only guard).
     {
         let claude_dir = std::path::Path::new(&working_dir).join(".claude");
         let _ = std::fs::create_dir_all(&claude_dir);
@@ -645,35 +649,60 @@ pub(crate) async fn chat(
         let sid = &target_session_id;
         let hook_base = format!("http://localhost:{port}/api/hooks");
 
+        // Start with the system hooks — always present.
         // Hook config: 3 levels — event -> matcher group -> hook handlers
         // See https://code.claude.com/docs/en/hooks
         //
         // NOTE: PermissionRequest hooks do NOT fire in stream-json mode.
-        // We use PreToolUse as the permission gate instead — it fires for every
-        // tool call and can return permissionDecision: "allow" or "deny".
-        settings["hooks"] = json!({
-            "PreToolUse": [{
-                "matcher": "Write|Edit|MultiEdit|NotebookEdit|Bash",
-                "hooks": [{
-                    "type": "http",
-                    "url": format!("{hook_base}/pre-tool-use?session_id={sid}"),
-                    "timeout": 130
-                }]
-            }],
-            "PostToolUse": [{
-                "matcher": "Write|Edit|MultiEdit|NotebookEdit|Bash",
-                "hooks": [{
-                    "type": "http",
-                    "url": format!("{hook_base}/post-tool-use?session_id={sid}")
-                }]
-            }],
-            "Stop": [{
-                "hooks": [{
-                    "type": "http",
-                    "url": format!("{hook_base}/stop?session_id={sid}")
-                }]
+        // We use PreToolUse as the permission gate instead.
+        let mut hooks_map: serde_json::Map<String, Value> = serde_json::Map::new();
+
+        hooks_map.insert("PreToolUse".into(), json!([{
+            "matcher": "Write|Edit|MultiEdit|NotebookEdit|Bash",
+            "hooks": [{
+                "type": "http",
+                "url": format!("{hook_base}/pre-tool-use?session_id={sid}"),
+                "timeout": 130
             }]
-        });
+        }]));
+        hooks_map.insert("PostToolUse".into(), json!([{
+            "matcher": "Write|Edit|MultiEdit|NotebookEdit|Bash",
+            "hooks": [{
+                "type": "http",
+                "url": format!("{hook_base}/post-tool-use?session_id={sid}")
+            }]
+        }]));
+        hooks_map.insert("Stop".into(), json!([{
+            "hooks": [{
+                "type": "http",
+                "url": format!("{hook_base}/stop?session_id={sid}")
+            }]
+        }]));
+
+        // Merge per-agent hooks: append agent hook groups after system groups.
+        if !agent.hooks.is_empty() {
+            for (event, agent_groups) in &agent.hooks {
+                let agent_groups_json = serde_json::to_value(agent_groups).unwrap_or(json!([]));
+                if let Some(existing) = hooks_map.get_mut(event) {
+                    // Event already has system hooks — append agent groups
+                    if let Some(arr) = existing.as_array_mut() {
+                        if let Some(extra) = agent_groups_json.as_array() {
+                            arr.extend(extra.iter().cloned());
+                        }
+                    }
+                } else {
+                    // Event only defined by agent (e.g. SessionStart, UserPromptSubmit)
+                    hooks_map.insert(event.clone(), agent_groups_json);
+                }
+            }
+            tracing::info!(
+                agent_id = %id,
+                agent_hook_events = agent.hooks.len(),
+                "merged per-agent hooks into settings"
+            );
+        }
+
+        settings["hooks"] = Value::Object(hooks_map);
 
         if let Ok(json_str) = serde_json::to_string_pretty(&settings) {
             let _ = std::fs::write(&settings_path, json_str);

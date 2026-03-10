@@ -26,7 +26,12 @@ use tracing_subscriber::util::SubscriberInitExt;
 
 use crate::agents::file_repository::FileAgentRepository;
 use crate::agents::repository::AgentRepository;
-use crate::agents::{STUDIO_ASSISTANT_ID, default_studio_assistant};
+use crate::agents::{
+    STUDIO_ASSISTANT_ID, default_studio_assistant,
+    BUGS_BUNNY_ID, default_bugs_bunny,
+    DAFFY_DUCK_ID, default_daffy_duck,
+    TWEETY_BIRD_ID, default_tweety_bird,
+};
 use crate::api::changes::ResourceChangeEvent;
 use crate::flows::events::RunEvent;
 use crate::flows::file_repository::FileFlowRepository;
@@ -144,13 +149,19 @@ async fn run_server(start_disabled: bool) -> Result<(), Box<dyn Error>> {
         .context("failed to load agent repository")?;
     let agent_repo: Arc<dyn AgentRepository> = file_agent_repo.clone();
 
-    // Seed the built-in Studio Assistant if it doesn't exist yet
-    if agent_repo.get(STUDIO_ASSISTANT_ID).await.is_none() {
-        tracing::info!("seeding built-in Studio Assistant agent");
-        agent_repo
-            .save(default_studio_assistant())
-            .await
-            .context("failed to seed Studio Assistant agent")?;
+    // Seed built-in agents if they don't exist yet
+    let defaults: Vec<(&str, fn() -> crate::agents::Agent)> = vec![
+        (STUDIO_ASSISTANT_ID, default_studio_assistant),
+        (BUGS_BUNNY_ID, default_bugs_bunny),
+        (DAFFY_DUCK_ID, default_daffy_duck),
+        (TWEETY_BIRD_ID, default_tweety_bird),
+    ];
+    for (id, builder) in defaults {
+        if agent_repo.get(id).await.is_none() {
+            tracing::info!(agent_id = %id, "seeding built-in agent");
+            agent_repo.save(builder()).await
+                .context(format!("failed to seed agent {id}"))?;
+        }
     }
 
     let (events_tx, _) = tokio::sync::broadcast::channel::<RunEvent>(256);

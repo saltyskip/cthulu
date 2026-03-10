@@ -8,7 +8,7 @@ use uuid::Uuid;
 
 use crate::api::AppState;
 use crate::api::changes::{ChangeType, ResourceChangeEvent, ResourceType};
-use crate::agents::{Agent, STUDIO_ASSISTANT_ID};
+use crate::agents::{Agent, AgentHooks, STUDIO_ASSISTANT_ID};
 
 pub(crate) async fn list_agents(State(state): State<AppState>) -> Json<Value> {
     let agents = state.agent_repo.list().await;
@@ -21,6 +21,7 @@ pub(crate) async fn list_agents(State(state): State<AppState>) -> Json<Value> {
                 "name": a.name,
                 "description": a.description,
                 "permissions": a.permissions,
+                "hooks": a.hooks,
                 "created_at": a.created_at,
                 "updated_at": a.updated_at,
             })
@@ -57,6 +58,8 @@ pub(crate) struct CreateAgentRequest {
     append_system_prompt: Option<String>,
     #[serde(default)]
     working_dir: Option<String>,
+    #[serde(default)]
+    hooks: AgentHooks,
 }
 
 pub(crate) async fn create_agent(
@@ -67,7 +70,8 @@ pub(crate) async fn create_agent(
         .name(body.name)
         .description(body.description)
         .prompt(body.prompt)
-        .permissions(body.permissions);
+        .permissions(body.permissions)
+        .hooks(body.hooks);
     if let Some(s) = body.append_system_prompt {
         builder = builder.append_system_prompt(s);
     }
@@ -108,6 +112,8 @@ pub(crate) struct UpdateAgentRequest {
     append_system_prompt: Option<Option<String>>,
     #[serde(default)]
     working_dir: Option<Option<String>>,
+    #[serde(default)]
+    hooks: Option<AgentHooks>,
 }
 
 pub(crate) async fn update_agent(
@@ -139,6 +145,9 @@ pub(crate) async fn update_agent(
     }
     if let Some(working_dir) = body.working_dir {
         agent.working_dir = working_dir;
+    }
+    if let Some(hooks) = body.hooks {
+        agent.hooks = hooks;
     }
     agent.updated_at = Utc::now();
 
