@@ -1241,6 +1241,20 @@ pub(crate) async fn chat(
                 // kicks in and fires PermissionRequest hooks (configured in
                 // .claude/settings.local.json) for tools that need approval.
 
+                // Pass sub-agent definitions via Claude Code's native --agents flag.
+                // This lets the parent session delegate to specialized sub-agents.
+                if !agent.subagents.is_empty() {
+                    if let Ok(agents_json) = serde_json::to_string(&agent.subagents) {
+                        args.push("--agents".to_string());
+                        args.push(agents_json);
+                        tracing::info!(
+                            agent_id = %id,
+                            subagent_count = agent.subagents.len(),
+                            "passing sub-agents to claude CLI"
+                        );
+                    }
+                }
+
                 if is_new {
                     args.push("--session-id".to_string());
                     args.push(session_id_for_stream.clone());

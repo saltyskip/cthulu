@@ -43,6 +43,29 @@ pub struct AgentHookGroup {
 pub type AgentHooks = HashMap<String, Vec<AgentHookGroup>>;
 
 // ---------------------------------------------------------------------------
+// Sub-agent definitions — passed to Claude Code via --agents flag
+// ---------------------------------------------------------------------------
+
+/// A sub-agent that can be delegated to within a session.
+/// Matches Claude Code's native `--agents` JSON format.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SubAgentDef {
+    pub description: String,
+    pub prompt: String,
+    pub tools: Vec<String>,
+    #[serde(default = "default_model")]
+    pub model: String,
+    #[serde(default = "default_max_turns", rename = "maxTurns")]
+    pub max_turns: u32,
+}
+
+fn default_model() -> String { "sonnet".into() }
+fn default_max_turns() -> u32 { 10 }
+
+/// Sub-agent map keyed by agent name (e.g. "bugs-bunny").
+pub type SubAgents = HashMap<String, SubAgentDef>;
+
+// ---------------------------------------------------------------------------
 // Agent
 // ---------------------------------------------------------------------------
 
@@ -65,6 +88,14 @@ pub struct Agent {
     /// Per-agent hooks merged into .claude/settings.local.json alongside system hooks.
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub hooks: AgentHooks,
+    /// Sub-agents available via Claude Code's native --agents flag.
+    /// When non-empty, the CLI is spawned with `--agents <json>` so the
+    /// parent session can delegate tasks to specialized sub-agents.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub subagents: SubAgents,
+    /// If true, this agent is only usable as a sub-agent and is hidden from the UI agent list.
+    #[serde(default)]
+    pub subagent_only: bool,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -81,6 +112,8 @@ impl Agent {
             append_system_prompt: None,
             working_dir: None,
             hooks: HashMap::new(),
+            subagents: HashMap::new(),
+            subagent_only: false,
             _state: std::marker::PhantomData,
         }
     }
@@ -100,6 +133,8 @@ pub struct AgentBuilder<State = NeedsName> {
     append_system_prompt: Option<String>,
     working_dir: Option<String>,
     hooks: AgentHooks,
+    subagents: SubAgents,
+    subagent_only: bool,
     _state: std::marker::PhantomData<State>,
 }
 
@@ -115,6 +150,8 @@ impl AgentBuilder<NeedsName> {
             append_system_prompt: self.append_system_prompt,
             working_dir: self.working_dir,
             hooks: self.hooks,
+            subagents: self.subagents,
+            subagent_only: self.subagent_only,
             _state: std::marker::PhantomData,
         }
     }
@@ -150,6 +187,16 @@ impl<S> AgentBuilder<S> {
         self.hooks = h;
         self
     }
+
+    pub fn subagents(mut self, s: SubAgents) -> Self {
+        self.subagents = s;
+        self
+    }
+
+    pub fn subagent_only(mut self, v: bool) -> Self {
+        self.subagent_only = v;
+        self
+    }
 }
 
 impl AgentBuilder<Ready> {
@@ -165,98 +212,66 @@ impl AgentBuilder<Ready> {
             append_system_prompt: self.append_system_prompt,
             working_dir: self.working_dir,
             hooks: self.hooks,
+            subagents: self.subagents,
+            subagent_only: self.subagent_only,
             created_at: now,
             updated_at: now,
         }
     }
 }
 
-/// Create the default Studio Assistant agent.
+/// Build the default sub-agent definitions for the Studio Assistant.
+/// These are passed to Claude Code via `--agents` so the parent session
+/// can delegate tasks to specialized sub-agents natively.
+pub fn default_subagents() -> SubAgents {
+    let mut m = SubAgents::new();
+
+    m.insert("code-reviewer".into(), SubAgentDef {
+        description: "Structured code reviewer. Finds bugs, security issues, regressions with severity tagging.".into(),
+        prompt: include_str!("code_reviewer_prompt.md").into(),
+        tools: vec!["Read".into(), "Grep".into(), "Glob".into(), "Bash".into()],
+        model: "sonnet".into(),
+        max_turns: 20,
+    });
+
+    m.insert("bugs-bunny".into(), SubAgentDef {
+        description: "Personality-driven code reviewer. Finds bugs, code smells, and logic errors with read-only access.".into(),
+        prompt: include_str!("bugs_bunny_prompt.md").into(),
+        tools: vec!["Read".into(), "Grep".into(), "Glob".into()],
+        model: "sonnet".into(),
+        max_turns: 10,
+    });
+
+    m.insert("daffy-duck".into(), SubAgentDef {
+        description: "Bug fixer. Takes review findings and fixes them with targeted edits.".into(),
+        prompt: include_str!("daffy_duck_prompt.md").into(),
+        tools: vec!["Read".into(), "Edit".into(), "Grep".into(), "Glob".into()],
+        model: "sonnet".into(),
+        max_turns: 15,
+    });
+
+    m.insert("tweety-bird".into(), SubAgentDef {
+        description: "Test runner. Runs tests, reports results, identifies coverage gaps.".into(),
+        prompt: include_str!("tweety_bird_prompt.md").into(),
+        tools: vec!["Read".into(), "Bash".into(), "Glob".into()],
+        model: "sonnet".into(),
+        max_turns: 10,
+    });
+
+    m
+}
+
+/// Create the default Studio Assistant agent with sub-agents.
 pub fn default_studio_assistant() -> Agent {
     Agent::builder(STUDIO_ASSISTANT_ID)
         .name("Studio Assistant")
-        .description("Built-in assistant for flow editing and Studio help")
+        .description("Built-in assistant for flow editing and Studio help. Delegates to sub-agents: code-reviewer, bugs-bunny (reviewer), daffy-duck (fixer), tweety-bird (tester).")
         .prompt(include_str!("studio_assistant_prompt.md"))
         .permissions(vec![
             "Read".into(),
             "Grep".into(),
             "Glob".into(),
         ])
-        .build()
-}
-
-pub const BUGS_BUNNY_ID: &str = "bugs-bunny";
-pub const DAFFY_DUCK_ID: &str = "daffy-duck";
-pub const TWEETY_BIRD_ID: &str = "tweety-bird";
-
-pub fn default_bugs_bunny() -> Agent {
-    // Bugs Bunny is read-only — PreToolUse denies Edit/Write as defense-in-depth
-    // (permissions already restrict him, but hooks provide belt-and-suspenders safety).
-    let mut hooks = AgentHooks::new();
-    hooks.insert("PreToolUse".into(), vec![
-        AgentHookGroup {
-            matcher: Some("Edit|Write|MultiEdit|NotebookEdit".into()),
-            hooks: vec![AgentHook::Command {
-                command: r#"echo '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Bugs Bunny is read-only, doc. No editing allowed!"}}';"#.into(),
-            }],
-        },
-    ]);
-
-    Agent::builder(BUGS_BUNNY_ID)
-        .name("Bugs Bunny")
-        .description("Code reviewer. Finds bugs, code smells, and logic errors.")
-        .prompt(include_str!("bugs_bunny_prompt.md"))
-        .permissions(vec!["Read".into(), "Grep".into(), "Glob".into()])
-        .hooks(hooks)
-        .build()
-}
-
-pub fn default_daffy_duck() -> Agent {
-    // Daffy Duck can Edit but not Write (no new files — only fix existing code).
-    let mut hooks = AgentHooks::new();
-    hooks.insert("PreToolUse".into(), vec![
-        AgentHookGroup {
-            matcher: Some("Write".into()),
-            hooks: vec![AgentHook::Command {
-                command: r#"echo '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Thuffering thuccotash! Daffy only fixes existing files, no new ones!"}}';"#.into(),
-            }],
-        },
-    ]);
-
-    Agent::builder(DAFFY_DUCK_ID)
-        .name("Daffy Duck")
-        .description("Bug fixer. Takes review findings and fixes them.")
-        .prompt(include_str!("daffy_duck_prompt.md"))
-        .permissions(vec!["Read".into(), "Edit".into(), "Grep".into(), "Glob".into()])
-        .hooks(hooks)
-        .build()
-}
-
-pub fn default_tweety_bird() -> Agent {
-    // Tweety Bird runs tests — no file-editing hooks needed.
-    // Guard against dangerous bash commands as a safety measure.
-    let mut hooks = AgentHooks::new();
-    hooks.insert("PreToolUse".into(), vec![
-        AgentHookGroup {
-            matcher: Some("Bash".into()),
-            hooks: vec![AgentHook::Command {
-                // Block destructive commands: rm -rf, git push --force, etc.
-                command: concat!(
-                    r#"INPUT=$(cat); CMD=$(echo "$INPUT" | "#,
-                    r#"grep -oP '"command"\s*:\s*"[^"]*"' | head -1 | sed 's/.*"command"\s*:\s*"//;s/"$//'); "#,
-                    r#"if echo "$CMD" | grep -qiE '(rm\s+-rf\s+/|git\s+push\s+--force|DROP\s+TABLE|format\s+c:)'; then "#,
-                    r#"echo '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Bad puddy tat! That command is too dangerous!"}}'; "#,
-                    r#"fi"#,
-                ).into(),
-            }],
-        },
-    ]);
-
-    Agent::builder(TWEETY_BIRD_ID)
-        .name("Tweety Bird")
-        .description("Test runner. Runs tests, reports results, identifies coverage gaps.")
-        .prompt(include_str!("tweety_bird_prompt.md"))
-        .permissions(vec!["Read".into(), "Bash".into(), "Glob".into()])
-        .hooks(hooks)
+        .subagents(default_subagents())
         .build()
 }

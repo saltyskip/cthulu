@@ -37,7 +37,8 @@ export default function AgentGridView({
 
   const loadData = useCallback(async () => {
     try {
-      const agents = await listAgents();
+      const allAgents = await listAgents();
+      const agents = allAgents.filter((a) => !a.subagent_only);
       const sessionResults = await Promise.allSettled(
         agents.map((a) => listAgentSessions(a.id))
       );

@@ -144,6 +144,8 @@ export interface AgentSummary {
   name: string;
   description: string;
   permissions: string[];
+  subagent_only?: boolean;
+  subagent_count?: number;
   created_at: string;
   updated_at: string;
 }
