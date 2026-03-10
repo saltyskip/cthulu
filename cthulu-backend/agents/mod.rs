@@ -243,8 +243,8 @@ pub fn default_tweety_bird() -> Agent {
                 // Block destructive commands: rm -rf, git push --force, etc.
                 command: concat!(
                     r#"INPUT=$(cat); CMD=$(echo "$INPUT" | "#,
-                    r#"grep -oP '"command"\s*:\s*"[^"]*"' | head -1 | sed 's/.*"command"\s*:\s*"//;s/"$//'); "#,
-                    r#"if echo "$CMD" | grep -qiE '(rm\s+-rf\s+/|git\s+push\s+--force|DROP\s+TABLE|format\s+c:)'; then "#,
+                    r#"jq -r '.tool_input.command // empty'); "#,
+                    r#"if echo "$CMD" | grep -qiE '(rm\s+.*-r.*-f|rm\s+.*-f.*-r|rm\s+-rf|git\s+push\s+(-f|--force)|DROP\s+TABLE|format\s+c:|mkfs\.|dd\s+if=)'; then "#,
                     r#"echo '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Bad puddy tat! That command is too dangerous!"}}'; "#,
                     r#"fi"#,
                 ).into(),

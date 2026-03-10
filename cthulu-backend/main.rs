@@ -160,7 +160,7 @@ async fn run_server(start_disabled: bool) -> Result<(), Box<dyn Error>> {
         if agent_repo.get(id).await.is_none() {
             tracing::info!(agent_id = %id, "seeding built-in agent");
             agent_repo.save(builder()).await
-                .context(format!("failed to seed agent {id}"))?;
+                .with_context(|| format!("failed to seed agent {id}"))?;
         }
     }
 

@@ -8,7 +8,10 @@ use uuid::Uuid;
 
 use crate::api::AppState;
 use crate::api::changes::{ChangeType, ResourceChangeEvent, ResourceType};
-use crate::agents::{Agent, AgentHooks, STUDIO_ASSISTANT_ID};
+use crate::agents::{Agent, AgentHooks, STUDIO_ASSISTANT_ID, BUGS_BUNNY_ID, DAFFY_DUCK_ID, TWEETY_BIRD_ID};
+
+/// IDs of built-in agents that cannot be deleted via the API.
+const BUILT_IN_IDS: &[&str] = &[STUDIO_ASSISTANT_ID, BUGS_BUNNY_ID, DAFFY_DUCK_ID, TWEETY_BIRD_ID];
 
 pub(crate) async fn list_agents(State(state): State<AppState>) -> Json<Value> {
     let agents = state.agent_repo.list().await;
@@ -172,10 +175,10 @@ pub(crate) async fn delete_agent(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    if id == STUDIO_ASSISTANT_ID {
+    if BUILT_IN_IDS.contains(&id.as_str()) {
         return Err((
             StatusCode::FORBIDDEN,
-            Json(json!({ "error": "cannot delete the built-in Studio Assistant" })),
+            Json(json!({ "error": format!("cannot delete built-in agent '{id}'") })),
         ));
     }
 
