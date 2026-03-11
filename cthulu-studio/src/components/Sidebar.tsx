@@ -1,9 +1,10 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { STUDIO_ASSISTANT_ID, type FlowSummary, type Flow, type NodeTypeSchema, type AgentSummary, type SavedPrompt, type ActiveView } from "../types/flow";
 import { listAgents, createAgent, deleteAgent, listPrompts, savePrompt, deletePrompt as deletePromptApi, listAgentSessions, newAgentSession } from "../api/client";
 import type { InteractSessionInfo } from "../api/client";
 import { Switch } from "@/components/ui/switch";
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
+import { createLayout } from "animejs";
 import TemplateGallery from "./TemplateGallery";
 import LooneyTunesShow from "./LooneyTunesShow";
 
@@ -64,6 +65,20 @@ export default function Sidebar({
   const [prompts, setPrompts] = useState<SavedPrompt[]>([]);
   const [agentMeta, setAgentMeta] = useState<Map<string, { busy: boolean; sessions: InteractSessionInfo[]; cost: number }>>(new Map());
   const [expandedAgents, setExpandedAgents] = useState<Set<string>>(new Set());
+  const [activeTab, setActiveTab] = useState<"agents" | "flows">("agents");
+  const tabContentRef = useRef<HTMLDivElement>(null);
+  const layoutRef = useRef<ReturnType<typeof createLayout> | null>(null);
+
+  useEffect(() => {
+    if (tabContentRef.current) {
+      layoutRef.current = createLayout(tabContentRef.current, { duration: 300, ease: "out(3)" });
+    }
+    return () => { layoutRef.current?.revert(); };
+  }, []);
+
+  useEffect(() => {
+    layoutRef.current?.animate();
+  }, [activeTab]);
 
   const refreshAgents = useCallback(async () => {
     try {
@@ -200,157 +215,147 @@ export default function Sidebar({
 
       <LooneyTunesShow />
 
-      {/* Agents section (primary, expanded by default) */}
-      <Collapsible defaultOpen className="sidebar-section">
-        <CollapsibleTrigger asChild>
-          <div className="sidebar-section-header">
-            <span className="sidebar-chevron">▶</span>
-            <h2>Agents</h2>
-            <div style={{ flex: 1 }} />
-            <button
-              className="ghost sidebar-action-btn"
-              onClick={(e) => {
-                e.stopPropagation();
-                handleCreateAgent();
-              }}
-            >
-              +
-            </button>
-          </div>
-        </CollapsibleTrigger>
-        <CollapsibleContent>
-          <div className="sidebar-section-body">
-            {[...agents].sort((a, b) => {
-              if (a.id === STUDIO_ASSISTANT_ID) return -1;
-              if (b.id === STUDIO_ASSISTANT_ID) return 1;
-              return 0;
-            }).map((agent) => {
-              const meta = agentMeta.get(agent.id);
-              const isExpanded = expandedAgents.has(agent.id);
-              const isActive = agent.id === selectedAgentId && activeView === "agent-workspace";
-              const sessions = meta?.sessions ?? [];
+      {/* Agents / Flows tab bar */}
+      <div className="sidebar-tab-bar">
+        <button
+          className={`sidebar-tab${activeTab === "agents" ? " active" : ""}`}
+          onClick={() => { layoutRef.current?.record(); setActiveTab("agents"); }}
+        >
+          Agents
+        </button>
+        <button
+          className={`sidebar-tab${activeTab === "flows" ? " active" : ""}`}
+          onClick={() => { layoutRef.current?.record(); setActiveTab("flows"); }}
+        >
+          Flows
+        </button>
+        <div className="sidebar-tab-actions">
+          <button
+            className="ghost sidebar-action-btn"
+            onClick={activeTab === "agents" ? handleCreateAgent : handleNewFlowClick}
+            title={activeTab === "agents" ? "New agent" : "New flow"}
+          >
+            +
+          </button>
+        </div>
+      </div>
 
-              return (
-                <div key={agent.id} className="sb-agent">
-                  <div
-                    className={`sb-agent-row${isActive ? " sb-agent-active" : ""}`}
-                    onClick={() => {
-                      setExpandedAgents((prev) => {
-                        const next = new Set(prev);
-                        if (next.has(agent.id)) next.delete(agent.id);
-                        else next.add(agent.id);
-                        return next;
-                      });
-                      if (sessions.length > 0) {
-                        onSelectSession(agent.id, sessions[0].session_id);
-                      }
-                    }}
-                  >
-                    <span className="sb-agent-chevron">{isExpanded ? "▾" : "▸"}</span>
-                    {meta?.busy && <span className="sb-agent-pulse" />}
-                    <span className="sb-agent-name">{agent.name}</span>
-                    {meta && meta.cost > 0 && (
-                      <span className="sb-agent-cost">${meta.cost.toFixed(2)}</span>
-                    )}
-                    {agent.id !== STUDIO_ASSISTANT_ID && (
-                      <button
-                        className="ghost sb-agent-delete"
-                        onClick={(e) => handleDeleteAgent(e, agent.id)}
-                        title="Delete agent"
-                      >
-                        ×
-                      </button>
+      {/* Tab content with layout animation */}
+      <div ref={tabContentRef} className="sidebar-tab-content">
+        <div className="sidebar-section-body">
+          {activeTab === "agents" ? (
+            <>
+              {[...agents].sort((a, b) => {
+                if (a.id === STUDIO_ASSISTANT_ID) return -1;
+                if (b.id === STUDIO_ASSISTANT_ID) return 1;
+                return 0;
+              }).map((agent) => {
+                const meta = agentMeta.get(agent.id);
+                const isExpanded = expandedAgents.has(agent.id);
+                const isActive = agent.id === selectedAgentId && activeView === "agent-workspace";
+                const sessions = meta?.sessions ?? [];
+
+                return (
+                  <div key={agent.id} className="sb-agent">
+                    <div
+                      className={`sb-agent-row${isActive ? " sb-agent-active" : ""}`}
+                      onClick={() => {
+                        setExpandedAgents((prev) => {
+                          const next = new Set(prev);
+                          if (next.has(agent.id)) next.delete(agent.id);
+                          else next.add(agent.id);
+                          return next;
+                        });
+                        if (sessions.length > 0) {
+                          onSelectSession(agent.id, sessions[0].session_id);
+                        }
+                      }}
+                    >
+                      <span className="sb-agent-chevron">{isExpanded ? "▾" : "▸"}</span>
+                      {meta?.busy && <span className="sb-agent-pulse" />}
+                      <span className="sb-agent-name">{agent.name}</span>
+                      {meta && meta.cost > 0 && (
+                        <span className="sb-agent-cost">${meta.cost.toFixed(2)}</span>
+                      )}
+                      {agent.id !== STUDIO_ASSISTANT_ID && (
+                        <button
+                          className="ghost sb-agent-delete"
+                          onClick={(e) => handleDeleteAgent(e, agent.id)}
+                          title="Delete agent"
+                        >
+                          ×
+                        </button>
+                      )}
+                    </div>
+                    {isExpanded && (
+                      <div className="sb-sessions">
+                        {sessions.map((s) => {
+                          const isSessionActive = s.session_id === selectedSessionId && agent.id === selectedAgentId;
+                          const label = s.summary || (s.kind === "flow_run" ? `Run: ${s.flow_run?.flow_name ?? ""}` : "New session");
+                          return (
+                            <div
+                              key={s.session_id}
+                              className={`sb-session${isSessionActive ? " sb-session-active" : ""}`}
+                              onClick={() => onSelectSession(agent.id, s.session_id)}
+                            >
+                              {s.busy && <span className="sb-session-pulse" />}
+                              <span className="sb-session-label">{label}</span>
+                              {s.total_cost > 0 && (
+                                <span className="sb-session-cost">${s.total_cost.toFixed(2)}</span>
+                              )}
+                            </div>
+                          );
+                        })}
+                        <button
+                          className="sb-session-new"
+                          onClick={async (e) => {
+                            e.stopPropagation();
+                            try {
+                              const result = await newAgentSession(agent.id);
+                              onSelectSession(agent.id, result.session_id);
+                            } catch (err) {
+                              console.error("Failed to create session:", err);
+                            }
+                          }}
+                        >
+                          + New Session
+                        </button>
+                      </div>
                     )}
                   </div>
-                  {isExpanded && (
-                    <div className="sb-sessions">
-                      {sessions.map((s) => {
-                        const isSessionActive = s.session_id === selectedSessionId && agent.id === selectedAgentId;
-                        const label = s.summary || (s.kind === "flow_run" ? `Run: ${s.flow_run?.flow_name ?? ""}` : "New session");
-                        return (
-                          <div
-                            key={s.session_id}
-                            className={`sb-session${isSessionActive ? " sb-session-active" : ""}`}
-                            onClick={() => onSelectSession(agent.id, s.session_id)}
-                          >
-                            {s.busy && <span className="sb-session-pulse" />}
-                            <span className="sb-session-label">{label}</span>
-                            {s.total_cost > 0 && (
-                              <span className="sb-session-cost">${s.total_cost.toFixed(2)}</span>
-                            )}
-                          </div>
-                        );
-                      })}
-                      <button
-                        className="sb-session-new"
-                        onClick={async (e) => {
-                          e.stopPropagation();
-                          try {
-                            const result = await newAgentSession(agent.id);
-                            onSelectSession(agent.id, result.session_id);
-                          } catch (err) {
-                            console.error("Failed to create session:", err);
-                          }
-                        }}
-                      >
-                        + New Session
-                      </button>
-                    </div>
-                  )}
+                );
+              })}
+              {agents.length === 0 && (
+                <div className="sidebar-item-empty">No agents yet</div>
+              )}
+            </>
+          ) : (
+            <>
+              {flows.map((flow) => (
+                <div
+                  key={flow.id}
+                  className={`sidebar-item${flow.id === activeFlowId && activeView === "flow-editor" ? " active" : ""}${!flow.enabled ? " disabled" : ""}`}
+                  onClick={() => onSelectFlow(flow.id)}
+                >
+                  <div className="sidebar-item-row">
+                    <div className="sidebar-item-name">{flow.name}</div>
+                    <Switch
+                      checked={flow.enabled}
+                      onCheckedChange={() => onToggleEnabled(flow.id)}
+                      onClick={(e) => e.stopPropagation()}
+                      className="data-[state=checked]:bg-[var(--success)]"
+                    />
+                  </div>
+                  <div className="sidebar-item-meta">{flow.node_count} nodes</div>
                 </div>
-              );
-            })}
-            {agents.length === 0 && (
-              <div className="sidebar-item-empty">No agents yet</div>
-            )}
-          </div>
-        </CollapsibleContent>
-      </Collapsible>
-
-      {/* Flows section (collapsed by default) */}
-      <Collapsible className="sidebar-section">
-        <CollapsibleTrigger asChild>
-          <div className="sidebar-section-header">
-            <span className="sidebar-chevron">▶</span>
-            <h2>Flows</h2>
-            <div style={{ flex: 1 }} />
-            <button
-              className="ghost sidebar-action-btn"
-              onClick={(e) => {
-                e.stopPropagation();
-                handleNewFlowClick();
-              }}
-            >
-              +
-            </button>
-          </div>
-        </CollapsibleTrigger>
-        <CollapsibleContent>
-          <div className="sidebar-section-body">
-            {flows.map((flow) => (
-              <div
-                key={flow.id}
-                className={`sidebar-item${flow.id === activeFlowId && activeView === "flow-editor" ? " active" : ""}${!flow.enabled ? " disabled" : ""}`}
-                onClick={() => onSelectFlow(flow.id)}
-              >
-                <div className="sidebar-item-row">
-                  <div className="sidebar-item-name">{flow.name}</div>
-                  <Switch
-                    checked={flow.enabled}
-                    onCheckedChange={() => onToggleEnabled(flow.id)}
-                    onClick={(e) => e.stopPropagation()}
-                    className="data-[state=checked]:bg-[var(--success)]"
-                  />
-                </div>
-                <div className="sidebar-item-meta">{flow.node_count} nodes</div>
-              </div>
-            ))}
-            {flows.length === 0 && (
-              <div className="sidebar-item-empty">No flows yet</div>
-            )}
-          </div>
-        </CollapsibleContent>
-      </Collapsible>
+              ))}
+              {flows.length === 0 && (
+                <div className="sidebar-item-empty">No flows yet</div>
+              )}
+            </>
+          )}
+        </div>
+      </div>
 
       {/* Prompts section */}
       <Collapsible defaultOpen className="sidebar-section">

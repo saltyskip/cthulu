@@ -386,6 +386,45 @@ button:disabled {
   letter-spacing: 0.5px;
 }
 
+.sidebar-tab-bar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 10px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border);
+  height: 32px;
+  flex-shrink: 0;
+}
+.sidebar-tab {
+  font-size: 11px;
+  font-weight: 500;
+  padding: 6px 10px;
+  color: var(--text-secondary);
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  cursor: pointer;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  transition: color 0.15s;
+}
+.sidebar-tab:hover {
+  color: var(--text);
+}
+.sidebar-tab.active {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+}
+.sidebar-tab-actions {
+  margin-left: auto;
+}
+.sidebar-tab-content {
+  flex: 1;
+  overflow-y: auto;
+}
+
 .sidebar-section {
   border-bottom: 1px solid var(--border);
 }
