@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import { flushSync } from "react-dom";
 import { STUDIO_ASSISTANT_ID, type FlowSummary, type Flow, type NodeTypeSchema, type AgentSummary, type SavedPrompt, type ActiveView } from "../types/flow";
 import { listAgents, createAgent, deleteAgent, listPrompts, savePrompt, deletePrompt as deletePromptApi, listAgentSessions, newAgentSession } from "../api/client";
 import type { InteractSessionInfo } from "../api/client";
@@ -76,9 +77,11 @@ export default function Sidebar({
     return () => { layoutRef.current?.revert(); };
   }, []);
 
-  useEffect(() => {
+  function switchTab(tab: "agents" | "flows") {
+    layoutRef.current?.record();
+    flushSync(() => setActiveTab(tab));
     layoutRef.current?.animate();
-  }, [activeTab]);
+  }
 
   const refreshAgents = useCallback(async () => {
     try {
@@ -219,13 +222,13 @@ export default function Sidebar({
       <div className="sidebar-tab-bar">
         <button
           className={`sidebar-tab${activeTab === "agents" ? " active" : ""}`}
-          onClick={() => { layoutRef.current?.record(); setActiveTab("agents"); }}
+          onClick={() => switchTab("agents")}
         >
           Agents
         </button>
         <button
           className={`sidebar-tab${activeTab === "flows" ? " active" : ""}`}
-          onClick={() => { layoutRef.current?.record(); setActiveTab("flows"); }}
+          onClick={() => switchTab("flows")}
         >
           Flows
         </button>
