@@ -6,6 +6,33 @@ use axum::{
 };
 use tracing::Span;
 
+/// Log method, path, status, and duration for each request.
+/// Skips noisy paths like /health and SSE streams.
+pub async fn request_logging(req: Request<Body>, next: Next) -> Response {
+    let method = req.method().clone();
+    let path = req.uri().path().to_string();
+
+    // Skip noisy endpoints
+    if path == "/health" || path.ends_with("/stream") || path == "/api/changes" {
+        return next.run(req).await;
+    }
+
+    let start = std::time::Instant::now();
+    let response = next.run(req).await;
+    let duration = start.elapsed();
+    let status = response.status().as_u16();
+
+    tracing::info!(
+        method = %method,
+        path = %path,
+        status = status,
+        duration_ms = duration.as_millis() as u64,
+        "request"
+    );
+
+    response
+}
+
 pub async fn enrich_current_span_middleware(req: Request<Body>, next: Next) -> Response {
     let uri: &Uri = req.uri();
 

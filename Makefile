@@ -21,7 +21,7 @@ CTHULU_URL ?= http://localhost:8081
 # ---------------------------------------------------------------------------
 # Phony targets
 # ---------------------------------------------------------------------------
-.PHONY: help build clean clean-build check run-backend
+.PHONY: help build clean clean-build check run-backend desktop desktop-dev
 
 # ---------------------------------------------------------------------------
 # help
@@ -38,6 +38,10 @@ help:
 	@echo ""
 	@echo "Run targets:"
 	@echo "  run-backend        Run backend locally on :8081 (dev profile)"
+	@echo ""
+	@echo "Desktop targets:"
+	@echo "  desktop            Build the Tauri desktop app"
+	@echo "  desktop-dev        Run the Tauri desktop app in dev mode"
 	@echo ""
 	@echo "Variables (current values):"
 	@echo "  BACKEND_BINARY = $(BACKEND_BINARY)"
@@ -78,3 +82,17 @@ check:
 # ---------------------------------------------------------------------------
 run-backend:
 	cargo run --bin cthulu -- serve
+
+# ---------------------------------------------------------------------------
+# desktop — build the Tauri desktop app
+# ---------------------------------------------------------------------------
+desktop:
+	bash scripts/build-desktop.sh
+	@echo ""
+	@echo "Desktop app built. Check cthulu-studio/src-tauri/target/release/bundle/"
+
+# ---------------------------------------------------------------------------
+# desktop-dev — run the Tauri desktop app in dev mode
+# ---------------------------------------------------------------------------
+desktop-dev:
+	bash scripts/dev-desktop.sh

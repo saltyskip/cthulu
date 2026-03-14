@@ -217,3 +217,216 @@ Record corrections, mistakes, and insights here so future sessions can avoid rep
 - **Context**: `src/server/flow_routes.rs` grew too large.
 - **Mistake**: Documentation still referenced the old single-file path.
 - **Fix**: Updated to `src/server/flow_routes/` with sub-modules (`mod.rs`, `crud.rs`, `sandbox.rs`, `interact.rs`, `node_chat.rs`).
+
+---
+
+## Tauri IPC Migration Lessons (2026-03-13)
+
+## 2026-03-13 - Tauri command names must match frontend invoke() names exactly
+
+- **Context**: Converting 60 HTTP endpoints to Tauri `#[tauri::command]` functions.
+- **Mistake**: Named Rust functions differently from what the frontend `invoke()` calls expect. Had 7 mismatches: `save_prompt` vs `create_prompt`, `get_token_status` vs `token_status`, `import_from_github` vs `import_github`, `setup_workflows` vs `setup_workflows_repo`, `list_workflows` vs `list_workspace_workflows`, `get_claude_status` vs `claude_status`, `respond_to_permission` vs `permission_response`.
+- **Fix**: The Rust function name IS the command name. Always verify every `invoke("command_name")` in TypeScript has a matching `fn command_name()` registered in `generate_handler![]`. These fail silently at runtime — no compile-time check.
+
+## 2026-03-13 - Tauri #[tauri::command] parameter naming: auto-camelCase for top-level only
+
+- **Context**: Frontend sends `{ agentId, sessionId }` (camelCase) to Tauri commands with `agent_id: String, session_id: String` (snake_case) params.
+- **Mistake**: Assumed serde `rename_all = "camelCase"` was needed on request structs. It's not — Tauri auto-converts snake_case parameter names to camelCase at the top level only.
+- **Fix**: Top-level command parameters are auto-converted (snake→camel). But struct fields INSIDE those parameters use whatever serde expects — by default snake_case. If Rust struct has `request_id: String`, frontend must send `"request_id"` (snake_case) not `"requestId"`.
+
+## 2026-03-13 - Tauri struct parameters must be passed wrapped, not flat
+
+- **Context**: Rust command `fn create_agent(state, request: CreateAgentRequest)` expects `{ request: { name, ... } }`.
+- **Mistake**: Frontend sent `{ data: { name, ... } }` — wrong wrapper key. Had 8 parameter shape mismatches where frontend sent flat args or used wrong key names.
+- **Fix**: If a Rust command parameter is `request: MyStruct`, the frontend MUST send `{ request: { ...fields } }`. The JSON key must match the Rust parameter name (after Tauri's camelCase conversion). Always check the Rust function signature when writing `invoke()` calls.
+
+## 2026-03-13 - AppState race condition in Tauri desktop apps
+
+- **Context**: `setup()` closure spawns a background thread for async AppState init. The webview starts rendering immediately.
+- **Mistake**: `app_handle.manage(app_state)` is called asynchronously after `setup()` returns. Commands invoked before it's ready cause panics or silent failures.
+- **Fix**: Register a `tokio::sync::watch::Receiver<bool>` (ReadySignal) synchronously in `setup()`. Background thread sends `true` after `manage()`. All commands call `wait_ready()` before accessing state. 30-second timeout prevents hanging.
+
+## 2026-03-13 - Dead invoke() calls fail silently in Tauri
+
+- **Context**: Frontend called `invoke("stream_session_log")` but no backend command with that name existed.
+- **Mistake**: The `.catch()` handler swallowed the error. The feature appeared to work because the real streaming happened via a separate `listen()` call.
+- **Fix**: Audit every `invoke()` call against the `generate_handler![]` list. Dead invokes waste IPC round-trips and mask real errors. Remove them or connect them to actual commands.
+
+## 2026-03-13 - Tauri event emit double-serialization
+
+- **Context**: Emitting chat events from Rust background task to frontend via `app.emit(channel, &payload)`.
+- **Mistake**: If `payload` is a `String` (already JSON), Tauri serializes it with serde, producing a JSON string containing JSON. Frontend gets `"\"{ ... }\"" ` and needs double-parse.
+- **Fix**: Emit `serde_json::Value` directly instead of `String`, or emit the raw string and have the frontend handle the double-parse. Test the exact payload format by logging `event.payload` in the frontend listener.
+
+## 2026-03-13 - Debug Tauri desktop apps by launching from terminal
+
+- **Context**: Installed DMG app showed blank screen, 479% CPU. No visible errors.
+- **Mistake**: Double-clicked the app icon — stdout/stderr go nowhere visible.
+- **Fix**: Launch directly: `/Applications/Cthulu\ Studio.app/Contents/MacOS/cthulu-studio 2>&1`. All `println!`, `eprintln!`, and `tracing` output appears in the terminal. Check macOS unified log with `/usr/bin/log show --predicate 'process == "cthulu-studio"'` for WebKit-level issues.
+
+## 2026-03-13 - Nightly Rust std::fmt::Arguments is not Send
+
+- **Context**: Backend init uses tracing spans across `.await` points inside `init_desktop()`.
+- **Mistake**: Tried to `tokio::spawn(init_desktop(...))` from Tauri's setup closure — Tauri requires spawned futures to be `Send`.
+- **Fix**: Run the backend on a dedicated `std::thread` with its own `tokio::runtime`. The thread's `rt.block_on()` doesn't require `Send`. This avoids the nightly-specific issue where `std::fmt::Arguments` (used by tracing macros) is not `Send`.
+
+## 2026-03-13 - No HTTP server in Tauri desktop mode
+
+- **Context**: Migrating from `fetch()` + `EventSource` to `invoke()` + `listen()`.
+- **Mistake**: Initially considered a hybrid approach keeping the HTTP server running alongside Tauri.
+- **Fix**: Pure Tauri IPC — no ports, no CORS, no HTTP server. The `server_port` and `cors_origins` fields on AppState are only used in CLI mode (`cargo run -- serve`). Desktop mode uses `init_app_state()` directly without `start_server()`.
+
+## 2026-03-13 - Frontend must listen() BEFORE invoke() for streaming
+
+- **Context**: `interactStream.ts` sets up Tauri event listeners for chat streaming.
+- **Mistake**: If `invoke("agent_chat")` is called before `listen("chat-event-{sid}")`, events emitted immediately after spawn are lost.
+- **Fix**: Always `await listen(channel, callback)` first, THEN call `invoke()`. The listen promise resolves when the listener is registered. Events emitted between listen and invoke are captured.
+
+## 2026-03-13 - Claude CLI hooks: command type for desktop, http type for server
+
+- **Context**: Claude CLI hooks in `.claude/settings.local.json` need to communicate with the app.
+- **Mistake**: Initially used `"type": "http"` hooks pointing to `localhost:{port}` — but desktop mode has no HTTP server.
+- **Fix**: Desktop mode uses `"type": "command"` hooks with a shell script (`/tmp/cthulu-hook.sh`) that communicates via Unix domain socket (`/tmp/cthulu-{pid}.sock`). The `hook_socket_path` field on AppState is `Some(path)` in desktop mode, `None` in server mode.
+
+## 2026-03-13 - async_stream cannot be used in Tauri commands
+
+- **Context**: HTTP chat handler uses `async_stream::stream!` to yield SSE events.
+- **Mistake**: Tried to reuse the same pattern in a `#[tauri::command]` function.
+- **Fix**: Tauri commands return `Result<T, String>`, not streams. Replace `async_stream` with a spawned `tokio::spawn` background task that reads process output and calls `app.emit()` for each event. The command returns `{ session_id }` immediately.
+
+## 2026-03-13 - Onboarding screen must wait for backend ready
+
+- **Context**: Setup screen calls `checkSetupStatus()` which reads AppState fields (`github_pat`, `oauth_token`).
+- **Mistake**: If the frontend renders before AppState is registered, the setup check fails and shows the setup screen even when credentials exist.
+- **Fix**: The `check_setup_status` Tauri command includes `wait_ready()` guard. The frontend shows a blank loading state until the check resolves.
+
+## 2026-03-13 - Missing hook socket means backend init failed
+
+- **Context**: Testing the installed DMG — app was running but not functional.
+- **Mistake**: Didn't check if the backend initialization completed.
+- **Fix**: Check for `/tmp/cthulu-{pid}.sock` after launch. If it doesn't exist, the backend thread either failed or is still initializing. Also check stdout for the `"backend initialized"` message.
+
+## 2026-03-14 - Tailwind v4 `@layer` and unlayered CSS reset `* { padding: 0 }` kills all Tailwind padding
+
+- **Context**: `styles.css` had `* { margin: 0; padding: 0; box-sizing: border-box; }` after `@import "tailwindcss"`. Tailwind v4 padding utilities like `.p-2`, `.pl-4` had no visible effect on Radix Select dropdown items.
+- **Root cause**: Tailwind v4 puts utilities inside `@layer utilities`. The `* { padding: 0 }` was **unlayered CSS**. In CSS, unlayered styles ALWAYS beat layered styles regardless of specificity. So `* { padding: 0 }` (specificity 0,0,0, unlayered) beat `.p-2` (specificity 0,1,0, in `@layer utilities`).
+- **Fix**: Wrap the global reset in `@layer base { * { margin: 0; padding: 0; box-sizing: border-box; } }`. The `base` layer is lower priority than `utilities` in Tailwind's layer order, so utility classes now properly override the reset.
+- **Rule**: In Tailwind v4, NEVER put CSS resets as unlayered styles. Always use `@layer base {}` for resets. Test in dev mode first (`npm run dev`) before building DMG.
+
+## 2026-03-14 - Always clean caches before DMG rebuild after CSS changes
+
+- **Context**: Made padding changes to `select.tsx`, rebuilt DMG, installed, but dropdown still showed old tight spacing.
+- **Root cause**: Nx cache, Vite dist cache, and Tauri bundle cache can all serve stale assets. The binary embeds frontend assets at build time — if any cache layer serves old CSS, the DMG gets old styles baked in.
+- **Fix**: Before rebuilding DMG after CSS/styling changes, always clean: `rm -rf dist .nx/cache src-tauri/target/release/bundle`. Then `npx tauri build --bundles dmg`.
+- **Rule**: Always test CSS changes in `npm run dev` first. Only build DMG once visually confirmed in dev mode. When building DMG, clean caches if prior DMG had stale styles.
+
+## 2026-03-14 - Always build DMG, reinstall, and launch after changes
+
+- **Context**: User needs to visually validate and test every change in the actual desktop app, not just dev mode.
+- **Workflow**: After ANY code change, always do the full cycle: clean caches → build DMG → detach old volume → mount new DMG → copy to /Applications → launch app. The user will test and provide feedback.
+- **Commands**:
+  1. `rm -rf dist .nx/cache src-tauri/target/release/bundle` (from `cthulu-studio/`)
+  2. `npx tauri build --bundles dmg` (from `cthulu-studio/`)
+  3. `hdiutil detach "/Volumes/Cthulu Studio" 2>/dev/null; open "...dmg" && sleep 4 && cp -R "/Volumes/Cthulu Studio/Cthulu Studio.app" /Applications/ && open "/Applications/Cthulu Studio.app"`
+- **Rule**: Never mark a UI task as complete without building DMG, installing, and launching for the user to validate. The user tests in the actual desktop app, not dev mode.
+
+---
+
+## Architecture & Design Discoveries (2026-03-14)
+
+## Flows vs Workflows — Two Completely Different Systems
+
+- **Flows** (Agents tab): Local disk storage at `~/.cthulu/flows/`, UUID-based identity, have `enabled` boolean + cron scheduler, Run/Run(Manual) button, auto-saved via debounced `updateFlow()`. Enable/disable toggle is in `Sidebar.tsx` using a `Switch` component with `onToggleEnabled` callback. Run is via `api.triggerFlow(id)` → Tauri IPC `invoke("trigger_flow", { id })`.
+- **Workflows** (Workflows tab): GitHub-backed, composite identity `workspace/name`, Save/Publish is manual. Activate/deactivate + Run are currently **UI-only** (no backend integration yet — logs to console). `editingWorkflow` state (`{ workspace, name } | null`) in `NavigationContext` determines whether TopBar shows flow controls vs workflow controls.
+- **Key difference**: Flows are the execution engine. Workflows are the GitHub-synced definitions. They operate on entirely different state systems. Don't confuse them.
+
+## WorkflowContext — Shared State Between Sidebar and WorkflowsView
+
+- `WorkflowContext.tsx` provides shared state consumed by both `Sidebar.tsx` and `WorkflowsView.tsx`.
+- **`enabledWorkflows: Set<string>`**: Keyed by `${workspace}::${name}`. Toggling in either Sidebar or WorkflowsView grid cards updates both views.
+- **`workflowSearch: string`**: Typing in either the sidebar search input or the grid toolbar search filters both views simultaneously.
+- **`setWfActiveWorkspace` wrapper**: Auto-clears `workflowSearch` when the workspace changes (wraps `setWfActiveWorkspaceRaw` in a `useCallback` that compares prev/next and calls `setWorkflowSearch("")` when different).
+- **Performance**: Both components use `useDeferredValue(workflowSearch)` + `useMemo` for filtering. The deferred value prevents jank during fast typing.
+
+## WorkspacePicker Combobox — Custom Component, No Radix Popover
+
+- Replaced Radix `Select` in TopBar for the workspace dropdown with a custom `WorkspacePicker` component.
+- Built with plain `div` + absolute positioning + `ref` + click-outside pattern. **No Radix Popover dependency** — Radix Popover is not installed in the project.
+- Features: search filtering, Enter to select single match, Escape to clear search or close dropdown, checkmark icon on active workspace, click outside to dismiss.
+- CSS classes: `.ws-picker-*` (~150 lines in `styles.css`).
+- **Pattern**: When Radix doesn't provide the UX needed (searchable combobox), build a custom one with refs and event handlers rather than adding a new dependency.
+
+## Sidebar Workflow Item Controls
+
+- Each workflow item in the sidebar has: `Switch` toggle (activate/deactivate), `Play` button (run), `Trash2` button (delete).
+- CSS classes: `.sidebar-wf-actions`, `.sidebar-run-btn`, `.sidebar-wf-enabled`, `.sidebar-wf-active-badge`.
+- The meta line below the workflow name shows node count and active/inactive badge. Fixed with `.sidebar-wf-meta { display: flex; justify-content: space-between }`.
+
+## Tauri Error Handling — Throws Strings Not Error Objects
+
+- Tauri `invoke()` rejects with plain strings, not `Error` objects.
+- **Always use**: `typeof e === "string" ? e : (e instanceof Error ? e.message : String(e))` in catch blocks.
+- This was discovered during `CreateWorkflowDialog` error handling fix.
+
+## CSS Variables for Theming — Never Hardcode Colors
+
+- Always use: `var(--bg)`, `var(--border)`, `var(--accent)`, `var(--text)`, `var(--text-secondary)`, `var(--bg-secondary)`, `var(--success)`.
+- Never hardcode hex/rgb values. The theme system in `ThemeContext.tsx` + `themes.ts` sets these variables on the root element.
+- Custom components added this session follow the pattern (e.g., `.ws-picker-dropdown`, `.wf-search-input`, `.sidebar-wf-search-input`).
+
+## useDeferredValue + Empty State Must Use Same Value
+
+- When using `useDeferredValue(searchQuery)` for performance, the `useMemo` filter AND the empty-state message MUST both read from the deferred value.
+- If the empty state reads from `searchQuery` (immediate) while the grid reads from `deferredSearch`, the message can flash "No results for X" while stale results are still visible.
+- Already documented as lesson #18 in the context of TemplateGallery, but applies equally to WorkflowsView and Sidebar workflow search.
+
+---
+
+## Session Progress & Current State (as of 2026-03-14)
+
+### What Has Been Built
+
+1. **Tauri IPC migration** (previous sessions): Converted ~60 HTTP endpoints to pure Tauri `invoke()` + `listen()` commands. No HTTP server in desktop mode.
+2. **UI padding & spacing fixes**: Select viewport, dialog gaps, theme selector trigger height (`h-7` → `h-8`), Tailwind v4 `@layer base` fix for global reset.
+3. **Workflow card controls**: Switch toggle + Run button on each workflow card in `WorkflowsView.tsx`.
+4. **Sidebar workflow controls**: Switch toggle + Play button + Delete button on each sidebar workflow item in `Sidebar.tsx`.
+5. **Shared enabled state**: Lifted `enabledWorkflows` from local `WorkflowsView` state to `WorkflowContext`, shared between Sidebar and WorkflowsView.
+6. **Workflow search bar (grid)**: Search input in WorkflowsView toolbar with clear button and empty state.
+7. **Workflow search bar (sidebar)**: Compact search input in Sidebar's Workflows collapsible section, shared state with grid search.
+8. **Workspace combobox**: Custom `WorkspacePicker` combobox in TopBar replacing Radix Select, with search filtering and keyboard support.
+9. **Auto-clear search on workspace change**: `setWfActiveWorkspace` wrapper in WorkflowContext.
+10. **"5 nodesActive" spacing fix**: Made sidebar workflow meta a flex row with space-between.
+
+### Key Modified Files (This Session)
+
+| File | What Changed |
+|------|-------------|
+| `cthulu-studio/src/contexts/WorkflowContext.tsx` | Added `enabledWorkflows`, `toggleWorkflowEnabled`, `isWorkflowEnabled`, `workflowSearch`, `setWorkflowSearch`; workspace-change auto-clears search |
+| `cthulu-studio/src/components/WorkflowsView.tsx` | Shared enabled state + search via `useWorkflowContext`; search input in toolbar; `useDeferredValue` filtering; empty search state |
+| `cthulu-studio/src/components/Sidebar.tsx` | Switch + Play + Delete on workflow items; compact search input; shared `workflowSearch`; meta line flex fix |
+| `cthulu-studio/src/components/TopBar.tsx` | Custom `WorkspacePicker` combobox replacing Radix Select; lucide-react icons |
+| `cthulu-studio/src/components/App.tsx` | Wired `toggleWorkflowEnabled`, `isWorkflowEnabled`, `onRunWorkflow` props to Sidebar |
+| `cthulu-studio/src/styles.css` | ~300 lines of new CSS: `.ws-picker-*`, `.wf-search-*`, `.sidebar-wf-search-*`, `.sidebar-wf-meta`, `.sidebar-wf-actions`, `.sidebar-run-btn`, `.workflow-card-controls`, `.workflow-card-active`, `.workflow-active-badge`, `.workflow-card-empty` |
+
+### Known Gaps / Not Yet Implemented
+
+- **Backend integration for workflow activate/deactivate**: Currently UI-only (`enabledWorkflows` is in-memory React state). No Tauri command or persistence. Toggling logs to console but doesn't persist across app restarts.
+- **Backend integration for workflow Run**: Currently UI-only (logs to console). No `invoke("run_workflow")` command exists yet.
+- **Backend integration for workflow Delete**: Currently UI-only. No `invoke("delete_workflow")` command exists yet.
+- **Workspace combobox polish**: May need styling adjustments based on user testing feedback.
+- **Search UX polish**: May need adjustments based on user testing feedback (e.g., search icon positioning, clear button behavior).
+
+### Dev Mode vs DMG Build
+
+- **Dev mode**: `npx nx dev cthulu-studio` from `cthulu/` directory. Vite at `localhost:1420`, Tauri window opens. Good for fast iteration.
+- **DMG build**: Required for user validation. Full cycle: clean caches → `npx tauri build --bundles dmg` → mount → copy to `/Applications/` → launch.
+- **Output**: `cthulu-studio/src-tauri/target/release/bundle/dmg/Cthulu Studio_0.1.0_aarch64.dmg`
+- **Debug tip**: Launch from terminal `/Applications/Cthulu\ Studio.app/Contents/MacOS/cthulu-studio 2>&1` to see all stdout/stderr.
+
+## 2026-03-14 - agent_chat and stop_agent_chat IPC parameter mismatch broke agent chat
+
+- **Context**: Agent chat didn't respond — user typed messages but got no response from Claude CLI.
+- **Root cause**: The `agent_chat` Tauri command accepted `request: AgentChatRequest` (a struct parameter), but the frontend sent all fields flat: `{ agentId, prompt, sessionId, flowId, nodeId, images }`. Tauri expected `{ agentId, request: { prompt, session_id, ... } }`. Same issue with `stop_agent_chat` which expected `request: Option<StopChatRequest>`.
+- **Fix**: Flattened both command signatures to use individual top-level parameters instead of struct wrappers. Tauri auto-converts `snake_case` params to `camelCase` for top-level params, so `session_id` → `sessionId` matches the frontend automatically. Removed the now-unused `AgentChatRequest` and `StopChatRequest` structs.
+- **Rule**: When writing Tauri `#[tauri::command]` functions, prefer flat top-level parameters over struct wrappers. Flat params get automatic snake→camel conversion. Struct params require the frontend to know the exact wrapper key name AND use the struct's serde field naming convention (usually snake_case), which is confusing and error-prone. This is a recurring pattern — see lessons from 2026-03-13 about Tauri struct parameters.
+- **Files**: `cthulu-studio/src-tauri/src/commands/chat.rs` — `agent_chat` (line 265) and `stop_agent_chat` (line 831).

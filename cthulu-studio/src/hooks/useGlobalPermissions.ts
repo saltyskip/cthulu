@@ -1,10 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { getServerUrl } from "../api/client";
+import { invoke } from "@tauri-apps/api/core";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { DebugEvent } from "../components/chat/useAgentChat";
-
-function getApi() {
-  return `${getServerUrl()}/api`;
-}
 
 const MAX_HOOK_DEBUG_EVENTS = 200;
 
@@ -37,9 +34,7 @@ export interface GlobalPermissionState {
 
 async function fetchPending(): Promise<PendingPermission[]> {
   try {
-    const res = await fetch(`${getApi()}/hooks/pending`);
-    if (!res.ok) return [];
-    const data = await res.json();
+    const data = await invoke<{ pending: PendingPermission[] }>("list_pending_permissions");
     return data.pending ?? [];
   } catch {
     return [];
@@ -52,7 +47,6 @@ export function useGlobalPermissions(): GlobalPermissionState {
   const hookDebugRef = useRef<DebugEvent[]>([]);
   const [fileChanges, setFileChanges] = useState<FileChangeData[]>([]);
   const fileChangesRef = useRef<FileChangeData[]>([]);
-  const retryRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const pushHookDebug = useCallback((type: string, data: string) => {
     const entry: DebugEvent = { ts: Date.now(), type, data };
@@ -73,92 +67,59 @@ export function useGlobalPermissions(): GlobalPermissionState {
   }, []);
 
   useEffect(() => {
-    const controller = new AbortController();
+    const unlisteners: UnlistenFn[] = [];
+    let cleaned = false;
 
-    function connect() {
-      fetch(`${getApi()}/hooks/stream`, {
-        signal: controller.signal,
-        headers: { Accept: "text/event-stream" },
-      })
-        .then(async (res) => {
-          if (!res.ok || !res.body) {
-            throw new Error(`Hook stream HTTP ${res.status}`);
-          }
+    // Fetch any pending permissions we may have missed
+    fetchPending().then((pending) => {
+      if (cleaned || pending.length === 0) return;
+      setPermissions((prev) => {
+        const ids = new Set(prev.map((p) => p.request_id));
+        const merged = [...prev];
+        for (const p of pending) {
+          if (!ids.has(p.request_id)) merged.push(p);
+        }
+        return merged;
+      });
+    });
 
-          pushHookDebug("hook_connected", "{}");
+    pushHookDebug("hook_connected", "{}");
 
-          // On connect, merge any pending requests we may have missed
-          const pending = await fetchPending();
-          if (pending.length > 0) {
-            setPermissions((prev) => {
-              const ids = new Set(prev.map((p) => p.request_id));
-              const merged = [...prev];
-              for (const p of pending) {
-                if (!ids.has(p.request_id)) merged.push(p);
-              }
-              return merged;
-            });
-          }
+    // Listen for permission requests via Tauri events
+    listen<{ type: string; data: PendingPermission | FileChangeData | { request_id: string } }>(
+      "hook-event",
+      (event) => {
+        if (cleaned) return;
+        const msg = event.payload;
+        const raw = JSON.stringify(msg);
+        pushHookDebug("hook", raw);
 
-          const reader = res.body.getReader();
-          const decoder = new TextDecoder();
-          let buffer = "";
-
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-
-            buffer += decoder.decode(value, { stream: true });
-            const lines = buffer.split("\n");
-            buffer = lines.pop() ?? "";
-
-            for (const line of lines) {
-              if (!line.startsWith("data: ")) continue;
-              const raw = line.slice(6).trim();
-              if (!raw || raw === "{}") continue;
-
-              pushHookDebug("hook", raw);
-
-              try {
-                const msg = JSON.parse(raw);
-                if (msg.type === "permission_request" && msg.data) {
-                  setPermissions((prev) => {
-                    if (prev.some((p) => p.request_id === msg.data.request_id)) return prev;
-                    return [...prev, msg.data as PendingPermission];
-                  });
-                } else if (msg.type === "permission_timeout" && msg.data) {
-                  setPermissions((prev) =>
-                    prev.filter((p) => p.request_id !== msg.data.request_id)
-                  );
-                } else if (msg.type === "file_change" && msg.data) {
-                  const buf = fileChangesRef.current;
-                  buf.push(msg.data as FileChangeData);
-                  if (buf.length > MAX_FILE_CHANGES) buf.splice(0, buf.length - MAX_FILE_CHANGES);
-                  setFileChanges([...buf]);
-                }
-              } catch {
-                // ignore parse errors
-              }
-            }
-          }
-        })
-        .catch((err) => {
-          if (controller.signal.aborted) return;
-          pushHookDebug("hook_error", String(err));
-          console.warn("Hook stream error, reconnecting in 3s:", err);
-        })
-        .finally(() => {
-          if (!controller.signal.aborted) {
-            retryRef.current = setTimeout(connect, 3000);
-          }
-        });
-    }
-
-    connect();
+        if (msg.type === "permission_request" && msg.data) {
+          setPermissions((prev) => {
+            const perm = msg.data as PendingPermission;
+            if (prev.some((p) => p.request_id === perm.request_id)) return prev;
+            return [...prev, perm];
+          });
+        } else if (msg.type === "permission_timeout" && msg.data) {
+          const timeoutData = msg.data as { request_id: string };
+          setPermissions((prev) =>
+            prev.filter((p) => p.request_id !== timeoutData.request_id)
+          );
+        } else if (msg.type === "file_change" && msg.data) {
+          const buf = fileChangesRef.current;
+          buf.push(msg.data as FileChangeData);
+          if (buf.length > MAX_FILE_CHANGES) buf.splice(0, buf.length - MAX_FILE_CHANGES);
+          setFileChanges([...buf]);
+        }
+      }
+    ).then((fn) => {
+      if (cleaned) { fn(); return; }
+      unlisteners.push(fn);
+    });
 
     return () => {
-      controller.abort();
-      if (retryRef.current) clearTimeout(retryRef.current);
+      cleaned = true;
+      for (const fn of unlisteners) fn();
     };
   }, [pushHookDebug]);
 
@@ -167,10 +128,8 @@ export function useGlobalPermissions(): GlobalPermissionState {
       setPermissions((prev) => prev.filter((p) => p.request_id !== requestId));
 
       try {
-        await fetch(`${getApi()}/hooks/permission-response`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ request_id: requestId, decision }),
+        await invoke("permission_response", {
+          request: { request_id: requestId, decision },
         });
       } catch (err) {
         console.error("Failed to send permission response:", err);

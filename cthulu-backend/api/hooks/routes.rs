@@ -354,7 +354,7 @@ pub async fn global_hook_stream(
 // ---------------------------------------------------------------------------
 
 /// Find the agent_id that owns a given Claude session_id.
-async fn find_agent_id_for_session(state: &AppState, session_id: &str) -> Option<String> {
+pub async fn find_agent_id_for_session(state: &AppState, session_id: &str) -> Option<String> {
     if session_id.is_empty() {
         return None;
     }

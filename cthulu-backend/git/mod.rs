@@ -590,6 +590,16 @@ pub fn snapshot_from_meta(meta: &WorktreeGroupMeta) -> MultiRepoSnapshot {
 /// Tries `git diff HEAD -- <path>`, then `git diff --staged HEAD -- <path>`,
 /// and falls back to reading an untracked file as an all-added diff.
 pub fn diff_file(worktree_path: &Path, file_path: &str) -> Option<String> {
+    // Path traversal prevention: reject ".." segments, absolute paths, and null bytes.
+    if file_path.contains('\0')
+        || file_path.starts_with('/')
+        || file_path.starts_with('\\')
+        || file_path.split(['/', '\\']).any(|seg| seg == "..")
+    {
+        tracing::warn!(file_path, "diff_file: rejected path traversal attempt");
+        return None;
+    }
+
     let dir = worktree_path.to_string_lossy();
 
     // Try unstaged diff against HEAD

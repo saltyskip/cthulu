@@ -1,4 +1,5 @@
 pub mod claude_code;
+pub mod python_script;
 pub mod sandbox;
 
 use anyhow::Result;

@@ -1,35 +1,43 @@
-import { useState, useEffect, useCallback } from "react";
-import { STUDIO_ASSISTANT_ID, type FlowSummary, type Flow, type NodeTypeSchema, type AgentSummary, type SavedPrompt, type ActiveView } from "../types/flow";
-import { listAgents, createAgent, deleteAgent, listPrompts, savePrompt, deletePrompt as deletePromptApi, listAgentSessions, newAgentSession } from "../api/client";
+import { useState, useEffect, useCallback, useMemo, useDeferredValue, useRef } from "react";
+import { STUDIO_ASSISTANT_ID, type FlowSummary, type Flow, type NodeTypeSchema, type AgentSummary, type SavedPrompt, type ActiveView, type WorkflowSummary } from "../types/flow";
+import { listAgents, deleteAgent, listPrompts, savePrompt, deletePrompt as deletePromptApi, listAgentSessions, syncAgentRepo } from "../api/client";
 import type { InteractSessionInfo } from "../api/client";
 import { Switch } from "@/components/ui/switch";
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
-import TemplateGallery from "./TemplateGallery";
-import LooneyTunesShow from "./LooneyTunesShow";
+import { PanelLeftClose, ChevronRight, Plus, X, Play, Search } from "lucide-react";
+import ConfirmDialog, { useConfirm } from "./ConfirmDialog";
+import { useWorkflowContext } from "../contexts/WorkflowContext";
+import { agentStatusDot, agentStatusDotDefault, deriveAgentStatus } from "../lib/status-colors";
+import { SidebarProjects } from "./SidebarProjects";
+import { NewAgentDialog } from "./NewAgentDialog";
 
 interface SidebarProps {
-  // Flow list
-  flows: FlowSummary[];
-  activeFlowId: string | null;
-  onSelectFlow: (id: string) => void;
-  onCreateFlow: () => void;
-  onImportTemplate: (flow: Flow) => void;
-  onToggleEnabled: (flowId: string) => void;
-  // Agent + session selection
+  // Agent selection (new Paperclip-style)
   selectedAgentId: string | null;
-  selectedSessionId: string | null;
-  onSelectSession: (agentId: string, sessionId: string) => void;
+  onSelectAgent: (agentId: string) => void;
   agentListKey: number;
   onAgentCreated: (id: string) => void;
   // Prompts
   selectedPromptId: string | null;
   onSelectPrompt: (id: string) => void;
   promptListKey: number;
-  // Node palette (only in flow editor view)
+  // View state
   activeView: ActiveView;
+  onCollapse: () => void;
+  // Node palette (only in flow editor view)
+  activeFlowId: string | null;
   nodeTypes: NodeTypeSchema[];
   onGrab: (nodeType: NodeTypeSchema) => void;
-  onCollapse: () => void;
+  // Workflows sidebar (only in workflows view)
+  activeWorkspace: string | null;
+  workflows: WorkflowSummary[];
+  onSelectWorkflow: (workspace: string, name: string) => void;
+  onCreateWorkflow: () => void;
+  onDeleteWorkflow: (workspace: string, name: string) => void;
+  editingWorkflow?: { workspace: string; name: string } | null;
+  onToggleWorkflowEnabled?: (workspace: string, name: string) => void;
+  onRunWorkflow?: (workspace: string, name: string) => void;
+  isWorkflowEnabled?: (workspace: string, name: string) => boolean;
 }
 
 const typeColors: Record<string, string> = {
@@ -40,30 +48,47 @@ const typeColors: Record<string, string> = {
 };
 
 export default function Sidebar({
-  flows,
-  activeFlowId,
-  onSelectFlow,
-  onCreateFlow,
-  onImportTemplate,
-  onToggleEnabled,
   selectedAgentId,
-  selectedSessionId,
-  onSelectSession,
+  onSelectAgent,
   agentListKey,
   onAgentCreated,
   selectedPromptId,
   onSelectPrompt,
   promptListKey,
   activeView,
+  onCollapse,
+  activeFlowId,
   nodeTypes,
   onGrab,
-  onCollapse,
+  activeWorkspace,
+  workflows,
+  onSelectWorkflow,
+  onCreateWorkflow,
+  onDeleteWorkflow,
+  editingWorkflow,
+  onToggleWorkflowEnabled,
+  onRunWorkflow,
+  isWorkflowEnabled,
 }: SidebarProps) {
-  const [showGallery, setShowGallery] = useState(false);
   const [agents, setAgents] = useState<AgentSummary[]>([]);
   const [prompts, setPrompts] = useState<SavedPrompt[]>([]);
   const [agentMeta, setAgentMeta] = useState<Map<string, { busy: boolean; sessions: InteractSessionInfo[]; cost: number }>>(new Map());
-  const [expandedAgents, setExpandedAgents] = useState<Set<string>>(new Set());
+  const [syncing, setSyncing] = useState(false);
+  const [confirmState, requestConfirm] = useConfirm();
+
+  // Shared workflow search from context
+  const { workflowSearch, setWorkflowSearch } = useWorkflowContext();
+  const deferredSearch = useDeferredValue(workflowSearch);
+  const sidebarSearchRef = useRef<HTMLInputElement>(null);
+
+  const filteredWorkflows = useMemo(() => {
+    const q = deferredSearch.trim().toLowerCase();
+    if (!q) return workflows;
+    return workflows.filter((wf) =>
+      wf.name.toLowerCase().includes(q) ||
+      (wf.description && wf.description.toLowerCase().includes(q))
+    );
+  }, [workflows, deferredSearch]);
 
   const refreshAgents = useCallback(async () => {
     try {
@@ -78,7 +103,19 @@ export default function Sidebar({
     refreshAgents();
   }, [refreshAgents, agentListKey]);
 
-  // Poll agent session data for tree display
+  const handleSyncAgents = useCallback(async () => {
+    setSyncing(true);
+    try {
+      await syncAgentRepo();
+      await refreshAgents();
+    } catch (e) {
+      console.error("Failed to sync agents:", e);
+    } finally {
+      setSyncing(false);
+    }
+  }, [refreshAgents]);
+
+  // Poll agent session data for live indicators
   useEffect(() => {
     if (agents.length === 0) return;
 
@@ -132,7 +169,8 @@ export default function Sidebar({
 
   async function handleDeletePrompt(e: React.MouseEvent, id: string) {
     e.stopPropagation();
-    if (!confirm("Delete this prompt?")) return;
+    const ok = await requestConfirm("Delete prompt?", "This action cannot be undone.");
+    if (!ok) return;
     try {
       await deletePromptApi(id);
       await refreshPrompts();
@@ -141,39 +179,28 @@ export default function Sidebar({
     }
   }
 
-  async function handleCreateAgent() {
-    try {
-      const { id } = await createAgent({ name: "New Agent" });
-      await refreshAgents();
-      onAgentCreated(id);
-    } catch (e) {
-      console.error("Failed to create agent:", e);
-    }
+  const [showNewAgent, setShowNewAgent] = useState(false);
+
+  function handleCreateAgent() {
+    setShowNewAgent(true);
+  }
+
+  async function handleAgentDialogCreated(id: string) {
+    setShowNewAgent(false);
+    await refreshAgents();
+    onAgentCreated(id);
   }
 
   async function handleDeleteAgent(e: React.MouseEvent, agentId: string) {
     e.stopPropagation();
-    if (!confirm("Delete this agent?")) return;
+    const ok = await requestConfirm("Delete agent?", "All sessions and data for this agent will be removed.");
+    if (!ok) return;
     try {
       await deleteAgent(agentId);
       await refreshAgents();
     } catch (err) {
       console.error("Failed to delete agent:", err);
     }
-  }
-
-  function handleNewFlowClick() {
-    setShowGallery(true);
-  }
-
-  function handleGalleryImport(flow: Flow) {
-    setShowGallery(false);
-    onImportTemplate(flow);
-  }
-
-  function handleBlank() {
-    setShowGallery(false);
-    onCreateFlow();
   }
 
   const grouped = {
@@ -183,229 +210,273 @@ export default function Sidebar({
     sink: nodeTypes.filter((n) => n.node_type === "sink"),
   };
 
+  // Sort agents: studio-assistant first, then alphabetical
+  const sortedAgents = useMemo(() =>
+    [...agents].sort((a, b) => {
+      if (a.id === STUDIO_ASSISTANT_ID) return -1;
+      if (b.id === STUDIO_ASSISTANT_ID) return 1;
+      return a.name.localeCompare(b.name);
+    }),
+  [agents]);
+
+  // Unassigned agents (not under any project in the sidebar Projects section)
+  const unassignedAgents = useMemo(() =>
+    sortedAgents.filter(a => !a.project),
+  [sortedAgents]);
+
   return (
     <div className="unified-sidebar">
       <div className="sidebar-collapse-bar">
-        <button className="sidebar-collapse-btn" onClick={onCollapse} title="Collapse sidebar">
-          ◨
+        <button className="sidebar-collapse-btn" onClick={onCollapse} title="Collapse sidebar" aria-label="Collapse sidebar">
+          <PanelLeftClose size={14} />
         </button>
       </div>
-      {showGallery && (
-        <TemplateGallery
-          onImport={handleGalleryImport}
-          onBlank={handleBlank}
-          onClose={() => setShowGallery(false)}
-        />
-      )}
 
-      <LooneyTunesShow />
-
-      {/* Agents section (primary, expanded by default) */}
-      <Collapsible defaultOpen className="sidebar-section">
-        <CollapsibleTrigger asChild>
-          <div className="sidebar-section-header">
-            <span className="sidebar-chevron">▶</span>
-            <h2>Agents</h2>
-            <div style={{ flex: 1 }} />
-            <button
-              className="ghost sidebar-action-btn"
-              onClick={(e) => {
-                e.stopPropagation();
-                handleCreateAgent();
-              }}
-            >
-              +
-            </button>
-          </div>
-        </CollapsibleTrigger>
-        <CollapsibleContent>
-          <div className="sidebar-section-body">
-            {[...agents].sort((a, b) => {
-              if (a.id === STUDIO_ASSISTANT_ID) return -1;
-              if (b.id === STUDIO_ASSISTANT_ID) return 1;
-              return 0;
-            }).map((agent) => {
-              const meta = agentMeta.get(agent.id);
-              const isExpanded = expandedAgents.has(agent.id);
-              const isActive = agent.id === selectedAgentId && activeView === "agent-workspace";
-              const sessions = meta?.sessions ?? [];
-
-              return (
-                <div key={agent.id} className="sb-agent">
-                  <div
-                    className={`sb-agent-row${isActive ? " sb-agent-active" : ""}`}
-                    onClick={() => {
-                      setExpandedAgents((prev) => {
-                        const next = new Set(prev);
-                        if (next.has(agent.id)) next.delete(agent.id);
-                        else next.add(agent.id);
-                        return next;
-                      });
-                      if (sessions.length > 0) {
-                        onSelectSession(agent.id, sessions[0].session_id);
-                      }
-                    }}
-                  >
-                    <span className="sb-agent-chevron">{isExpanded ? "▾" : "▸"}</span>
-                    {meta?.busy && <span className="sb-agent-pulse" />}
-                    <span className="sb-agent-name">{agent.name}</span>
-                    {meta && meta.cost > 0 && (
-                      <span className="sb-agent-cost">${meta.cost.toFixed(2)}</span>
-                    )}
-                    {agent.id !== STUDIO_ASSISTANT_ID && (
-                      <button
-                        className="ghost sb-agent-delete"
-                        onClick={(e) => handleDeleteAgent(e, agent.id)}
-                        title="Delete agent"
-                      >
-                        ×
-                      </button>
-                    )}
-                  </div>
-                  {isExpanded && (
-                    <div className="sb-sessions">
-                      {sessions.map((s) => {
-                        const isSessionActive = s.session_id === selectedSessionId && agent.id === selectedAgentId;
-                        const label = s.summary || (s.kind === "flow_run" ? `Run: ${s.flow_run?.flow_name ?? ""}` : "New session");
-                        return (
-                          <div
-                            key={s.session_id}
-                            className={`sb-session${isSessionActive ? " sb-session-active" : ""}`}
-                            onClick={() => onSelectSession(agent.id, s.session_id)}
+      {activeView === "workflows" ? (
+        <>
+          {/* Workflows in active workspace */}
+          {activeWorkspace && (
+            <Collapsible defaultOpen className="sidebar-section">
+              <CollapsibleTrigger asChild>
+                <div className="sidebar-section-header">
+                  <span className="sidebar-chevron"><ChevronRight size={12} /></span>
+                  <h2>Workflows</h2>
+                </div>
+              </CollapsibleTrigger>
+              <CollapsibleContent>
+                <div className="sidebar-wf-search">
+                  <Search size={12} className="sidebar-wf-search-icon" />
+                  <input
+                    ref={sidebarSearchRef}
+                    className="sidebar-wf-search-input"
+                    type="text"
+                    placeholder="Search..."
+                    value={workflowSearch}
+                    onChange={(e) => setWorkflowSearch(e.target.value)}
+                  />
+                  {workflowSearch && (
+                    <button
+                      className="sidebar-wf-search-clear"
+                      onClick={() => { setWorkflowSearch(""); sidebarSearchRef.current?.focus(); }}
+                      aria-label="Clear search"
+                    >
+                      <X size={10} />
+                    </button>
+                  )}
+                </div>
+                <div className="sidebar-section-body">
+                  {filteredWorkflows.map((wf) => {
+                    const wfEnabled = isWorkflowEnabled?.(wf.workspace, wf.name) ?? false;
+                    return (
+                    <div
+                      key={wf.name}
+                      className={`sidebar-item${editingWorkflow?.workspace === wf.workspace && editingWorkflow?.name === wf.name ? " active" : ""}${wfEnabled ? " sidebar-wf-enabled" : ""}`}
+                      onClick={() => onSelectWorkflow(wf.workspace, wf.name)}
+                    >
+                      <div className="sidebar-item-row">
+                        <div className="sidebar-item-name">{wf.name}</div>
+                        <div className="sidebar-wf-actions">
+                          <Switch
+                            checked={wfEnabled}
+                            onCheckedChange={() => onToggleWorkflowEnabled?.(wf.workspace, wf.name)}
+                            onClick={(e) => e.stopPropagation()}
+                            className="data-[state=checked]:bg-[var(--success)]"
+                          />
+                          <button
+                            className="ghost sidebar-run-btn"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onRunWorkflow?.(wf.workspace, wf.name);
+                            }}
+                            title={wfEnabled ? "Run workflow" : "Run (manual)"}
+                            aria-label="Run workflow"
                           >
-                            {s.busy && <span className="sb-session-pulse" />}
-                            <span className="sb-session-label">{label}</span>
-                            {s.total_cost > 0 && (
-                              <span className="sb-session-cost">${s.total_cost.toFixed(2)}</span>
-                            )}
-                          </div>
-                        );
-                      })}
-                      <button
-                        className="sb-session-new"
-                        onClick={async (e) => {
-                          e.stopPropagation();
-                          try {
-                            const result = await newAgentSession(agent.id);
-                            onSelectSession(agent.id, result.session_id);
-                          } catch (err) {
-                            console.error("Failed to create session:", err);
-                          }
-                        }}
-                      >
-                        + New Session
-                      </button>
+                            <Play size={11} />
+                          </button>
+                          <button
+                            className="ghost sidebar-delete-btn"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onDeleteWorkflow(wf.workspace, wf.name);
+                            }}
+                            title="Delete workflow"
+                            aria-label="Delete workflow"
+                          >
+                            <X size={12} />
+                          </button>
+                        </div>
+                      </div>
+                      <div className="sidebar-item-meta sidebar-wf-meta">
+                        <span>{wf.node_count} node{wf.node_count !== 1 ? "s" : ""}</span>
+                        {wfEnabled && <span className="sidebar-wf-active-badge">Active</span>}
+                      </div>
+                    </div>
+                    );
+                  })}
+                  {filteredWorkflows.length === 0 && (
+                    <div className="sidebar-item-empty">
+                      {deferredSearch ? `No matches for "${deferredSearch}"` : "No workflows in this workspace"}
                     </div>
                   )}
                 </div>
-              );
-            })}
-            {agents.length === 0 && (
-              <div className="sidebar-item-empty">No agents yet</div>
-            )}
-          </div>
-        </CollapsibleContent>
-      </Collapsible>
-
-      {/* Flows section (collapsed by default) */}
-      <Collapsible className="sidebar-section">
-        <CollapsibleTrigger asChild>
-          <div className="sidebar-section-header">
-            <span className="sidebar-chevron">▶</span>
-            <h2>Flows</h2>
-            <div style={{ flex: 1 }} />
-            <button
-              className="ghost sidebar-action-btn"
-              onClick={(e) => {
-                e.stopPropagation();
-                handleNewFlowClick();
-              }}
-            >
-              +
-            </button>
-          </div>
-        </CollapsibleTrigger>
-        <CollapsibleContent>
-          <div className="sidebar-section-body">
-            {flows.map((flow) => (
-              <div
-                key={flow.id}
-                className={`sidebar-item${flow.id === activeFlowId && activeView === "flow-editor" ? " active" : ""}${!flow.enabled ? " disabled" : ""}`}
-                onClick={() => onSelectFlow(flow.id)}
-              >
-                <div className="sidebar-item-row">
-                  <div className="sidebar-item-name">{flow.name}</div>
-                  <Switch
-                    checked={flow.enabled}
-                    onCheckedChange={() => onToggleEnabled(flow.id)}
-                    onClick={(e) => e.stopPropagation()}
-                    className="data-[state=checked]:bg-[var(--success)]"
-                  />
-                </div>
-                <div className="sidebar-item-meta">{flow.node_count} nodes</div>
+              </CollapsibleContent>
+            </Collapsible>
+          )}
+        </>
+      ) : (
+        <>
+          {/* Projects section — collapsible project tree with nested agents */}
+          <Collapsible defaultOpen className="sidebar-section">
+            <CollapsibleTrigger asChild>
+              <div className="sidebar-section-header">
+                <span className="sidebar-chevron"><ChevronRight size={12} /></span>
+                <h2>Projects</h2>
               </div>
-            ))}
-            {flows.length === 0 && (
-              <div className="sidebar-item-empty">No flows yet</div>
-            )}
-          </div>
-        </CollapsibleContent>
-      </Collapsible>
+            </CollapsibleTrigger>
+            <CollapsibleContent>
+              <div className="sidebar-section-body">
+                <SidebarProjects
+                  agents={agents}
+                  onSelectAgent={onSelectAgent}
+                  selectedAgentId={selectedAgentId}
+                />
+              </div>
+            </CollapsibleContent>
+          </Collapsible>
 
-      {/* Prompts section */}
-      <Collapsible defaultOpen className="sidebar-section">
-        <CollapsibleTrigger asChild>
-          <div className="sidebar-section-header">
-            <span className="sidebar-chevron">▶</span>
-            <h2>Prompts</h2>
-            <div style={{ flex: 1 }} />
-            <button
-              className="ghost sidebar-action-btn"
-              onClick={(e) => {
-                e.stopPropagation();
-                handleCreatePrompt();
-              }}
-            >
-              +
-            </button>
-          </div>
-        </CollapsibleTrigger>
-        <CollapsibleContent>
-          <div className="sidebar-section-body">
-            {prompts.map((p) => (
-              <div
-                key={p.id}
-                className={`sidebar-item${p.id === selectedPromptId && activeView === "prompt-editor" ? " active" : ""}`}
-                onClick={() => onSelectPrompt(p.id)}
-              >
-                <div className="sidebar-item-row">
-                  <div className="sidebar-item-name">{p.title}</div>
-                  <button
-                    className="ghost sidebar-delete-btn"
-                    onClick={(e) => handleDeletePrompt(e, p.id)}
-                    title="Delete prompt"
-                  >
-                    ×
-                  </button>
-                </div>
-                {p.tags.length > 0 && (
-                  <div className="sidebar-item-meta">{p.tags.join(", ")}</div>
+          {/* Agents section — Paperclip-style with live indicators (unassigned agents) */}
+          <Collapsible defaultOpen className="sidebar-section">
+            <CollapsibleTrigger asChild>
+              <div className="sidebar-section-header">
+                <span className="sidebar-chevron"><ChevronRight size={12} /></span>
+                <h2>Agents</h2>
+                <div style={{ flex: 1 }} />
+                <button
+                  className="ghost sidebar-action-btn"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleSyncAgents();
+                  }}
+                  disabled={syncing}
+                  aria-label="Sync agents"
+                  title="Sync agents from repo"
+                >
+                  {syncing ? "..." : "↓"}
+                </button>
+                <button
+                  className="ghost sidebar-action-btn"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleCreateAgent();
+                  }}
+                  aria-label="New agent"
+                >
+                  <Plus size={13} />
+                </button>
+              </div>
+            </CollapsibleTrigger>
+            <CollapsibleContent>
+              <div className="sidebar-section-body">
+                {unassignedAgents.map((agent) => {
+                  const meta = agentMeta.get(agent.id);
+                  const isActive = agent.id === selectedAgentId &&
+                    (activeView === "agent-workspace" || activeView === "agent-detail");
+                  const isBusy = meta?.busy ?? false;
+                  const status = deriveAgentStatus(true, isBusy, false);
+                  const dotColor = agentStatusDot[status] ?? agentStatusDotDefault;
+
+                  return (
+                    <div
+                      key={agent.id}
+                      className={`sb-agent-item${isActive ? " sb-agent-item-active" : ""}`}
+                      onClick={() => onSelectAgent(agent.id)}
+                    >
+                      <div className="sb-agent-status-dot" style={{ background: dotColor }} />
+                      <span className="sb-agent-name-text">{agent.name}</span>
+                      {isBusy && (
+                        <div className="sb-agent-live">
+                          <div className="sb-agent-live-dot" />
+                          <span className="sb-agent-live-text">Live</span>
+                        </div>
+                      )}
+                      {agent.id !== STUDIO_ASSISTANT_ID && (
+                        <button
+                          className="ghost sb-agent-delete"
+                          onClick={(e) => handleDeleteAgent(e, agent.id)}
+                          title="Delete agent"
+                          aria-label="Delete agent"
+                        >
+                          <X size={12} />
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+                {agents.length === 0 && (
+                  <div className="sidebar-item-empty">No agents yet</div>
                 )}
               </div>
-            ))}
-            {prompts.length === 0 && (
-              <div className="sidebar-item-empty">No prompts yet</div>
-            )}
-          </div>
-        </CollapsibleContent>
-      </Collapsible>
+            </CollapsibleContent>
+          </Collapsible>
 
-      {/* Node palette — only visible in flow editor with an active flow */}
-      {activeView === "flow-editor" && activeFlowId && (
+          {/* Prompts section */}
+          <Collapsible defaultOpen className="sidebar-section">
+            <CollapsibleTrigger asChild>
+              <div className="sidebar-section-header">
+                <span className="sidebar-chevron"><ChevronRight size={12} /></span>
+                <h2>Prompts</h2>
+                <div style={{ flex: 1 }} />
+                <button
+                  className="ghost sidebar-action-btn"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleCreatePrompt();
+                  }}
+                  aria-label="New prompt"
+                >
+                  <Plus size={13} />
+                </button>
+              </div>
+            </CollapsibleTrigger>
+            <CollapsibleContent>
+              <div className="sidebar-section-body">
+                {prompts.map((p) => (
+                  <div
+                    key={p.id}
+                    className={`sidebar-item${p.id === selectedPromptId && activeView === "prompt-editor" ? " active" : ""}`}
+                    onClick={() => onSelectPrompt(p.id)}
+                  >
+                    <div className="sidebar-item-row">
+                      <div className="sidebar-item-name">{p.title}</div>
+                       <button
+                        className="ghost sidebar-delete-btn"
+                        onClick={(e) => handleDeletePrompt(e, p.id)}
+                        title="Delete prompt"
+                        aria-label="Delete prompt"
+                       >
+                        <X size={12} />
+                       </button>
+                    </div>
+                    {p.tags.length > 0 && (
+                      <div className="sidebar-item-meta">{p.tags.join(", ")}</div>
+                    )}
+                  </div>
+                ))}
+                {prompts.length === 0 && (
+                  <div className="sidebar-item-empty">No prompts yet</div>
+                )}
+              </div>
+            </CollapsibleContent>
+          </Collapsible>
+        </>
+      )}
+
+      {/* Node palette — visible in flow editor or when editing a workflow */}
+      {(activeView === "flow-editor" || editingWorkflow) && activeFlowId && (
         <Collapsible defaultOpen className="sidebar-section sidebar-palette-section">
           <CollapsibleTrigger asChild>
             <div className="sidebar-section-header">
-              <span className="sidebar-chevron">▶</span>
+              <span className="sidebar-chevron"><ChevronRight size={12} /></span>
               <h2>Nodes</h2>
             </div>
           </CollapsibleTrigger>
@@ -436,6 +507,13 @@ export default function Sidebar({
         </Collapsible>
       )}
 
+      <ConfirmDialog {...confirmState} />
+      {showNewAgent && (
+        <NewAgentDialog
+          onClose={() => setShowNewAgent(false)}
+          onCreated={handleAgentDialogCreated}
+        />
+      )}
     </div>
   );
 }

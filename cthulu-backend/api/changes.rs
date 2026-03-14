@@ -22,6 +22,7 @@ pub enum ResourceType {
     Flow,
     Agent,
     Prompt,
+    Workflow,
 }
 
 impl ResourceType {
@@ -30,6 +31,7 @@ impl ResourceType {
             ResourceType::Flow => "flow_change",
             ResourceType::Agent => "agent_change",
             ResourceType::Prompt => "prompt_change",
+            ResourceType::Workflow => "workflow_change",
         }
     }
 }

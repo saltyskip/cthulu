@@ -11,6 +11,7 @@ This guide is the entry point for AI assistants working in this monorepo. It pro
 3. **`.claude/rules/CODE_QUALITY.md`** — Code quality standards (state management, async, errors)
 4. **This file (`CLAUDE.md`)** — Project-specific context, architecture, and workflows
 5. **Relevant `.claude/skills/*.skill.md`** for the task domain
+6. **Anthropic Skills** in `.claude/skills/` subdirectories — load these for plan & build tasks
 
 > **Generic rules in `.claude/rules/` apply to ALL tasks and override project-specific guidance when they conflict.**
 
@@ -205,7 +206,11 @@ Sessions (sessions.yaml, local state)
 | AI Workflow | [docs/AI-WORKFLOW.md](docs/AI-WORKFLOW.md) -- project-specific verification, VM sandbox, templates |
 | Troubleshooting | [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) -- common errors and fixes |
 | Agent Rules | [AGENT.md](AGENT.md) -- rules for executor agents running inside workflows |
-| Skills | [.claude/skills/](.claude/skills/) -- Rust/Axum, React Flow, Nx, Claude CLI |
+| Skills (Project) | [.claude/skills/](.claude/skills/) -- Rust/Axum, React Flow, Nx, Claude CLI, sandbox, security |
+| Skills (Anthropic) | [.claude/skills/](.claude/skills/) -- frontend-design, webapp-testing, mcp-builder, claude-api, doc-coauthoring, skill-creator, web-artifacts-builder |
+| Skills (Superpowers) | [.claude/skills/](.claude/skills/) -- brainstorming, writing-plans, subagent-driven-development, TDD, systematic-debugging, verification, parallel-agents, code-review |
+| Skills (Vercel) | [.claude/skills/](.claude/skills/) -- react-best-practices, web-design-guidelines, composition-patterns |
+| Skills (Google Labs) | [.claude/skills/](.claude/skills/) -- shadcn-ui, react-components, design-md |
 | Lessons | [.claude/lessons.md](.claude/lessons.md) -- recorded mistakes and insights |
 | Dead Ends | [NOPE.md](NOPE.md) -- approaches that don't work |
 

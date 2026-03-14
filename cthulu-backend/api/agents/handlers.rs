@@ -24,6 +24,8 @@ pub(crate) async fn list_agents(State(state): State<AppState>) -> Json<Value> {
                 "hooks": a.hooks,
                 "subagent_only": a.subagent_only,
                 "subagent_count": a.subagents.len(),
+                "reports_to": a.reports_to,
+                "role": a.role,
                 "created_at": a.created_at,
                 "updated_at": a.updated_at,
             })
@@ -66,6 +68,10 @@ pub(crate) struct CreateAgentRequest {
     subagents: SubAgents,
     #[serde(default)]
     subagent_only: bool,
+    #[serde(default)]
+    reports_to: Option<String>,
+    #[serde(default)]
+    role: Option<String>,
 }
 
 pub(crate) async fn create_agent(
@@ -85,6 +91,12 @@ pub(crate) async fn create_agent(
     }
     if let Some(w) = body.working_dir {
         builder = builder.working_dir(w);
+    }
+    if let Some(r) = body.reports_to {
+        builder = builder.reports_to(r);
+    }
+    if let Some(r) = body.role {
+        builder = builder.role(r);
     }
     let agent = builder.build();
 
@@ -126,6 +138,22 @@ pub(crate) struct UpdateAgentRequest {
     subagents: Option<SubAgents>,
     #[serde(default)]
     subagent_only: Option<bool>,
+    // Hierarchy fields
+    #[serde(default)]
+    reports_to: Option<Option<String>>,
+    #[serde(default)]
+    role: Option<Option<String>>,
+    // Heartbeat config fields
+    #[serde(default)]
+    heartbeat_enabled: Option<bool>,
+    #[serde(default)]
+    heartbeat_interval_secs: Option<u64>,
+    #[serde(default)]
+    heartbeat_prompt_template: Option<String>,
+    #[serde(default)]
+    max_turns_per_heartbeat: Option<u32>,
+    #[serde(default)]
+    auto_permissions: Option<bool>,
 }
 
 pub(crate) async fn update_agent(
@@ -167,6 +195,51 @@ pub(crate) async fn update_agent(
     if let Some(subagent_only) = body.subagent_only {
         agent.subagent_only = subagent_only;
     }
+    // Hierarchy
+    if let Some(reports_to) = body.reports_to {
+        if let Some(ref target_id) = reports_to {
+            if target_id == &id {
+                return Err((StatusCode::BAD_REQUEST, Json(json!({ "error": "agent cannot report to itself" }))));
+            }
+            // Walk up the chain to detect cycles
+            let mut current = target_id.clone();
+            for _ in 0..100 {
+                if let Some(parent) = state.agent_repo.get(&current).await {
+                    match &parent.reports_to {
+                        Some(parent_rt) if parent_rt == &id => {
+                            return Err((StatusCode::BAD_REQUEST, Json(json!({ "error": "circular reporting chain detected" }))));
+                        }
+                        Some(parent_rt) => current = parent_rt.clone(),
+                        None => break,
+                    }
+                } else {
+                    break;
+                }
+            }
+        }
+        agent.reports_to = reports_to;
+    }
+    if let Some(role) = body.role {
+        agent.role = role;
+    }
+    // Heartbeat config
+    let heartbeat_changed = body.heartbeat_enabled.is_some()
+        || body.heartbeat_interval_secs.is_some();
+    if let Some(heartbeat_enabled) = body.heartbeat_enabled {
+        agent.heartbeat_enabled = heartbeat_enabled;
+    }
+    if let Some(heartbeat_interval_secs) = body.heartbeat_interval_secs {
+        agent.heartbeat_interval_secs = heartbeat_interval_secs;
+    }
+    if let Some(heartbeat_prompt_template) = body.heartbeat_prompt_template {
+        agent.heartbeat_prompt_template = heartbeat_prompt_template;
+    }
+    if let Some(max_turns_per_heartbeat) = body.max_turns_per_heartbeat {
+        agent.max_turns_per_heartbeat = max_turns_per_heartbeat;
+    }
+    if let Some(auto_permissions) = body.auto_permissions {
+        agent.auto_permissions = auto_permissions;
+    }
     agent.updated_at = Utc::now();
 
     state.agent_repo.save(agent.clone()).await.map_err(|e| {
@@ -175,6 +248,12 @@ pub(crate) async fn update_agent(
             Json(json!({ "error": format!("failed to save agent: {e}") })),
         )
     })?;
+
+    // Sync heartbeat scheduler if heartbeat config changed
+    if heartbeat_changed {
+        let scheduler = state.heartbeat_scheduler.read().await;
+        scheduler.sync_agent(&id).await;
+    }
 
     let _ = state.changes_tx.send(ResourceChangeEvent {
         resource_type: ResourceType::Agent,
@@ -197,6 +276,16 @@ pub(crate) async fn delete_agent(
         ));
     }
 
+    // Orphan any agents that reported to this one
+    let all_agents = state.agent_repo.list().await;
+    for mut subordinate in all_agents {
+        if subordinate.reports_to.as_deref() == Some(&id) {
+            subordinate.reports_to = None;
+            subordinate.updated_at = Utc::now();
+            let _ = state.agent_repo.save(subordinate).await;
+        }
+    }
+
     let existed = state.agent_repo.delete(&id).await.map_err(|e| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -209,6 +298,12 @@ pub(crate) async fn delete_agent(
             StatusCode::NOT_FOUND,
             Json(json!({ "error": "agent not found" })),
         ));
+    }
+
+    // Stop heartbeat timer for deleted agent
+    {
+        let scheduler = state.heartbeat_scheduler.read().await;
+        scheduler.sync_agent(&id).await;
     }
 
     let _ = state.changes_tx.send(ResourceChangeEvent {

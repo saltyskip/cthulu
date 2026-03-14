@@ -68,8 +68,8 @@ fn process_key(agent_id: &str, session_id: &str) -> String {
     format!("agent::{agent_id}::session::{session_id}")
 }
 
-/// Check if the Agent SDK integration is enabled via AGENT_SDK_ENABLED env var.
-/// When enabled, new chat sessions use `AgentSession` (SDK) instead of `LiveClaudeProcess`.
+/// Whether to use the Rust Agent SDK instead of spawning the `claude` CLI.
+/// Defaults to `false` (CLI mode). Set `AGENT_SDK_ENABLED=1` to use the SDK.
 fn agent_sdk_enabled() -> bool {
     std::env::var("AGENT_SDK_ENABLED")
         .map(|v| matches!(v.to_lowercase().as_str(), "1" | "true" | "yes"))
@@ -1002,7 +1002,6 @@ pub(crate) async fn chat(
 
         let port = state.server_port;
         let sid = &target_session_id;
-        let hook_base = format!("http://localhost:{port}/api/hooks");
 
         // Start with the system hooks — always present.
         // Hook config: 3 levels — event -> matcher group -> hook handlers
@@ -1012,27 +1011,60 @@ pub(crate) async fn chat(
         // We use PreToolUse as the permission gate instead.
         let mut hooks_map: serde_json::Map<String, Value> = serde_json::Map::new();
 
-        hooks_map.insert("PreToolUse".into(), json!([{
-            "matcher": "Write|Edit|MultiEdit|NotebookEdit|Bash",
-            "hooks": [{
-                "type": "http",
-                "url": format!("{hook_base}/pre-tool-use?session_id={sid}"),
-                "timeout": 130
-            }]
-        }]));
-        hooks_map.insert("PostToolUse".into(), json!([{
-            "matcher": "Write|Edit|MultiEdit|NotebookEdit|Bash",
-            "hooks": [{
-                "type": "http",
-                "url": format!("{hook_base}/post-tool-use?session_id={sid}")
-            }]
-        }]));
-        hooks_map.insert("Stop".into(), json!([{
-            "hooks": [{
-                "type": "http",
-                "url": format!("{hook_base}/stop?session_id={sid}")
-            }]
-        }]));
+        if let Some(ref _socket_path) = state.hook_socket_path {
+            // Desktop mode: use command-type hooks via Unix domain socket.
+            // The hook helper script lives at /tmp/cthulu-hook.sh and
+            // communicates with the Tauri app via the socket.
+            let script = std::env::temp_dir().join("cthulu-hook.sh");
+            let script_path = script.display().to_string();
+
+            hooks_map.insert("PreToolUse".into(), json!([{
+                "matcher": "Write|Edit|MultiEdit|NotebookEdit|Bash",
+                "hooks": [{
+                    "type": "command",
+                    "command": format!("{script_path} pre-tool-use {sid}"),
+                    "timeout": 130
+                }]
+            }]));
+            hooks_map.insert("PostToolUse".into(), json!([{
+                "matcher": "Write|Edit|MultiEdit|NotebookEdit|Bash",
+                "hooks": [{
+                    "type": "command",
+                    "command": format!("{script_path} post-tool-use {sid}")
+                }]
+            }]));
+            hooks_map.insert("Stop".into(), json!([{
+                "hooks": [{
+                    "type": "command",
+                    "command": format!("{script_path} stop {sid}")
+                }]
+            }]));
+        } else {
+            // CLI/server mode: use HTTP hooks.
+            let hook_base = format!("http://localhost:{port}/api/hooks");
+
+            hooks_map.insert("PreToolUse".into(), json!([{
+                "matcher": "Write|Edit|MultiEdit|NotebookEdit|Bash",
+                "hooks": [{
+                    "type": "http",
+                    "url": format!("{hook_base}/pre-tool-use?session_id={sid}"),
+                    "timeout": 130
+                }]
+            }]));
+            hooks_map.insert("PostToolUse".into(), json!([{
+                "matcher": "Write|Edit|MultiEdit|NotebookEdit|Bash",
+                "hooks": [{
+                    "type": "http",
+                    "url": format!("{hook_base}/post-tool-use?session_id={sid}")
+                }]
+            }]));
+            hooks_map.insert("Stop".into(), json!([{
+                "hooks": [{
+                    "type": "http",
+                    "url": format!("{hook_base}/stop?session_id={sid}")
+                }]
+            }]));
+        }
 
         // Merge per-agent hooks: append agent hook groups after system groups.
         if !agent.hooks.is_empty() {
@@ -1061,10 +1093,12 @@ pub(crate) async fn chat(
 
         if let Ok(json_str) = serde_json::to_string_pretty(&settings) {
             let _ = std::fs::write(&settings_path, json_str);
+            let mode = if state.hook_socket_path.is_some() { "command (socket)" } else { "http" };
             tracing::info!(
                 path = %settings_path.display(),
                 session_id = %sid,
-                "wrote .claude/settings.local.json with hook URLs"
+                hook_mode = %mode,
+                "wrote .claude/settings.local.json with hooks"
             );
         }
     }

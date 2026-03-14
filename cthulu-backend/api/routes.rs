@@ -13,25 +13,46 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 use tokio_stream::wrappers::LinesStream;
 use tokio_stream::StreamExt;
-use tower_http::cors::{Any, CorsLayer};
+use tower_http::cors::{Any, AllowOrigin, CorsLayer};
 
 use super::middleware;
 use super::AppState;
 
 pub fn build_router(state: AppState) -> Router {
+    let uptime_start = std::time::Instant::now();
+    let environment = state.environment.clone();
+
     let health_routes = Router::new().route(
         "/",
-        get(|| async {
-            Json(json!({
-                "status": "ok",
-            }))
+        get(move || {
+            let env = environment.clone();
+            async move {
+                Json(json!({
+                    "status": "ok",
+                    "version": env!("CARGO_PKG_VERSION"),
+                    "uptime_seconds": uptime_start.elapsed().as_secs(),
+                    "environment": env,
+                }))
+            }
         }),
     );
 
-    let cors = CorsLayer::new()
-        .allow_origin(Any)
-        .allow_methods(Any)
-        .allow_headers(vec![header::CONTENT_TYPE, header::AUTHORIZATION]);
+    let cors = if state.cors_origins.is_empty() {
+        CorsLayer::new()
+            .allow_origin(Any)
+            .allow_methods(Any)
+            .allow_headers(vec![header::CONTENT_TYPE, header::AUTHORIZATION])
+    } else {
+        let origins: Vec<hyper::header::HeaderValue> = state
+            .cors_origins
+            .iter()
+            .filter_map(|o| o.parse().ok())
+            .collect();
+        CorsLayer::new()
+            .allow_origin(AllowOrigin::list(origins))
+            .allow_methods(Any)
+            .allow_headers(vec![header::CONTENT_TYPE, header::AUTHORIZATION])
+    };
 
     Router::new()
         .nest("/health", health_routes)
@@ -40,6 +61,7 @@ pub fn build_router(state: AppState) -> Router {
         .fallback(not_found)
         .with_state(state)
         .layer(cors)
+        .layer(axum::middleware::from_fn(middleware::request_logging))
         .layer(axum::middleware::from_fn(middleware::strip_trailing_slash))
         .layer(axum::middleware::from_fn(
             middleware::enrich_current_span_middleware,
@@ -56,6 +78,9 @@ fn api_router() -> Router<AppState> {
         .merge(super::scheduler::router())
         .merge(super::changes::router())
         .merge(super::hooks::router())
+        .merge(super::secrets::router())
+        .merge(super::workflows::router())
+        .merge(super::cloud::router())
 }
 
 async fn not_found(req: axum::extract::Request) -> impl IntoResponse {

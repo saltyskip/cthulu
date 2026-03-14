@@ -3,10 +3,47 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 
 use crate::config::SinkConfig;
-use crate::tasks::sinks::Sink;
 use crate::tasks::sinks::notion::NotionSink;
 use crate::tasks::sinks::slack::{SlackApiSink, SlackWebhookSink};
+use crate::tasks::sinks::telegram::TelegramSink;
+use crate::tasks::sinks::Sink;
 use crate::tasks::sources::ContentItem;
+
+/// Read a secret value. Strategy:
+/// 1. If `env_name` is provided, try `std::env::var(env_name)`.
+/// 2. If that fails (or env_name is None), try reading `key` from `~/.cthulu/secrets.json`.
+/// 3. If both fail, return Err.
+fn read_secret(env_name: Option<&str>, secrets_key: &str) -> Result<String> {
+    if let Some(name) = env_name {
+        if let Ok(val) = std::env::var(name) {
+            if !val.is_empty() {
+                return Ok(val);
+            }
+        }
+    }
+
+    let base_dir = dirs::home_dir()
+        .map(|h| h.join(".cthulu"))
+        .unwrap_or_else(|| std::path::PathBuf::from(".cthulu"));
+    let secrets_path = base_dir.join("secrets.json");
+
+    if secrets_path.exists() {
+        if let Ok(content) = std::fs::read_to_string(&secrets_path) {
+            if let Ok(secrets) = serde_json::from_str::<serde_json::Value>(&content) {
+                if let Some(val) = secrets[secrets_key].as_str() {
+                    if !val.is_empty() {
+                        return Ok(val.to_string());
+                    }
+                }
+            }
+        }
+    }
+
+    let source = env_name
+        .map(|n| format!("env var '{n}' or secrets.json key '{secrets_key}'"))
+        .unwrap_or_else(|| format!("secrets.json key '{secrets_key}'"));
+    anyhow::bail!("secret not found: {source}")
+}
 
 pub fn resolve_sinks(
     configs: &[SinkConfig],
@@ -22,40 +59,66 @@ pub fn resolve_sinks(
                 channel,
             } => {
                 if let Some(token_env) = bot_token_env {
-                    let bot_token = std::env::var(token_env).with_context(|| {
-                        format!("sink requires env var {token_env} but it is not set")
-                    })?;
-                    let channel = channel.as_ref().with_context(|| {
-                        "slack bot_token_env requires a channel to be set"
-                    })?;
+                    let bot_token =
+                        read_secret(Some(token_env), "slack_bot_token").with_context(|| {
+                            format!(
+                                "slack bot sink requires token (env: {token_env} or secrets.json)"
+                            )
+                        })?;
+                    let channel = channel
+                        .as_ref()
+                        .with_context(|| "slack bot_token_env requires a channel to be set")?;
                     sinks.push(Arc::new(SlackApiSink::new(
                         Arc::clone(http_client),
                         bot_token,
                         channel.clone(),
                     )));
                 } else if let Some(webhook_env) = webhook_url_env {
-                    let webhook_url = std::env::var(webhook_env).with_context(|| {
-                        format!("sink requires env var {webhook_env} but it is not set")
-                    })?;
+                    let webhook_url = read_secret(Some(webhook_env), "slack_webhook_url")
+                        .with_context(|| format!("slack webhook sink requires URL (env: {webhook_env} or secrets.json)"))?;
                     sinks.push(Arc::new(SlackWebhookSink::new(
                         Arc::clone(http_client),
                         webhook_url,
                     )));
                 } else {
-                    anyhow::bail!("slack sink requires either webhook_url_env or bot_token_env");
+                    let webhook_url = read_secret(None, "slack_webhook_url")
+                        .context("slack sink requires either webhook_url_env, bot_token_env, or slack_webhook_url in secrets.json")?;
+                    sinks.push(Arc::new(SlackWebhookSink::new(
+                        Arc::clone(http_client),
+                        webhook_url,
+                    )));
                 }
             }
             SinkConfig::Notion {
                 token_env,
                 database_id,
             } => {
-                let token = std::env::var(token_env).with_context(|| {
-                    format!("sink requires env var {token_env} but it is not set")
+                let token = read_secret(Some(token_env), "notion_token").with_context(|| {
+                    format!("notion sink requires token (env: {token_env} or secrets.json)")
                 })?;
+                // Use config database_id if non-empty, otherwise fall back to secrets.json
+                let db_id = if !database_id.is_empty() {
+                    database_id.clone()
+                } else {
+                    read_secret(None, "notion_database_id")
+                        .context("notion sink requires database_id in config or notion_database_id in secrets.json")?
+                };
                 sinks.push(Arc::new(NotionSink::new(
                     Arc::clone(http_client),
                     token,
-                    database_id.clone(),
+                    db_id,
+                )));
+            }
+            SinkConfig::Telegram {
+                bot_token_env,
+                chat_id,
+            } => {
+                let bot_token = read_secret(bot_token_env.as_deref(), "telegram_bot_token")
+                    .context("telegram sink requires bot token (env var or secrets.json)")?;
+                sinks.push(Arc::new(TelegramSink::new(
+                    Arc::clone(http_client),
+                    bot_token,
+                    chat_id.clone(),
                 )));
             }
         }

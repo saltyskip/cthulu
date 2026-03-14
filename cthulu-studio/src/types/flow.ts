@@ -2,7 +2,22 @@ export const STUDIO_ASSISTANT_ID = "studio-assistant";
 
 export type NodeType = "trigger" | "source" | "executor" | "sink";
 
-export type ActiveView = "flow-editor" | "agent-workspace" | "prompt-editor";
+export type ActiveView = "flow-editor" | "agent-workspace" | "agent-list" | "agent-detail" | "prompt-editor" | "workflows" | "org-chart";
+
+export interface Org {
+  slug: string;
+  name: string;
+  description: string;
+}
+
+export interface ProjectMeta {
+  slug: string;
+  name: string;
+  description: string;
+  working_dir: string;
+  color: string | null;
+  status: "active" | "archived";
+}
 
 export interface Position {
   x: number;
@@ -135,6 +150,14 @@ export interface Agent {
   permissions: string[];
   append_system_prompt: string | null;
   working_dir: string | null;
+  project?: string | null;
+  reports_to?: string | null;
+  role?: string | null;
+  heartbeat_enabled: boolean;
+  heartbeat_interval_secs: number;
+  heartbeat_prompt_template: string;
+  max_turns_per_heartbeat: number;
+  auto_permissions: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -146,8 +169,11 @@ export interface AgentSummary {
   permissions: string[];
   subagent_only?: boolean;
   subagent_count?: number;
+  reports_to?: string | null;
+  role?: string | null;
   created_at: string;
   updated_at: string;
+  project?: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -160,6 +186,102 @@ export interface PipelineShape {
   sources: string[];
   executors: string[];
   sinks: string[];
+}
+
+// ---------------------------------------------------------------------------
+// Workflows (GitHub-backed)
+// ---------------------------------------------------------------------------
+
+export interface WorkflowSummary {
+  name: string;
+  workspace: string;
+  description?: string;
+  node_count: number;
+}
+
+// ---------------------------------------------------------------------------
+// Heartbeat
+// ---------------------------------------------------------------------------
+
+export type HeartbeatRunStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'timed_out' | 'cancelled';
+
+export type WakeupSource = 'timer' | 'on_demand' | 'assignment';
+
+export interface HeartbeatRun {
+  id: string;
+  agent_id: string;
+  status: HeartbeatRunStatus;
+  source: WakeupSource;
+  started_at: string;
+  finished_at: string | null;
+  cost_usd: number;
+  usage: { input_tokens: number; cached_input_tokens: number; output_tokens: number } | null;
+  error: string | null;
+  log_path: string;
+  model: string | null;
+  session_id: string | null;
+  duration_secs: number;
+}
+
+// ---------------------------------------------------------------------------
+// Agent Hierarchy
+// ---------------------------------------------------------------------------
+
+export const AGENT_ROLES = [
+  "ceo", "cto", "cmo", "cfo", "engineer", "designer",
+  "pm", "qa", "devops", "researcher", "general",
+] as const;
+
+export type AgentRole = typeof AGENT_ROLES[number];
+
+export const ROLE_LABELS: Record<AgentRole, string> = {
+  ceo: "CEO",
+  cto: "CTO",
+  cmo: "CMO",
+  cfo: "CFO",
+  engineer: "Engineer",
+  designer: "Designer",
+  pm: "Product Manager",
+  qa: "QA",
+  devops: "DevOps",
+  researcher: "Researcher",
+  general: "General",
+};
+
+// ---------------------------------------------------------------------------
+// Tasks
+// ---------------------------------------------------------------------------
+
+export type TaskStatus = 'todo' | 'in_progress' | 'done' | 'cancelled';
+
+export interface Task {
+  id: string;
+  title: string;
+  status: TaskStatus;
+  assignee_agent_id: string;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
+// ---------------------------------------------------------------------------
+// Environment / Claude CLI Status
+// ---------------------------------------------------------------------------
+
+export type CheckLevel = 'info' | 'warn' | 'error';
+export type CheckStatus = 'pass' | 'warn' | 'fail';
+
+export interface EnvironmentCheck {
+  code: string;
+  level: CheckLevel;
+  message: string;
+  hint?: string;
+}
+
+export interface EnvironmentTestResult {
+  status: CheckStatus;
+  checks: EnvironmentCheck[];
+  tested_at: string;
 }
 
 /** Metadata for a single workflow template loaded from static/workflows/. */

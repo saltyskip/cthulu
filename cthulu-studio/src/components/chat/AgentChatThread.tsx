@@ -83,6 +83,7 @@ interface AgentChatThreadProps {
   isStreaming: boolean;
   resultMeta: { cost: number; turns: number } | null;
   isDone: boolean;
+  maxTurnsReached?: boolean;
   onNew: (message: { content: unknown; role?: string }) => Promise<void>;
   onCancel: () => void;
   onClear: () => void;
@@ -101,6 +102,7 @@ export default function AgentChatThread({
   isStreaming,
   resultMeta,
   isDone,
+  maxTurnsReached,
   onNew,
   onCancel,
   onClear,
@@ -349,6 +351,12 @@ export default function AgentChatThread({
             </div>
           )}
 
+          {maxTurnsReached && !isStreaming && (
+            <div className="max-turns-banner">
+              Agent reached the turn limit. Send another message to continue.
+            </div>
+          )}
+
           {attachments.length > 0 && (
             <div className="fr-attachments">
               {attachments.map((a) => (
@@ -406,16 +414,46 @@ export default function AgentChatThread({
                 placeholder="Send a message..."
                 autoFocus
                 onChange={handleComposerChange}
-                onKeyDown={handleSlashKeyDown}
+                onKeyDown={(e) => {
+                  handleSlashKeyDown(e);
+                  // Enter to send (without shift)
+                  if (e.key === "Enter" && !e.shiftKey && !isStreaming) {
+                    e.preventDefault();
+                    const input = composerInputRef.current;
+                    const text = input?.value?.trim();
+                    if (text) {
+                      if (input) {
+                        const nativeSetter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set;
+                        nativeSetter?.call(input, "");
+                        input.dispatchEvent(new Event("input", { bubbles: true }));
+                      }
+                      onNew({ content: text, role: "user" });
+                    }
+                  }
+                }}
               />
               {isStreaming ? (
                 <button className="ac-btn ac-btn-stop" onClick={onCancel}>
                   Stop
                 </button>
               ) : (
-                <ComposerPrimitive.Send className="ac-btn">
+                <button
+                  className="ac-btn"
+                  onClick={() => {
+                    const input = composerInputRef.current;
+                    const text = input?.value?.trim();
+                    if (text) {
+                      if (input) {
+                        const nativeSetter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set;
+                        nativeSetter?.call(input, "");
+                        input.dispatchEvent(new Event("input", { bubbles: true }));
+                      }
+                      onNew({ content: text, role: "user" });
+                    }
+                  }}
+                >
                   Send
-                </ComposerPrimitive.Send>
+                </button>
               )}
             </ComposerPrimitive.Root>
           </div>

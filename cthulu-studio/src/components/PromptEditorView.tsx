@@ -5,6 +5,7 @@ import { getPrompt, updatePrompt, deletePrompt } from "../api/client";
 import { Button } from "@/components/ui/button";
 import { applyMonacoTheme } from "../lib/monaco-theme";
 import { useTheme } from "../lib/ThemeContext";
+import ConfirmDialog, { useConfirm } from "./ConfirmDialog";
 
 interface PromptEditorViewProps {
   promptId: string;
@@ -28,6 +29,7 @@ export default function PromptEditorView({
   const monacoRef = useRef<any>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const { theme: appTheme } = useTheme();
+  const [confirmState, requestConfirm] = useConfirm();
 
   useEffect(() => {
     let cancelled = false;
@@ -105,14 +107,15 @@ export default function PromptEditorView({
 
   const handleDelete = useCallback(async () => {
     if (!prompt) return;
-    if (!confirm(`Delete prompt "${prompt.title}"?`)) return;
+    const ok = await requestConfirm(`Delete "${prompt.title}"?`, "This action cannot be undone.");
+    if (!ok) return;
     try {
       await deletePrompt(promptId);
       onDeleted();
     } catch (e) {
       console.error("Failed to delete prompt:", e);
     }
-  }, [prompt, promptId, onDeleted]);
+  }, [prompt, promptId, onDeleted, requestConfirm]);
 
   if (loading) {
     return (
@@ -192,6 +195,7 @@ export default function PromptEditorView({
           }}
         />
       </div>
+      <ConfirmDialog {...confirmState} />
     </div>
   );
 }

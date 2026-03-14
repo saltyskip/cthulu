@@ -1,3 +1,5 @@
+import { invoke } from "@tauri-apps/api/core";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { log } from "./logger";
 import type {
   Flow,
@@ -10,79 +12,26 @@ import type {
   TemplateMetadata,
   Agent,
   AgentSummary,
+  HeartbeatRun,
+  EnvironmentTestResult,
+  Org,
+  ProjectMeta,
+  Task,
 } from "../types/flow";
 
-const DEFAULT_BASE_URL = "http://localhost:8081";
-
-function ensureProtocol(url: string): string {
-  const trimmed = url.trim().replace(/\/+$/, "");
-  if (!trimmed.startsWith("http://") && !trimmed.startsWith("https://")) {
-    return `http://${trimmed}`;
-  }
-  return trimmed;
-}
-
-function getBaseUrl(): string {
-  const stored = localStorage.getItem("cthulu_server_url");
-  return stored ? ensureProtocol(stored) : DEFAULT_BASE_URL;
-}
-
-export function setServerUrl(url: string) {
-  const normalized = ensureProtocol(url);
-  localStorage.setItem("cthulu_server_url", normalized);
-  log("info", `Server URL changed to ${normalized}`);
-}
-
-export function getServerUrl(): string {
-  return getBaseUrl();
-}
-
-async function apiFetch<T>(
-  path: string,
-  options: RequestInit = {}
-): Promise<T> {
-  const url = `${getBaseUrl()}/api${path}`;
-  const method = options.method || "GET";
-
-  log("http", `${method} ${path}`);
-  const start = performance.now();
-
-  try {
-    const res = await fetch(url, {
-      ...options,
-      headers: {
-        "Content-Type": "application/json",
-        ...options.headers,
-      },
-    });
-
-    const elapsed = Math.round(performance.now() - start);
-
-    if (!res.ok) {
-      const body = await res.text();
-      log("error", `${method} ${path} -> ${res.status} (${elapsed}ms)`, body);
-      throw new Error(`API error ${res.status}: ${body}`);
-    }
-
-    const data = await res.json();
-    log("http", `${method} ${path} -> ${res.status} (${elapsed}ms)`);
-    return data;
-  } catch (e) {
-    if (e instanceof TypeError) {
-      // Network error (server unreachable)
-      log("error", `${method} ${path} -> network error`, (e as Error).message);
-    }
-    throw e;
-  }
-}
+// ---------------------------------------------------------------------------
+// Flows
+// ---------------------------------------------------------------------------
 
 export async function listFlows(): Promise<FlowSummary[]> {
-  const data = await apiFetch<{ flows: FlowSummary[] }>("/flows");
+  log("http", "invoke list_flows");
+  const data = await invoke<{ flows: FlowSummary[] }>("list_flows");
   return data.flows;
 }
 
 export async function getFlow(id: string): Promise<Flow> {
-  return apiFetch<Flow>(`/flows/${id}`);
+  log("http", `invoke get_flow id=${id}`);
+  return invoke<Flow>("get_flow", { id });
 }
 
 export async function createFlow(
@@ -91,14 +40,12 @@ export async function createFlow(
   nodes?: FlowNode[],
   edges?: FlowEdge[]
 ): Promise<{ id: string }> {
-  return apiFetch<{ id: string }>("/flows", {
-    method: "POST",
-    body: JSON.stringify({
-      name,
-      description: description || "",
-      nodes: nodes || [],
-      edges: edges || [],
-    }),
+  log("http", `invoke create_flow name=${name}`);
+  return invoke<{ id: string }>("create_flow", {
+    name,
+    description: description || "",
+    nodes: nodes || [],
+    edges: edges || [],
   });
 }
 
@@ -113,29 +60,31 @@ export async function updateFlow(
     version?: number;
   }
 ): Promise<Flow> {
-  return apiFetch<Flow>(`/flows/${id}`, {
-    method: "PUT",
-    body: JSON.stringify(updates),
-  });
+  log("http", `invoke update_flow id=${id}`);
+  return invoke<Flow>("update_flow", { id, updates });
 }
 
 export async function deleteFlow(id: string): Promise<void> {
-  await apiFetch(`/flows/${id}`, { method: "DELETE" });
+  log("http", `invoke delete_flow id=${id}`);
+  await invoke("delete_flow", { id });
 }
 
 export async function triggerFlow(
   id: string
 ): Promise<{ status: string; flow_id: string }> {
-  return apiFetch(`/flows/${id}/trigger`, { method: "POST" });
+  log("http", `invoke trigger_flow id=${id}`);
+  return invoke<{ status: string; flow_id: string }>("trigger_flow", { id });
 }
 
 export async function getFlowRuns(id: string): Promise<FlowRun[]> {
-  const data = await apiFetch<{ runs: FlowRun[] }>(`/flows/${id}/runs`);
+  log("http", `invoke get_flow_runs id=${id}`);
+  const data = await invoke<{ runs: FlowRun[] }>("get_flow_runs", { id });
   return data.runs;
 }
 
 export async function getNodeTypes(): Promise<NodeTypeSchema[]> {
-  const data = await apiFetch<{ node_types: NodeTypeSchema[] }>("/node-types");
+  log("http", "invoke get_node_types");
+  const data = await invoke<{ node_types: NodeTypeSchema[] }>("get_node_types");
   return data.node_types;
 }
 
@@ -146,7 +95,8 @@ export interface PromptFile {
 }
 
 export async function listPromptFiles(): Promise<PromptFile[]> {
-  const data = await apiFetch<{ files: PromptFile[] }>("/prompt-files");
+  log("http", "invoke list_prompt_files");
+  const data = await invoke<{ files: PromptFile[] }>("list_prompt_files");
   return data.files;
 }
 
@@ -185,32 +135,37 @@ export interface InteractSessionInfo {
 export async function listAgentSessions(
   agentId: string
 ): Promise<AgentSessionsInfo> {
-  return apiFetch<AgentSessionsInfo>(`/agents/${agentId}/sessions`);
+  log("http", `invoke list_agent_sessions agentId=${agentId}`);
+  return invoke<AgentSessionsInfo>("list_agent_sessions", { agentId });
 }
 
 export async function newAgentSession(
   agentId: string
 ): Promise<{ session_id: string; created_at: string; warning?: string }> {
-  return apiFetch(`/agents/${agentId}/sessions`, { method: "POST" });
+  log("http", `invoke new_agent_session agentId=${agentId}`);
+  return invoke<{ session_id: string; created_at: string; warning?: string }>(
+    "new_agent_session",
+    { agentId }
+  );
 }
 
 export async function deleteAgentSession(
   agentId: string,
   sessionId: string
 ): Promise<{ deleted: boolean; active_session: string }> {
-  return apiFetch(`/agents/${agentId}/sessions/${sessionId}`, {
-    method: "DELETE",
-  });
+  log("http", `invoke delete_agent_session agentId=${agentId} sessionId=${sessionId}`);
+  return invoke<{ deleted: boolean; active_session: string }>(
+    "delete_agent_session",
+    { agentId, sessionId }
+  );
 }
 
 export async function stopAgentChat(
   agentId: string,
   sessionId?: string
 ): Promise<void> {
-  await apiFetch(`/agents/${agentId}/chat/stop`, {
-    method: "POST",
-    body: sessionId ? JSON.stringify({ session_id: sessionId }) : undefined,
-  });
+  log("http", `invoke stop_agent_chat agentId=${agentId}`);
+  await invoke("stop_agent_chat", { agentId, sessionId });
 }
 
 export interface SessionStatus {
@@ -226,18 +181,16 @@ export async function getSessionStatus(
   agentId: string,
   sessionId: string
 ): Promise<SessionStatus> {
-  return apiFetch<SessionStatus>(
-    `/agents/${agentId}/sessions/${sessionId}/status`
-  );
+  log("http", `invoke get_session_status agentId=${agentId} sessionId=${sessionId}`);
+  return invoke<SessionStatus>("get_session_status", { agentId, sessionId });
 }
 
 export async function killSession(
   agentId: string,
   sessionId: string
 ): Promise<void> {
-  await apiFetch(`/agents/${agentId}/sessions/${sessionId}/kill`, {
-    method: "POST",
-  });
+  log("http", `invoke kill_session agentId=${agentId} sessionId=${sessionId}`);
+  await invoke("kill_session", { agentId, sessionId });
 }
 
 // ---------------------------------------------------------------------------
@@ -249,9 +202,9 @@ export async function respondToPermission(
   requestId: string,
   decision: "allow" | "deny"
 ): Promise<{ ok: boolean }> {
-  return apiFetch<{ ok: boolean }>("/hooks/permission-response", {
-    method: "POST",
-    body: JSON.stringify({ request_id: requestId, decision }),
+  log("http", `invoke respond_to_permission requestId=${requestId} decision=${decision}`);
+  return invoke<{ ok: boolean }>("permission_response", {
+    request: { request_id: requestId, decision },
   });
 }
 
@@ -272,7 +225,11 @@ export async function listSessionFiles(
   agentId: string,
   sessionId: string
 ): Promise<{ tree: FileTreeEntry[]; root: string }> {
-  return apiFetch(`/agents/${agentId}/sessions/${sessionId}/files`);
+  log("http", `invoke list_session_files agentId=${agentId} sessionId=${sessionId}`);
+  return invoke<{ tree: FileTreeEntry[]; root: string }>(
+    "list_session_files",
+    { agentId, sessionId }
+  );
 }
 
 /** Read a file from a session's working directory (read-only). */
@@ -281,7 +238,11 @@ export async function readSessionFile(
   sessionId: string,
   path: string
 ): Promise<{ path: string; content: string; size: number }> {
-  return apiFetch(`/agents/${agentId}/sessions/${sessionId}/files/read?path=${encodeURIComponent(path)}`);
+  log("http", `invoke read_session_file agentId=${agentId} path=${path}`);
+  return invoke<{ path: string; content: string; size: number }>(
+    "read_session_file",
+    { agentId, sessionId, path }
+  );
 }
 
 /** Fetch git status snapshot for a session. Returns null if no git integration. */
@@ -290,9 +251,12 @@ export async function getGitSnapshot(
   sessionId: string
 ): Promise<import("../components/chat/FilePreviewContext").MultiRepoSnapshot | null> {
   try {
-    return await apiFetch(`/agents/${agentId}/sessions/${sessionId}/git`);
+    return await invoke<import("../components/chat/FilePreviewContext").MultiRepoSnapshot>(
+      "get_git_snapshot",
+      { agentId, sessionId }
+    );
   } catch {
-    return null; // 404 = no git integration
+    return null; // no git integration
   }
 }
 
@@ -303,9 +267,11 @@ export async function getGitDiff(
   path: string,
   repoRoot?: string
 ): Promise<{ diff: string; path: string; repo_root: string }> {
-  const params = new URLSearchParams({ path });
-  if (repoRoot && repoRoot !== ".") params.set("repo_root", repoRoot);
-  return apiFetch(`/agents/${agentId}/sessions/${sessionId}/git/diff?${params}`);
+  log("http", `invoke get_git_diff agentId=${agentId} path=${path}`);
+  return invoke<{ diff: string; path: string; repo_root: string }>(
+    "get_git_diff",
+    { agentId, sessionId, path, repoRoot: repoRoot && repoRoot !== "." ? repoRoot : undefined }
+  );
 }
 
 /** Fetch the full JSONL log for a completed flow-run session. */
@@ -313,47 +279,54 @@ export async function getSessionLog(
   agentId: string,
   sessionId: string
 ): Promise<string[]> {
-  const data = await apiFetch<{ lines: string[] }>(
-    `/agents/${agentId}/sessions/${sessionId}/log`
-  );
+  log("http", `invoke get_session_log agentId=${agentId} sessionId=${sessionId}`);
+  const data = await invoke<{ lines: string[] }>("get_session_log", {
+    agentId,
+    sessionId,
+  });
   return data.lines;
 }
 
-/** Subscribe to a live flow-run session via SSE. Returns cleanup function. */
+/** Subscribe to a live flow-run session log via Tauri events. Returns cleanup function. */
 export function streamSessionLog(
   agentId: string,
   sessionId: string,
   onLine: (line: string) => void,
   onDone: () => void
 ): () => void {
-  const url = `${getBaseUrl()}/api/agents/${agentId}/sessions/${sessionId}/stream`;
-  const source = new EventSource(url);
+  let unlisten: UnlistenFn | null = null;
+  let cleaned = false;
 
-  source.addEventListener("line", (e: MessageEvent) => {
-    onLine(e.data);
+  listen<{ line?: string; done?: boolean }>(
+    `session-log-${agentId}-${sessionId}`,
+    (event) => {
+      if (cleaned) return;
+      if (event.payload.done) {
+        onDone();
+      } else if (event.payload.line != null) {
+        onLine(event.payload.line);
+      }
+    }
+  ).then((fn) => {
+    unlisten = fn;
+    if (cleaned) fn(); // was cleaned up before listener attached
   });
 
-  source.addEventListener("done", () => {
-    onDone();
-    source.close();
-  });
-
-  source.onerror = () => {
-    log("warn", "Session stream SSE error — closing");
-    onDone();
-    source.close();
+  return () => {
+    cleaned = true;
+    unlisten?.();
   };
-
-  return () => source.close();
 }
 
 export async function listPrompts(): Promise<SavedPrompt[]> {
-  const data = await apiFetch<{ prompts: SavedPrompt[] }>("/prompts");
+  log("http", "invoke list_prompts");
+  const data = await invoke<{ prompts: SavedPrompt[] }>("list_prompts");
   return data.prompts;
 }
 
 export async function getPrompt(id: string): Promise<SavedPrompt> {
-  return apiFetch<SavedPrompt>(`/prompts/${id}`);
+  log("http", `invoke get_prompt id=${id}`);
+  return invoke<SavedPrompt>("get_prompt", { id });
 }
 
 export async function savePrompt(prompt: {
@@ -362,24 +335,21 @@ export async function savePrompt(prompt: {
   source_flow_name: string;
   tags: string[];
 }): Promise<{ id: string }> {
-  return apiFetch<{ id: string }>("/prompts", {
-    method: "POST",
-    body: JSON.stringify(prompt),
-  });
+  log("http", "invoke save_prompt");
+  return invoke<{ id: string }>("create_prompt", { request: prompt });
 }
 
 export async function updatePrompt(
   id: string,
   updates: { title?: string; summary?: string; tags?: string[] }
 ): Promise<SavedPrompt> {
-  return apiFetch<SavedPrompt>(`/prompts/${id}`, {
-    method: "PUT",
-    body: JSON.stringify(updates),
-  });
+  log("http", `invoke update_prompt id=${id}`);
+  return invoke<SavedPrompt>("update_prompt", { id, request: updates });
 }
 
 export async function deletePrompt(id: string): Promise<void> {
-  await apiFetch(`/prompts/${id}`, { method: "DELETE" });
+  log("http", `invoke delete_prompt id=${id}`);
+  await invoke("delete_prompt", { id });
 }
 
 export async function summarizeSession(
@@ -387,16 +357,12 @@ export async function summarizeSession(
   flowName: string,
   flowDescription: string
 ): Promise<{ title: string; summary: string; tags: string[] }> {
-  return apiFetch("/prompts/summarize", {
-    method: "POST",
-    body: JSON.stringify({
-      transcript,
-      flow_name: flowName,
-      flow_description: flowDescription,
-    }),
-  });
+  log("http", "invoke summarize_session");
+  return invoke<{ title: string; summary: string; tags: string[] }>(
+    "summarize_session",
+    { request: { transcript, flow_name: flowName, flow_description: flowDescription } }
+  );
 }
-
 
 // ---------------------------------------------------------------------------
 // Scheduler / Cron API
@@ -414,7 +380,8 @@ export interface ScheduleInfo {
 }
 
 export async function getFlowSchedule(flowId: string): Promise<ScheduleInfo> {
-  return apiFetch<ScheduleInfo>(`/flows/${flowId}/schedule`);
+  log("http", `invoke get_flow_schedule flowId=${flowId}`);
+  return invoke<ScheduleInfo>("get_flow_schedule", { flowId });
 }
 
 export interface SchedulerFlowStatus {
@@ -431,7 +398,8 @@ export interface SchedulerStatus {
 }
 
 export async function getSchedulerStatus(): Promise<SchedulerStatus> {
-  return apiFetch<SchedulerStatus>("/scheduler/status");
+  log("http", "invoke get_scheduler_status");
+  return invoke<SchedulerStatus>("get_scheduler_status");
 }
 
 export interface CronValidation {
@@ -441,11 +409,11 @@ export interface CronValidation {
   next_runs: string[];
 }
 
-export async function validateCron(expression: string): Promise<CronValidation> {
-  return apiFetch<CronValidation>("/validate/cron", {
-    method: "POST",
-    body: JSON.stringify({ expression }),
-  });
+export async function validateCron(
+  expression: string
+): Promise<CronValidation> {
+  log("http", "invoke validate_cron");
+  return invoke<CronValidation>("validate_cron", { expression });
 }
 
 // ---------------------------------------------------------------------------
@@ -453,13 +421,16 @@ export async function validateCron(expression: string): Promise<CronValidation> 
 // ---------------------------------------------------------------------------
 
 export async function getTokenStatus(): Promise<{ has_token: boolean }> {
-  return apiFetch<{ has_token: boolean }>("/auth/token-status");
+  log("http", "invoke get_token_status");
+  return invoke<{ has_token: boolean }>("token_status");
 }
 
-export async function refreshToken(): Promise<{ ok: boolean; message: string }> {
-  return apiFetch<{ ok: boolean; message: string }>("/auth/refresh-token", {
-    method: "POST",
-  });
+export async function refreshToken(): Promise<{
+  ok: boolean;
+  message: string;
+}> {
+  log("http", "invoke refresh_token");
+  return invoke<{ ok: boolean; message: string }>("refresh_token");
 }
 
 // ---------------------------------------------------------------------------
@@ -468,7 +439,10 @@ export async function refreshToken(): Promise<{ ok: boolean; message: string }> 
 
 /** Fetch all workflow templates (all categories). */
 export async function listTemplates(): Promise<TemplateMetadata[]> {
-  const data = await apiFetch<{ templates: TemplateMetadata[] }>("/templates");
+  log("http", "invoke list_templates");
+  const data = await invoke<{ templates: TemplateMetadata[] }>(
+    "list_templates"
+  );
   return data.templates;
 }
 
@@ -477,10 +451,8 @@ export async function getTemplateYaml(
   category: string,
   slug: string
 ): Promise<string> {
-  const url = `${getBaseUrl()}/api/templates/${category}/${slug}`;
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`API error ${res.status}`);
-  return res.text();
+  log("http", `invoke get_template_yaml category=${category} slug=${slug}`);
+  return invoke<string>("get_template_yaml", { category, slug });
 }
 
 /** Parse + save a template as a new Flow. Returns the created Flow. */
@@ -488,9 +460,8 @@ export async function importTemplate(
   category: string,
   slug: string
 ): Promise<Flow> {
-  return apiFetch<Flow>(`/templates/${category}/${slug}/import`, {
-    method: "POST",
-  });
+  log("http", `invoke import_template category=${category} slug=${slug}`);
+  return invoke<Flow>("import_template", { category, slug });
 }
 
 export interface ImportResult {
@@ -502,10 +473,8 @@ export interface ImportResult {
 
 /** Upload raw YAML text and import it as a new Flow. */
 export async function importYaml(yaml: string): Promise<ImportResult> {
-  return apiFetch<ImportResult>("/templates/import-yaml", {
-    method: "POST",
-    body: JSON.stringify({ yaml }),
-  });
+  log("http", "invoke import_yaml");
+  return invoke<ImportResult>("import_yaml", { request: { yaml } });
 }
 
 /** Fetch all workflow YAMLs from a GitHub repo and import them. */
@@ -514,9 +483,9 @@ export async function importFromGithub(
   path = "",
   branch = "main"
 ): Promise<ImportResult> {
-  return apiFetch<ImportResult>("/templates/import-github", {
-    method: "POST",
-    body: JSON.stringify({ repo_url: repoUrl, path, branch }),
+  log("http", `invoke import_from_github repo=${repoUrl}`);
+  return invoke<ImportResult>("import_github", {
+    request: { repo_url: repoUrl, path, branch },
   });
 }
 
@@ -525,12 +494,14 @@ export async function importFromGithub(
 // ---------------------------------------------------------------------------
 
 export async function listAgents(): Promise<AgentSummary[]> {
-  const data = await apiFetch<{ agents: AgentSummary[] }>("/agents");
+  log("http", "invoke list_agents");
+  const data = await invoke<{ agents: AgentSummary[] }>("list_agents");
   return data.agents;
 }
 
 export async function getAgent(id: string): Promise<Agent> {
-  return apiFetch<Agent>(`/agents/${id}`);
+  log("http", `invoke get_agent id=${id}`);
+  return invoke<Agent>("get_agent", { id });
 }
 
 export async function createAgent(data: {
@@ -541,10 +512,8 @@ export async function createAgent(data: {
   append_system_prompt?: string | null;
   working_dir?: string | null;
 }): Promise<{ id: string }> {
-  return apiFetch<{ id: string }>("/agents", {
-    method: "POST",
-    body: JSON.stringify(data),
-  });
+  log("http", `invoke create_agent name=${data.name}`);
+  return invoke<{ id: string }>("create_agent", { request: data });
 }
 
 export async function updateAgent(
@@ -556,20 +525,27 @@ export async function updateAgent(
     permissions?: string[];
     append_system_prompt?: string | null;
     working_dir?: string | null;
+    heartbeat_enabled?: boolean;
+    heartbeat_interval_secs?: number;
+    heartbeat_prompt_template?: string;
+    max_turns_per_heartbeat?: number;
+    auto_permissions?: boolean;
+    project?: string | null;
+    role?: string | null;
+    reports_to?: string | null;
   }
 ): Promise<Agent> {
-  return apiFetch<Agent>(`/agents/${id}`, {
-    method: "PUT",
-    body: JSON.stringify(updates),
-  });
+  log("http", `invoke update_agent id=${id}`);
+  return invoke<Agent>("update_agent", { id, request: updates });
 }
 
 export async function deleteAgent(id: string): Promise<void> {
-  await apiFetch(`/agents/${id}`, { method: "DELETE" });
+  log("http", `invoke delete_agent id=${id}`);
+  await invoke("delete_agent", { id });
 }
 
 // ---------------------------------------------------------------------------
-// File Change Subscriptions (SSE)
+// File Change Subscriptions (Tauri events)
 // ---------------------------------------------------------------------------
 
 export interface ResourceChangeEvent {
@@ -580,59 +556,392 @@ export interface ResourceChangeEvent {
 }
 
 /**
- * Subscribe to real-time resource change events via SSE.
- * Returns a cleanup function to close the connection.
+ * Subscribe to real-time resource change events via Tauri event system.
+ * Returns a cleanup function to stop listening.
  */
 export function subscribeToChanges(
   onEvent: (event: ResourceChangeEvent) => void
 ): () => void {
-  const url = `${getBaseUrl()}/api/changes`;
-  const source = new EventSource(url);
+  let unlisten: UnlistenFn | null = null;
+  let cleaned = false;
 
-  const handler = (e: MessageEvent) => {
-    try {
-      const event: ResourceChangeEvent = JSON.parse(e.data);
-      onEvent(event);
-    } catch {
-      log("warn", "Failed to parse change event", e.data);
-    }
+  listen<ResourceChangeEvent>("resource-change", (event) => {
+    if (cleaned) return;
+    onEvent(event.payload);
+  }).then((fn) => {
+    unlisten = fn;
+    if (cleaned) fn();
+  });
+
+  return () => {
+    cleaned = true;
+    unlisten?.();
   };
-
-  source.addEventListener("flow_change", handler);
-  source.addEventListener("agent_change", handler);
-  source.addEventListener("prompt_change", handler);
-
-  source.onerror = () => {
-    log("warn", "Changes SSE connection error — will auto-reconnect");
-  };
-
-  return () => source.close();
 }
 
 // ---------------------------------------------------------------------------
-// Health / Connection
+// Secrets / GitHub PAT
 // ---------------------------------------------------------------------------
 
-export async function checkConnection(): Promise<boolean> {
-  const url = `${getBaseUrl()}/health`;
-  const start = performance.now();
+export async function getGithubPatStatus(): Promise<{ configured: boolean }> {
+  log("http", "invoke get_github_pat_status");
+  return invoke<{ configured: boolean }>("get_github_pat_status");
+}
 
-  try {
-    const res = await fetch(url);
-    const elapsed = Math.round(performance.now() - start);
-    if (res.ok) {
-      log("info", `Health check OK (${elapsed}ms)`);
-      return true;
-    }
-    log("warn", `Health check failed: ${res.status} (${elapsed}ms)`);
-    return false;
-  } catch (e) {
-    const elapsed = Math.round(performance.now() - start);
-    log(
-      "warn",
-      `Health check failed (${elapsed}ms)`,
-      `Cannot reach ${url} — ${(e as Error).message}`
-    );
-    return false;
-  }
+export async function saveGithubPat(
+  token: string
+): Promise<{ ok: boolean; username: string }> {
+  log("http", "invoke save_github_pat");
+  return invoke<{ ok: boolean; username: string }>("save_github_pat", {
+    request: { token },
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Workflows (GitHub-backed)
+// ---------------------------------------------------------------------------
+
+export async function setupWorkflows(): Promise<{
+  repo_url: string;
+  created: boolean;
+  username: string;
+}> {
+  log("http", "invoke setup_workflows");
+  return invoke<{ repo_url: string; created: boolean; username: string }>(
+    "setup_workflows_repo"
+  );
+}
+
+export async function listWorkspaces(): Promise<{ workspaces: string[] }> {
+  log("http", "invoke list_workspaces");
+  return invoke<{ workspaces: string[] }>("list_workspaces");
+}
+
+export async function createWorkspace(
+  name: string
+): Promise<{ ok: boolean; name: string }> {
+  log("http", `invoke create_workspace name=${name}`);
+  return invoke<{ ok: boolean; name: string }>("create_workspace", { request: { name } });
+}
+
+export async function listWorkflows(
+  workspace: string
+): Promise<{
+  workspace: string;
+  workflows: import("../types/flow").WorkflowSummary[];
+}> {
+  log("http", `invoke list_workflows workspace=${workspace}`);
+  return invoke<{
+    workspace: string;
+    workflows: import("../types/flow").WorkflowSummary[];
+  }>("list_workspace_workflows", { workspace });
+}
+
+export async function getWorkflow(
+  workspace: string,
+  name: string
+): Promise<Record<string, unknown>> {
+  log("http", `invoke get_workflow workspace=${workspace} name=${name}`);
+  return invoke<Record<string, unknown>>("get_workflow", { workspace, name });
+}
+
+export async function saveWorkflow(
+  workspace: string,
+  name: string,
+  flow: Record<string, unknown>
+): Promise<{ ok: boolean }> {
+  log("http", `invoke save_workflow workspace=${workspace} name=${name}`);
+  return invoke<{ ok: boolean }>("save_workflow", { workspace, name, request: { flow } });
+}
+
+export async function publishWorkflow(
+  workspace: string,
+  name: string,
+  flow: Record<string, unknown>
+): Promise<{ ok: boolean }> {
+  log("http", `invoke publish_workflow workspace=${workspace} name=${name}`);
+  return invoke<{ ok: boolean }>("publish_workflow", {
+    workspace,
+    name,
+    request: { flow },
+  });
+}
+
+export async function deleteWorkflow(
+  workspace: string,
+  name: string
+): Promise<{ ok: boolean }> {
+  log("http", `invoke delete_workflow workspace=${workspace} name=${name}`);
+  return invoke<{ ok: boolean }>("delete_workflow", { workspace, name });
+}
+
+export async function syncWorkflows(): Promise<{
+  ok: boolean;
+  workspaces: string[];
+}> {
+  log("http", "invoke sync_workflows");
+  return invoke<{ ok: boolean; workspaces: string[] }>("sync_workflows");
+}
+
+export async function runWorkflow(
+  workspace: string,
+  name: string,
+): Promise<{ status: string; workspace: string; name: string }> {
+  log("info", `invoke run_workflow workspace=${workspace} name=${name}`);
+  return invoke<{ status: string; workspace: string; name: string }>(
+    "run_workflow",
+    { workspace, name },
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Claude CLI Status
+// ---------------------------------------------------------------------------
+
+export async function getClaudeStatus(): Promise<EnvironmentTestResult> {
+  log("http", "invoke get_claude_status");
+  return invoke<EnvironmentTestResult>("claude_status");
+}
+
+// ---------------------------------------------------------------------------
+// Heartbeat
+// ---------------------------------------------------------------------------
+
+export async function wakeupAgent(agentId: string): Promise<HeartbeatRun> {
+  log("http", `invoke wakeup_agent agentId=${agentId}`);
+  return invoke<HeartbeatRun>("wakeup_agent", { agentId });
+}
+
+export async function listHeartbeatRuns(
+  agentId: string
+): Promise<HeartbeatRun[]> {
+  log("http", `invoke list_heartbeat_runs agentId=${agentId}`);
+  return invoke<HeartbeatRun[]>("list_heartbeat_runs", { agentId });
+}
+
+export async function getHeartbeatRun(
+  agentId: string,
+  runId: string
+): Promise<HeartbeatRun> {
+  log("http", `invoke get_heartbeat_run agentId=${agentId} runId=${runId}`);
+  return invoke<HeartbeatRun>("get_heartbeat_run", { agentId, runId });
+}
+
+export async function getHeartbeatRunLog(
+  agentId: string,
+  runId: string
+): Promise<{ lines: string[] }> {
+  log("http", `invoke get_heartbeat_run_log agentId=${agentId} runId=${runId}`);
+  return invoke<{ lines: string[] }>("get_heartbeat_run_log", {
+    agentId,
+    runId,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Setup / Configuration
+// ---------------------------------------------------------------------------
+
+export async function checkSetupStatus(): Promise<{
+  setup_complete: boolean;
+  github_pat_configured: boolean;
+  claude_oauth_configured: boolean;
+  anthropic_api_key_configured: boolean;
+  openai_api_key_configured: boolean;
+  slack_webhook_configured: boolean;
+  notion_configured: boolean;
+  telegram_configured: boolean;
+}> {
+  return invoke("check_setup_status");
+}
+
+export async function saveAnthropicKey(key: string): Promise<{ ok: boolean }> {
+  return invoke("save_anthropic_key", { request: { key } });
+}
+
+export async function saveOpenaiKey(key: string): Promise<{ ok: boolean }> {
+  return invoke("save_openai_key", { request: { key } });
+}
+
+export async function saveSlackWebhook(url: string): Promise<{ ok: boolean }> {
+  return invoke("save_slack_webhook", { request: { url } });
+}
+
+export async function saveNotionCredentials(
+  token: string,
+  databaseId: string
+): Promise<{ ok: boolean }> {
+  return invoke("save_notion_credentials", {
+    request: { token, database_id: databaseId },
+  });
+}
+
+export async function saveTelegramCredentials(
+  botToken: string,
+  chatId: string
+): Promise<{ ok: boolean }> {
+  return invoke("save_telegram_credentials", {
+    request: { bot_token: botToken, chat_id: chatId },
+  });
+}
+
+// ---------------------------------------------------------------------------
+// PTY (Terminal)
+// ---------------------------------------------------------------------------
+
+export async function spawnPty(
+  agentId: string,
+  sessionId: string,
+  opts?: { workingDirOverride?: string; workspace?: string; workflowName?: string },
+): Promise<{ session_id: string }> {
+  log("info", `invoke spawn_pty agentId=${agentId} sessionId=${sessionId}${opts?.workspace ? ` ws=${opts.workspace}` : ""}${opts?.workflowName ? ` wf=${opts.workflowName}` : ""}${opts?.workingDirOverride ? ` dir=${opts.workingDirOverride}` : ""}`);
+  return invoke<{ session_id: string }>("spawn_pty", {
+    agentId,
+    sessionId,
+    workingDirOverride: opts?.workingDirOverride ?? null,
+    workspace: opts?.workspace ?? null,
+    workflowName: opts?.workflowName ?? null,
+  });
+}
+
+export async function writePty(
+  sessionId: string,
+  data: string,
+): Promise<void> {
+  await invoke("write_pty", { sessionId, data });
+}
+
+export async function resizePty(
+  sessionId: string,
+  cols: number,
+  rows: number,
+): Promise<void> {
+  await invoke("resize_pty", {
+    sessionId,
+    cols: Math.floor(cols),
+    rows: Math.floor(rows),
+  });
+}
+
+export async function killPty(sessionId: string): Promise<void> {
+  log("info", `invoke kill_pty sessionId=${sessionId}`);
+  await invoke("kill_pty", { sessionId });
+}
+
+// ---------------------------------------------------------------------------
+// Agent Repo Sync
+// ---------------------------------------------------------------------------
+
+export async function setupAgentRepo(): Promise<{
+  repo_url: string;
+  created: boolean;
+  username: string;
+}> {
+  log("http", "invoke setup_agent_repo");
+  return invoke<{ repo_url: string; created: boolean; username: string }>(
+    "setup_agent_repo"
+  );
+}
+
+export async function listAgentProjects(org: string): Promise<ProjectMeta[]> {
+  log("http", `invoke list_agent_projects org=${org}`);
+  const data = await invoke<{ projects: ProjectMeta[] }>("list_agent_projects", { org });
+  return data.projects;
+}
+
+export async function createAgentProject(
+  org: string,
+  project: string,
+  workingDir?: string
+): Promise<{ ok: boolean; project: string }> {
+  log("http", `invoke create_agent_project org=${org} project=${project}`);
+  return invoke<{ ok: boolean; project: string }>("create_agent_project", {
+    org,
+    project,
+    working_dir: workingDir || null,
+  });
+}
+
+export async function publishAgent(
+  id: string,
+  org: string,
+  project: string
+): Promise<{ ok: boolean; id: string; project: string }> {
+  log("http", `invoke publish_agent id=${id} org=${org} project=${project}`);
+  return invoke<{ ok: boolean; id: string; project: string }>(
+    "publish_agent",
+    { id, org, project }
+  );
+}
+
+export async function unpublishAgent(
+  id: string,
+  org: string
+): Promise<{ ok: boolean; id: string }> {
+  log("http", `invoke unpublish_agent id=${id} org=${org}`);
+  return invoke<{ ok: boolean; id: string }>("unpublish_agent", { id, org });
+}
+
+export async function syncAgentRepo(): Promise<{
+  ok: boolean;
+  synced: number;
+}> {
+  log("http", "invoke sync_agent_repo");
+  return invoke<{ ok: boolean; synced: number }>("sync_agent_repo");
+}
+
+// ---------------------------------------------------------------------------
+// Org management
+// ---------------------------------------------------------------------------
+
+export async function listOrgs(): Promise<Org[]> {
+  log("http", "invoke list_orgs");
+  const data = await invoke<{ orgs: Org[] }>("list_orgs");
+  return data.orgs;
+}
+
+export async function createOrg(
+  name: string,
+  description?: string
+): Promise<{ ok: boolean; slug: string; name: string }> {
+  log("http", `invoke create_org name=${name}`);
+  return invoke<{ ok: boolean; slug: string; name: string }>("create_org", {
+    name,
+    description: description ?? null,
+  });
+}
+
+export async function deleteOrg(slug: string): Promise<{ ok: boolean }> {
+  log("http", `invoke delete_org slug=${slug}`);
+  return invoke<{ ok: boolean }>("delete_org", { slug });
+}
+
+// ---------------------------------------------------------------------------
+// Tasks
+// ---------------------------------------------------------------------------
+
+export async function listTasks(assignee?: string): Promise<Task[]> {
+  log("http", `invoke list_tasks assignee=${assignee ?? "all"}`);
+  const data = await invoke<{ tasks: Task[] }>("list_tasks", { assignee: assignee ?? null });
+  return data.tasks;
+}
+
+export async function createTask(title: string, assigneeAgentId: string): Promise<Task> {
+  log("http", `invoke create_task title=${title} assignee=${assigneeAgentId}`);
+  return invoke<Task>("create_task", {
+    request: { title, assignee_agent_id: assigneeAgentId },
+  });
+}
+
+export async function updateTask(
+  id: string,
+  updates: { title?: string; status?: string; assignee_agent_id?: string }
+): Promise<Task> {
+  log("http", `invoke update_task id=${id}`);
+  return invoke<Task>("update_task", { id, request: updates });
+}
+
+export async function deleteTask(id: string): Promise<void> {
+  log("http", `invoke delete_task id=${id}`);
+  await invoke("delete_task", { id });
 }

@@ -35,6 +35,14 @@
   --color-executor: #9d8ce0;
   --color-sink: #5bb98c;
   --color-primary-foreground: #0b1317;
+
+  --spacing-xs: 0.25rem;
+  --spacing-sm: 0.5rem;
+  --spacing-md: 1rem;
+  --spacing-lg: 1.5rem;
+  --spacing-xl: 2rem;
+  --spacing-2xl: 3rem;
+  --spacing-section: 5rem;
 }
 
 * {
@@ -126,4 +134,9 @@ body {
 .terminal-line {
   opacity: 0;
   animation: terminalLine 10s ease-in-out infinite;
+}
+
+*:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }

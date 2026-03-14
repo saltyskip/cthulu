@@ -366,6 +366,7 @@ impl SandboxProvider for FirecrackerProvider {
 struct FirecrackerHandle {
     id: String,
     vm_state_dir: PathBuf,
+    #[allow(dead_code)]
     socket_path: PathBuf,
     network: VmNetwork,
     guest_agent: Arc<dyn GuestAgent>,
@@ -375,6 +376,7 @@ struct FirecrackerHandle {
     env: BTreeMap<String, String>,
     fc_child: Arc<tokio::sync::Mutex<Option<tokio::process::Child>>>,
     transport: Arc<dyn HostTransport>,
+    #[allow(dead_code)]
     ssh_key_path: PathBuf,
     _ssh_pub_key_path: PathBuf,
 }

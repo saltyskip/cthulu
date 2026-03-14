@@ -47,11 +47,6 @@ vi.mock("../RunLog", () => ({
   default: () => <div data-testid="run-log" />,
 }));
 
-// --- Mock AgentChatView ---
-vi.mock("../AgentChatView", () => ({
-  default: () => <div data-testid="agent-chat-view" />,
-}));
-
 // --- Mock ErrorBoundary ---
 vi.mock("../ErrorBoundary", () => ({
   default: ({ children }: { children: React.ReactNode }) => <>{children}</>,

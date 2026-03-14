@@ -16,3 +16,5 @@ logs/
 .nx/
 node_modules/
 .claude/
+target/
+docs/superpowers/

@@ -1,5 +1,6 @@
 pub mod notion;
 pub mod slack;
+pub mod telegram;
 
 use anyhow::Result;
 use async_trait::async_trait;

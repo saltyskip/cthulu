@@ -68,10 +68,15 @@ export default function UseCases() {
         </p>
 
         {/* Tabs */}
-        <div className="mt-10 flex justify-center gap-3">
+        <div className="mt-10 flex justify-center gap-3" role="tablist" aria-label="Use case categories">
           {cases.map((c) => (
             <button
               key={c.id}
+              role="tab"
+              aria-selected={active === c.id}
+              aria-controls={`usecases-tabpanel-${c.id}`}
+              id={`usecases-tab-${c.id}`}
+              tabIndex={active === c.id ? 0 : -1}
               onClick={() => setActive(c.id)}
               className={`rounded-lg px-5 py-2.5 text-sm font-medium transition-colors ${
                 active === c.id
@@ -89,6 +94,9 @@ export default function UseCases() {
         <AnimatePresence mode="wait">
           <motion.div
             key={current.id}
+            role="tabpanel"
+            id={`usecases-tabpanel-${current.id}`}
+            aria-labelledby={`usecases-tab-${current.id}`}
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -10 }}

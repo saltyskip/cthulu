@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import * as api from "../api/client";
 import { log } from "../api/logger";
 import { Button } from "@/components/ui/button";
@@ -15,6 +15,8 @@ import {
 import { useTheme } from "@/lib/ThemeContext";
 import { themes } from "@/lib/themes";
 import type { ActiveView } from "../types/flow";
+import { listen } from "@tauri-apps/api/event";
+import { ChevronDown, Search, X, Check } from "lucide-react";
 
 function formatRelativeTime(iso: string): string {
   const now = Date.now();
@@ -42,6 +44,15 @@ interface TopBarProps {
   onBackToFlow: () => void;
   onSettingsClick: () => void;
   onReconnect?: () => void;
+  onNavigate?: (view: ActiveView) => void;
+  onPublish?: () => void;
+  onSaveWorkflow?: () => void;
+  onRunWorkflow?: () => void;
+  editingWorkflow?: { workspace: string; name: string } | null;
+  workspaces?: string[];
+  activeWorkspace?: string | null;
+  onSelectWorkspace?: (ws: string) => void;
+  onCreateWorkspace?: () => void;
 }
 
 export default function TopBar({
@@ -55,22 +66,50 @@ export default function TopBar({
   onBackToFlow,
   onSettingsClick,
   onReconnect,
+  onNavigate,
+  onPublish,
+  onSaveWorkflow,
+  onRunWorkflow,
+  editingWorkflow,
+  workspaces,
+  activeWorkspace,
+  onSelectWorkspace,
+  onCreateWorkspace,
 }: TopBarProps) {
-  const [connected, setConnected] = useState(false);
+  // Sync status from backend
+  const [syncStatus, setSyncStatus] = useState<{ status: string; message: string } | null>(null);
+
+  useEffect(() => {
+    const unlisten = listen<{ status: string; workspace: string; message: string }>("sync-status", (event) => {
+      setSyncStatus({ status: event.payload.status, message: event.payload.message });
+      if (event.payload.status === "synced") {
+        setTimeout(() => setSyncStatus(null), 3000);
+      } else if (event.payload.status === "error") {
+        setTimeout(() => setSyncStatus(null), 5000);
+      }
+    });
+    return () => { unlisten.then((fn) => fn()); };
+  }, []);
+
+  // In Tauri desktop mode, we're always connected via IPC
+  const connected = true;
   const [nextRun, setNextRun] = useState<string | null>(null);
   const [tokenOk, setTokenOk] = useState<boolean | null>(null);
   const [refreshing, setRefreshing] = useState(false);
-  const retryRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const connectedRef = useRef(false);
-  const onReconnectRef = useRef(onReconnect);
-  onReconnectRef.current = onReconnect;
   const [editing, setEditing] = useState(false);
   const [editName, setEditName] = useState("");
   const nameInputRef = useRef<HTMLInputElement>(null);
 
+  // Call onReconnect once on mount (desktop is always connected)
+  const onReconnectRef = useRef(onReconnect);
+  onReconnectRef.current = onReconnect;
+  useEffect(() => {
+    onReconnectRef.current?.();
+  }, []);
+
   // Fetch next run time for current flow
   useEffect(() => {
-    if (!flowId || !connected) {
+    if (!flowId) {
       setNextRun(null);
       return;
     }
@@ -83,36 +122,7 @@ export default function TopBar({
       if (!cancelled) setNextRun(null);
     });
     return () => { cancelled = true; };
-  }, [flowId, connected, flow?.enabled]);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    const check = async (interval: number) => {
-      if (cancelled) return;
-      const ok = await api.checkConnection();
-      if (!cancelled) {
-        const wasDisconnected = !connectedRef.current;
-        connectedRef.current = ok;
-        setConnected(ok);
-
-        if (ok && wasDisconnected) {
-          log("info", `Connected to server at ${api.getServerUrl()}`);
-          onReconnectRef.current?.();
-        }
-
-        const nextInterval = ok ? 10000 : Math.min(interval + 1000, 10000);
-        retryRef.current = setTimeout(() => check(nextInterval), nextInterval);
-      }
-    };
-
-    check(1000);
-
-    return () => {
-      cancelled = true;
-      if (retryRef.current) clearTimeout(retryRef.current);
-    };
-  }, []);
+  }, [flowId, flow?.enabled]);
 
   // Check token status whenever we connect
   useEffect(() => {
@@ -144,7 +154,53 @@ export default function TopBar({
     <div className="top-bar">
       <h1>Cthulu Studio</h1>
 
-      {activeView === "agent-workspace" && (
+      <div className="top-bar-nav">
+        <button
+          className={`top-bar-nav-item${activeView === "agent-list" || activeView === "agent-detail" || activeView === "org-chart" ? " active" : ""}`}
+          onClick={() => onNavigate?.("agent-list")}
+        >
+          Agents
+        </button>
+        <button
+          className={`top-bar-nav-item${activeView === "workflows" ? " active" : ""}`}
+          onClick={() => onNavigate?.("workflows")}
+        >
+          Workflows
+        </button>
+      </div>
+
+      {activeView === "workflows" && !editingWorkflow && (
+        <div className="workspace-selector">
+          {workspaces && workspaces.length > 0 ? (
+            <WorkspacePicker
+              workspaces={workspaces}
+              activeWorkspace={activeWorkspace ?? null}
+              onSelect={(ws) => onSelectWorkspace?.(ws)}
+            />
+          ) : (
+            <span className="text-sm text-[var(--text-secondary)]">
+              No workspaces yet
+            </span>
+          )}
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onCreateWorkspace}
+          >
+            + New Workspace
+          </Button>
+          {syncStatus && (
+            <span className={`sync-status sync-status-${syncStatus.status}`}>
+              {syncStatus.status === "syncing" && "⟳ "}
+              {syncStatus.status === "synced" && "✓ "}
+              {syncStatus.status === "error" && "✗ "}
+              {syncStatus.message}
+            </span>
+          )}
+        </div>
+      )}
+
+      {(activeView === "agent-workspace" || activeView === "agent-detail" || activeView === "org-chart") && (
         <Button variant="ghost" size="sm" className="top-bar-back" onClick={onBackToFlow}>
           ← Back
         </Button>
@@ -159,7 +215,18 @@ export default function TopBar({
         </>
       )}
 
-      {activeView === "flow-editor" && flow && (
+      {editingWorkflow && flow && (
+        <>
+          <Button variant="ghost" size="sm" className="top-bar-back" onClick={() => onNavigate?.("workflows")}>
+            ← Workflows
+          </Button>
+          <span className="flow-name" title={`${editingWorkflow.workspace}/${editingWorkflow.name}`}>
+            {flow.name}
+          </span>
+        </>
+      )}
+
+      {activeView === "flow-editor" && !editingWorkflow && flow && (
         <>
           {editing ? (
             <input
@@ -198,7 +265,7 @@ export default function TopBar({
         </>
       )}
 
-      {activeView === "agent-workspace" && agentName && (
+      {(activeView === "agent-workspace" || activeView === "agent-detail") && agentName && (
         <>
           <span className="top-bar-agent-name">{agentName}</span>
           {sessionSummary && (
@@ -209,27 +276,63 @@ export default function TopBar({
 
       <div className="spacer" />
 
-      {activeView === "flow-editor" && flow && (
+      {editingWorkflow && onRunWorkflow && (
         <Button
           size="sm"
-          onClick={onTrigger}
+          onClick={onRunWorkflow}
           disabled={!connected}
-          title={
-            !connected
-              ? "Server disconnected"
-              : !(flow.enabled)
-                ? "Flow is disabled — manual run still works"
-                : undefined
-          }
+          title="Run this workflow"
         >
-          Run{!(flow.enabled) ? " (Manual)" : ""}
+          Run
         </Button>
+      )}
+
+      {editingWorkflow && onSaveWorkflow && (
+        <Button
+          size="sm"
+          onClick={onSaveWorkflow}
+          disabled={!connected}
+          title="Save workflow locally"
+        >
+          Save
+        </Button>
+      )}
+
+      {editingWorkflow && onPublish && (
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={onPublish}
+          disabled={!connected}
+          title="Save and push to GitHub"
+        >
+          Publish
+        </Button>
+      )}
+
+      {activeView === "flow-editor" && !editingWorkflow && flow && (
+        <>
+          <Button
+            size="sm"
+            onClick={onTrigger}
+            disabled={!connected}
+            title={
+              !connected
+                ? "Server disconnected"
+                : !(flow.enabled)
+                  ? "Flow is disabled — manual run still works"
+                  : undefined
+            }
+          >
+            Run{!(flow.enabled) ? " (Manual)" : ""}
+          </Button>
+        </>
       )}
 
       <div className="connection-status">
         <div
           className={`connection-dot ${connected ? "connected" : "disconnected"}`}
-          title={connected ? api.getServerUrl() : "Disconnected"}
+          title={connected ? "Connected (Tauri IPC)" : "Disconnected"}
         />
       </div>
 
@@ -253,6 +356,118 @@ export default function TopBar({
   );
 }
 
+/** Searchable workspace picker (combobox pattern) */
+function WorkspacePicker({
+  workspaces,
+  activeWorkspace,
+  onSelect,
+}: {
+  workspaces: string[];
+  activeWorkspace: string | null;
+  onSelect: (ws: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const containerRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return workspaces;
+    return workspaces.filter((ws) => ws.toLowerCase().includes(q));
+  }, [workspaces, query]);
+
+  // Close on click outside
+  useEffect(() => {
+    if (!open) return;
+    const handleClick = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false);
+        setQuery("");
+      }
+    };
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [open]);
+
+  // Focus input when opening
+  useEffect(() => {
+    if (open) {
+      setTimeout(() => inputRef.current?.focus(), 0);
+    }
+  }, [open]);
+
+  const handleSelect = (ws: string) => {
+    onSelect(ws);
+    setOpen(false);
+    setQuery("");
+  };
+
+  return (
+    <div className="ws-picker" ref={containerRef}>
+      <button
+        className="ws-picker-trigger"
+        onClick={() => setOpen(!open)}
+        type="button"
+      >
+        <span className="ws-picker-trigger-text">
+          {activeWorkspace || "Select workspace"}
+        </span>
+        <ChevronDown size={12} className={`ws-picker-chevron${open ? " ws-picker-chevron-open" : ""}`} />
+      </button>
+      {open && (
+        <div className="ws-picker-dropdown">
+          <div className="ws-picker-search">
+            <Search size={12} className="ws-picker-search-icon" />
+            <input
+              ref={inputRef}
+              className="ws-picker-search-input"
+              type="text"
+              placeholder="Search workspaces..."
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") {
+                  if (query) { setQuery(""); } else { setOpen(false); }
+                } else if (e.key === "Enter" && filtered.length === 1) {
+                  handleSelect(filtered[0]);
+                }
+              }}
+            />
+            {query && (
+              <button
+                className="ws-picker-search-clear"
+                onClick={() => { setQuery(""); inputRef.current?.focus(); }}
+                aria-label="Clear search"
+              >
+                <X size={10} />
+              </button>
+            )}
+          </div>
+          <div className="ws-picker-list">
+            {filtered.map((ws) => (
+              <button
+                key={ws}
+                className={`ws-picker-item${ws === activeWorkspace ? " ws-picker-item-active" : ""}`}
+                onClick={() => handleSelect(ws)}
+                type="button"
+              >
+                <span>{ws}</span>
+                {ws === activeWorkspace && <Check size={12} />}
+              </button>
+            ))}
+            {filtered.length === 0 && (
+              <div className="ws-picker-empty">
+                {query ? `No workspaces matching "${query}"` : "No workspaces"}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ThemeSelector() {
   const { theme, setThemeId } = useTheme();
   const branded = themes.filter((t) => t.group === "branded");
@@ -260,7 +475,7 @@ function ThemeSelector() {
 
   return (
     <Select value={theme.id} onValueChange={setThemeId}>
-      <SelectTrigger size="sm" className="text-xs h-7 min-w-[120px]">
+      <SelectTrigger size="sm" className="text-xs h-8 min-w-[120px]">
         <SelectValue />
       </SelectTrigger>
       <SelectContent position="popper" sideOffset={4}>

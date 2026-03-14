@@ -1,0 +1,86 @@
+# E2E Test Workflow: Python Script → Claude Code → Slack
+#
+# Pipeline: Manual Trigger → Python (fetch BTC/ETH prices) → Claude (analyze) → Slack
+#
+# NOTE: The agent_id "PLACEHOLDER_AGENT_ID" must be replaced with a real agent ID
+# before running. The integration test script (scripts/integration-test-e2e-workflow.sh)
+# patches this automatically.
+
+name: e2e-python-slack-test
+description: "E2E test: Python fetches BTC price, Claude analyzes it, result posted to Slack"
+nodes:
+  - id: "trigger"
+    node_type: trigger
+    kind: manual
+    config: {}
+    position: { x: 0, y: 0 }
+    label: "Manual Trigger"
+
+  - id: "fetch-btc"
+    node_type: executor
+    kind: python-script
+    config:
+      script: |
+        import urllib.request
+        import json
+        import ssl
+
+        # Create SSL context that works on macOS framework Python
+        ctx = ssl.create_default_context()
+        try:
+            import certifi
+            ctx.load_verify_locations(certifi.where())
+        except ImportError:
+            # Fallback: disable verification if certifi not available
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+
+        url = "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum&vs_currencies=usd&include_24hr_change=true"
+        req = urllib.request.Request(url, headers={"Accept": "application/json", "User-Agent": "cthulu/1.0"})
+        with urllib.request.urlopen(req, timeout=15, context=ctx) as resp:
+            data = json.loads(resp.read().decode())
+
+        btc = data.get("bitcoin", {})
+        eth = data.get("ethereum", {})
+        btc_price = btc.get("usd", "N/A")
+        btc_change = btc.get("usd_24h_change", 0)
+        eth_price = eth.get("usd", "N/A")
+        eth_change = eth.get("usd_24h_change", 0)
+
+        print(f"BTC: ${btc_price:,.2f} ({btc_change:+.2f}% 24h)")
+        print(f"ETH: ${eth_price:,.2f} ({eth_change:+.2f}% 24h)")
+        print(f"Timestamp: {__import__('datetime').datetime.utcnow().isoformat()}Z")
+      timeout: 30
+    position: { x: 300, y: 0 }
+    label: "Fetch Crypto Prices (Python)"
+
+  - id: "analyze"
+    node_type: executor
+    kind: claude-code
+    config:
+      agent_id: "PLACEHOLDER_AGENT_ID"
+      prompt: |
+        You are a concise crypto market analyst. Analyze the following live price data and write a brief 2-3 sentence market summary suitable for a Slack post. Include the prices, direction (bullish/bearish), and any notable observations. Use emoji for visual appeal. Keep it under 280 characters.
+
+        {{content}}
+      working_dir: "."
+    position: { x: 600, y: 0 }
+    label: "Claude: Analyze Prices"
+
+  - id: "post-slack"
+    node_type: sink
+    kind: slack
+    config: {}
+    position: { x: 900, y: 0 }
+    label: "Post to Slack"
+
+edges:
+  - id: "e1"
+    source: "trigger"
+    target: "fetch-btc"
+  - id: "e2"
+    source: "fetch-btc"
+    target: "analyze"
+  - id: "e3"
+    source: "analyze"
+    target: "post-slack"

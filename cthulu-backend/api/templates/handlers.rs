@@ -91,8 +91,7 @@ async fn provision_agents_for_executors(
 /// List all templates across all categories.
 /// Returns an array of `TemplateMetadata` objects.
 pub(crate) async fn list_templates(State(state): State<AppState>) -> impl IntoResponse {
-    let repo = TemplateRepository::new(state.flow_repo.clone(), state.static_dir.clone());
-    let templates = repo.list_templates();
+    let templates = state.template_cache.read().await.clone();
     Json(json!({ "templates": templates }))
 }
 

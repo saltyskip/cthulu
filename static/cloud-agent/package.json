@@ -1,0 +1,14 @@
+{
+  "name": "cthulu-cloud-agent",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.52.0",
+    "@google/adk": "^0.2.0"
+  }
+}

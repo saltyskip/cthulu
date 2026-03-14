@@ -3,6 +3,8 @@ import Hero from "@/components/Hero";
 import ValueProps from "@/components/ValueProps";
 import MultiAgent from "@/components/MultiAgent";
 import UseCases from "@/components/UseCases";
+import Skills from "@/components/Skills";
+import Plugins from "@/components/Plugins";
 import HowItWorks from "@/components/HowItWorks";
 import StudioShowcase from "@/components/StudioShowcase";
 import ConfigExample from "@/components/ConfigExample";
@@ -13,11 +15,13 @@ export default function Home() {
   return (
     <>
       <Nav />
-      <main>
+      <main id="main-content">
         <Hero />
         <ValueProps />
         <MultiAgent />
         <UseCases />
+        <Skills />
+        <Plugins />
         <HowItWorks />
         <StudioShowcase />
         <ConfigExample />

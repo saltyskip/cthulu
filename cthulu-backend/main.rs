@@ -1,41 +1,8 @@
-mod agent_sdk;
-mod agents;
-mod config;
-mod flows;
-mod git;
-mod github;
-mod prompts;
-mod sandbox;
-mod api;
-mod tasks;
-mod templates;
-mod watcher;
-
-use anyhow::{Context, Result};
-use axum::body::Body;
-use axum::extract::Request;
 use clap::Parser;
 use dotenvy::dotenv;
-use sentry::integrations::tower::{NewSentryLayer, SentryHttpLayer};
 use std::error::Error;
-use std::sync::Arc;
-use std::time::Duration;
-use tokio::net::TcpListener;
-use tracing_subscriber::EnvFilter;
-use tracing_subscriber::layer::SubscriberExt;
-use tracing_subscriber::util::SubscriberInitExt;
 
-use crate::agents::file_repository::FileAgentRepository;
-use crate::agents::repository::AgentRepository;
-use crate::agents::{STUDIO_ASSISTANT_ID, default_studio_assistant};
-use crate::api::changes::ResourceChangeEvent;
-use crate::flows::events::RunEvent;
-use crate::flows::file_repository::FileFlowRepository;
-use crate::flows::repository::FlowRepository;
-use crate::flows::scheduler::FlowScheduler;
-use crate::github::client::{GithubClient, HttpGithubClient};
-use crate::prompts::file_repository::FilePromptRepository;
-use crate::prompts::repository::PromptRepository;
+use cthulu::ServerConfig;
 
 #[derive(Parser)]
 #[command(name = "cthulu", about = "AI-powered flow runner")]
@@ -50,7 +17,7 @@ enum Cli {
 }
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn Error>> {
+async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     dotenv().ok();
 
     // Parse CLI args — default to Serve when no subcommand is given,
@@ -58,7 +25,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let args: Vec<String> = std::env::args().collect();
     let cli = if args.len() <= 1 {
         // No subcommand given, default to serve
-        Cli::Serve { start_disabled: false }
+        Cli::Serve {
+            start_disabled: false,
+        }
     } else {
         Cli::parse()
     };
@@ -68,355 +37,34 @@ async fn main() -> Result<(), Box<dyn Error>> {
     }
 }
 
-async fn run_server(start_disabled: bool) -> Result<(), Box<dyn Error>> {
-    let config = config::Config::from_env();
-
-    let filter = tracing_subscriber::EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new("cthulu=info,tower_http=warn,hyper=warn"));
-
-    tracing_subscriber::registry()
-        .with(filter)
-        .with(tracing_tree::HierarchicalLayer::new(2).with_targets(true).with_bracketed_fields(false))
-        .with(sentry::integrations::tracing::layer().event_filter(
-            |metadata| match *metadata.level() {
-                tracing::Level::ERROR => sentry::integrations::tracing::EventFilter::Event,
-                tracing::Level::WARN | tracing::Level::INFO => {
-                    sentry::integrations::tracing::EventFilter::Breadcrumb
-                }
-                _ => sentry::integrations::tracing::EventFilter::Ignore,
-            },
-        ))
-        .init();
-
-    let _guard = sentry::init((
-        config.sentry_dsn.clone().unwrap_or_default(),
-        sentry::ClientOptions {
-            release: sentry::release_name!(),
-            environment: Some(config.environment.clone().into()),
-            send_default_pii: true,
-            traces_sample_rate: 0.2,
-            enable_logs: true,
-            ..Default::default()
-        },
-    ));
-
-    let http_client = Arc::new(
-        reqwest::Client::builder()
-            .connect_timeout(Duration::from_secs(10))
-            .timeout(Duration::from_secs(30))
-            .build()
-            .context("failed to build HTTP client")?,
-    );
-
-    let github_client: Option<Arc<dyn GithubClient>> = std::env::var("GITHUB_TOKEN")
+async fn run_server(start_disabled: bool) -> Result<(), Box<dyn Error + Send + Sync>> {
+    let port: u16 = std::env::var("PORT")
         .ok()
-        .filter(|t| !t.is_empty())
-        .map(|token| {
-            Arc::new(HttpGithubClient::new((*http_client).clone(), token)) as Arc<dyn GithubClient>
-        });
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(8081);
 
-    // Initialize data directory
-    let base_dir = dirs::home_dir()
-        .unwrap_or_else(|| std::path::PathBuf::from("."))
-        .join(".cthulu");
-
-    // Initialize flow repository (flows + runs)
-    // Keep concrete Arc for the file watcher, upcast to trait object for AppState.
-    let file_flow_repo = Arc::new(FileFlowRepository::new(base_dir.clone()));
-    file_flow_repo
-        .load_all()
-        .await
-        .context("failed to load flow repository")?;
-    let flow_repo: Arc<dyn FlowRepository> = file_flow_repo.clone();
-
-    // Initialize prompt repository
-    let file_prompt_repo = Arc::new(FilePromptRepository::new(base_dir.clone()));
-    file_prompt_repo
-        .load_all()
-        .await
-        .context("failed to load prompt repository")?;
-    let prompt_repo: Arc<dyn PromptRepository> = file_prompt_repo.clone();
-
-    // Initialize agent repository
-    let file_agent_repo = Arc::new(FileAgentRepository::new(base_dir.clone()));
-    file_agent_repo
-        .load_all()
-        .await
-        .context("failed to load agent repository")?;
-    let agent_repo: Arc<dyn AgentRepository> = file_agent_repo.clone();
-
-    // Seed or migrate the built-in Studio Assistant with sub-agents.
-    // Sub-agents (code-reviewer, bugs-bunny, daffy-duck, tweety-bird) are embedded
-    // in the Studio Assistant's subagents field and passed via --agents to Claude Code.
-    match agent_repo.get(STUDIO_ASSISTANT_ID).await {
-        None => {
-            tracing::info!("seeding built-in Studio Assistant agent with sub-agents");
-            agent_repo
-                .save(default_studio_assistant())
-                .await
-                .with_context(|| "failed to seed Studio Assistant agent")?;
-        }
-        Some(existing) if existing.subagents.is_empty() => {
-            // Migration: existing install has Studio Assistant without sub-agents.
-            // Update it with the default sub-agents so the feature works.
-            tracing::info!("migrating Studio Assistant: adding default sub-agents");
-            let mut updated = existing;
-            updated.subagents = crate::agents::default_subagents();
-            updated.updated_at = chrono::Utc::now();
-            agent_repo
-                .save(updated)
-                .await
-                .with_context(|| "failed to migrate Studio Assistant with sub-agents")?;
-        }
-        Some(_) => {} // Already has sub-agents, nothing to do
-    }
-
-    let (events_tx, _) = tokio::sync::broadcast::channel::<RunEvent>(256);
-    let (changes_tx, _) = tokio::sync::broadcast::channel::<ResourceChangeEvent>(256);
-
-    // Load persisted interact sessions from ~/.cthulu/sessions.yaml
-    let sessions_path = base_dir.join("sessions.yaml");
-    let persisted_sessions = api::load_sessions(&sessions_path);
-
-    // Read OAuth token: macOS Keychain first, then CLAUDE_CODE_OAUTH_TOKEN env
-    let oauth_token: Option<String> = {
-        // Try macOS Keychain
-        let keychain_result = std::process::Command::new("security")
-            .args(["find-generic-password", "-s", "Claude Code-credentials", "-w"])
-            .output();
-        match keychain_result {
-            Ok(output) if output.status.success() => {
-                let raw = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                // Parse JSON to extract accessToken
-                if let Ok(v) = serde_json::from_str::<serde_json::Value>(&raw) {
-                    let token = v["claudeAiOauth"]["accessToken"].as_str().map(String::from);
-                    if token.is_some() {
-                        tracing::info!("OAuth token loaded from macOS Keychain");
-                    }
-                    token
-                } else {
-                    None
-                }
-            }
-            _ => None,
-        }
-        .or_else(|| {
-            std::env::var("CLAUDE_CODE_OAUTH_TOKEN").ok().map(|t| {
-                tracing::info!("OAuth token loaded from CLAUDE_CODE_OAUTH_TOKEN env");
-                t
-            })
-        })
+    let config = ServerConfig {
+        port,
+        start_disabled,
+        static_dir: None,
+        data_dir: None,
     };
 
-    // Initialize sandbox provider (before scheduler, so scheduler can use it)
-    //
-    // Priority:
-    //   1. FIRECRACKER_SSH_HOST → RemoteSsh (real Linux server with /dev/kvm)
-    //   2. FIRECRACKER_API_URL → LimaTcp (Lima VM on macOS, FC API over TCP)
-    //   3. Default → DangerousHost (best-effort host isolation, no VM)
-    let sandbox_provider: Arc<dyn sandbox::SandboxProvider> =
-        if let Ok(ssh_host) = std::env::var("FIRECRACKER_SSH_HOST") {
-            let api_url = std::env::var("FIRECRACKER_API_URL")
-                .unwrap_or_else(|_| format!("http://{}:8080", ssh_host.split('@').last().unwrap_or(&ssh_host)));
-            let ssh_port: u16 = std::env::var("FIRECRACKER_SSH_PORT")
-                .ok()
-                .and_then(|v| v.parse().ok())
-                .unwrap_or(22);
-            let ssh_key = std::env::var("FIRECRACKER_SSH_KEY").ok();
+    // Create a watch channel for shutdown signaling
+    let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
 
-            tracing::info!(
-                ssh_target = %ssh_host,
-                ssh_port = ssh_port,
-                api_url = %api_url,
-                "initializing Firecracker sandbox provider (RemoteSsh)"
-            );
+    // Spawn a task that listens for ctrl-c / SIGTERM and sends shutdown
+    tokio::spawn(async move {
+        shutdown_signal().await;
+        let _ = shutdown_tx.send(true);
+    });
 
-            let remote_state_dir = std::env::var("FC_REMOTE_STATE_DIR")
-                .unwrap_or_else(|_| "/var/lib/firecracker".into());
-            let remote_fc_bin = std::env::var("FC_REMOTE_BIN")
-                .unwrap_or_else(|_| "/usr/local/bin/firecracker".into());
+    cthulu::start_server(config, shutdown_rx).await?;
 
-            let kernel_default = std::path::PathBuf::from(format!("{remote_state_dir}/vmlinux"));
-            let rootfs_default = std::path::PathBuf::from(format!("{remote_state_dir}/rootfs.ext4"));
-
-            let fc_config = build_fc_config(
-                sandbox::FirecrackerHostTransportConfig::RemoteSsh {
-                    ssh_target: ssh_host,
-                    ssh_port,
-                    ssh_key_path: ssh_key,
-                    api_base_url: api_url,
-                    remote_firecracker_bin: remote_fc_bin,
-                    remote_state_dir: remote_state_dir.clone(),
-                },
-                &base_dir,
-                kernel_default,
-                rootfs_default,
-            );
-            Arc::new(
-                sandbox::backends::firecracker::FirecrackerProvider::new(fc_config)
-                    .context("failed to initialize Firecracker sandbox provider")?,
-            )
-        } else if let Ok(fc_api_url) = std::env::var("FIRECRACKER_API_URL") {
-            tracing::info!(
-                api_url = %fc_api_url,
-                "initializing Firecracker sandbox provider (LimaTcp)"
-            );
-
-            let kernel_default = base_dir.join("firecracker/vmlinux");
-            let rootfs_default = base_dir.join("firecracker/rootfs.ext4");
-
-            let fc_config = build_fc_config(
-                sandbox::FirecrackerHostTransportConfig::LimaTcp {
-                    lima_instance: std::env::var("LIMA_INSTANCE").unwrap_or_else(|_| "default".into()),
-                    api_base_url: fc_api_url,
-                    guest_ssh_via_lima: true,
-                },
-                &base_dir,
-                kernel_default,
-                rootfs_default,
-            );
-            Arc::new(
-                sandbox::backends::firecracker::FirecrackerProvider::new(fc_config)
-                    .context("failed to initialize Firecracker sandbox provider")?,
-            )
-        } else {
-            tracing::info!("initializing DangerousHost sandbox provider (default)");
-            let sandbox_config = sandbox::DangerousConfig {
-                root_dir: base_dir.join("sandboxes"),
-                ..sandbox::DangerousConfig::default()
-            };
-            Arc::new(
-                sandbox::backends::dangerous::DangerousHostProvider::new(sandbox_config)
-                    .context("failed to initialize sandbox provider")?,
-            )
-        };
-
-    // Session streams for flow-run session broadcasting
-    let session_streams = Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new()));
-
-    // Interact sessions (shared between scheduler and AppState)
-    let interact_sessions = Arc::new(tokio::sync::RwLock::new(persisted_sessions));
-
-    // Create and start the flow scheduler
-    let scheduler = Arc::new(FlowScheduler::new(
-        flow_repo.clone(),
-        http_client.clone(),
-        github_client.clone(),
-        events_tx.clone(),
-        sandbox_provider.clone(),
-        agent_repo.clone(),
-        interact_sessions.clone(),
-        sessions_path.clone(),
-        base_dir.clone(),
-        session_streams.clone(),
-    ));
-    if start_disabled {
-        tracing::info!("Starting with all flow triggers disabled (--start-disabled)");
-        let flows = flow_repo.list_flows().await;
-        for mut flow in flows {
-            if flow.enabled {
-                flow.enabled = false;
-                if let Err(e) = flow_repo.save_flow(flow).await {
-                    tracing::warn!(error = %e, "Failed to disable flow");
-                }
-            }
-        }
-    } else {
-        scheduler.start_all().await;
-    }
-
-    // Resolve static/ directory: prefer CTHULU_STATIC_DIR env var,
-    // then look relative to the current working directory (repo root during dev),
-    // then fall back to the binary's directory.
-    let static_dir = std::env::var("CTHULU_STATIC_DIR")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|_| {
-            let cwd_static = std::env::current_dir()
-                .unwrap_or_else(|_| ".".into())
-                .join("static");
-            if cwd_static.exists() {
-                cwd_static
-            } else {
-                // Try next to the binary
-                std::env::current_exe()
-                    .ok()
-                    .and_then(|p| p.parent().map(|d| d.join("static")))
-                    .unwrap_or_else(|| std::path::PathBuf::from("static"))
-            }
-        });
-
-    tracing::info!(path = %static_dir.display(), "static directory");
-
-    let app_state = api::AppState {
-        github_client,
-        http_client,
-        flow_repo,
-        prompt_repo,
-        agent_repo,
-        scheduler,
-        events_tx,
-        changes_tx: changes_tx.clone(),
-        interact_sessions,
-        sessions_path,
-        data_dir: base_dir.clone(),
-        static_dir,
-        live_processes: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
-        sandbox_provider,
-        oauth_token: Arc::new(tokio::sync::RwLock::new(oauth_token)),
-        session_streams,
-        chat_event_buffers: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
-        sdk_sessions: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
-        pending_permissions: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
-        global_hook_tx: Arc::new(tokio::sync::broadcast::channel::<String>(256).0),
-        server_port: config.port,
-    };
-
-    // Start file change watcher (keeps caches in sync with external edits)
-    let _watcher = watcher::FileChangeWatcher::start(
-        base_dir,
-        file_flow_repo,
-        file_agent_repo,
-        file_prompt_repo,
-        changes_tx,
-    )
-    .context("failed to start file change watcher")?;
-
-    let live_processes = app_state.live_processes.clone();
-    let sdk_sessions = app_state.sdk_sessions.clone();
-
-    let app = api::create_app(app_state)
-        .layer(SentryHttpLayer::new().enable_transaction())
-        .layer(NewSentryLayer::<Request<Body>>::new_from_top());
-
-    let port = config.port;
-    let addr = format!("0.0.0.0:{port}");
-    let listener = TcpListener::bind(&addr).await?;
-    println!("Listening on http://{addr}");
-    axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal())
-        .await?;
-
-    // Server has stopped — kill all child processes then exit.
-    tracing::info!("shutting down: killing child processes");
-    {
-        let mut pool = live_processes.lock().await;
-        for (key, mut proc) in pool.drain() {
-            if let Err(e) = proc.child.kill().await {
-                tracing::trace!(key = %key, error = %e, "live process kill on shutdown");
-            }
-        }
-    }
-    {
-        let mut pool = sdk_sessions.lock().await;
-        for (key, mut session) in pool.drain() {
-            if let Err(e) = session.disconnect().await {
-                tracing::trace!(key = %key, error = %e, "SDK session disconnect on shutdown");
-            }
-        }
-    }
     // Force exit — spawn_blocking reader threads can't be stopped gracefully
     std::process::exit(0);
 
+    #[allow(unreachable_code)]
     Ok(())
 }
 
@@ -425,8 +73,9 @@ async fn shutdown_signal() {
     let ctrl_c = tokio::signal::ctrl_c();
     #[cfg(unix)]
     {
-        let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-            .expect("failed to register SIGTERM handler");
+        let mut sigterm =
+            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+                .expect("failed to register SIGTERM handler");
         tokio::select! {
             _ = ctrl_c => {},
             _ = sigterm.recv() => {},
@@ -437,43 +86,4 @@ async fn shutdown_signal() {
         ctrl_c.await.ok();
     }
     tracing::info!("shutdown signal received");
-}
-
-/// Build a `FirecrackerConfig` with the transport-specific `host` variant and
-/// shared defaults for vcpu, memory, network, jailer, and guest agent.
-///
-/// `kernel_default` / `rootfs_default` are the fallback paths when the
-/// corresponding env vars (`FC_KERNEL_IMAGE`, `FC_ROOTFS_IMAGE`) are not set.
-fn build_fc_config(
-    host: sandbox::FirecrackerHostTransportConfig,
-    base_dir: &std::path::Path,
-    kernel_default: std::path::PathBuf,
-    rootfs_default: std::path::PathBuf,
-) -> sandbox::FirecrackerConfig {
-    sandbox::FirecrackerConfig {
-        host,
-        state_dir: base_dir.join("firecracker"),
-        kernel_image: std::env::var("FC_KERNEL_IMAGE")
-            .map(std::path::PathBuf::from)
-            .unwrap_or(kernel_default),
-        rootfs_base_image: std::env::var("FC_ROOTFS_IMAGE")
-            .map(std::path::PathBuf::from)
-            .unwrap_or(rootfs_default),
-        default_vcpu: std::env::var("FC_VCPU")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(1),
-        default_memory_mb: std::env::var("FC_MEMORY_MB")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(256),
-        network: sandbox::FirecrackerNetworkConfig {
-            enable_internet: true,
-            allowed_egress: vec![],
-            host_port_range_start: 8100,
-            host_port_range_end: 8200,
-        },
-        use_jailer: false,
-        guest_agent: sandbox::GuestAgentTransport::Ssh,
-    }
 }

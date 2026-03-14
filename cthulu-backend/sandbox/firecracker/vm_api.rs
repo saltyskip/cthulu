@@ -7,7 +7,7 @@
 //! The TCP path is useful when FC's Unix socket is exposed via socat/port-forward
 //! from a Lima VM to the macOS host.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use crate::sandbox::error::SandboxError;
 use crate::sandbox::firecracker::host_transport::HostTransport;

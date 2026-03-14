@@ -3,6 +3,7 @@
   "description": "Default capabilities for Cthulu Studio",
   "windows": ["main"],
   "permissions": [
+    "core:event:default",
     "dialog:default",
     "dialog:allow-open",
     "opener:default",
@@ -11,7 +12,9 @@
       "identifier": "http:allow-fetch",
       "allow": [
         { "url": "http://localhost:8081/**" },
-        { "url": "ws://localhost:8081/**" }
+        { "url": "http://127.0.0.1:8081/**" },
+        { "url": "ws://localhost:8081/**" },
+        { "url": "ws://127.0.0.1:8081/**" }
       ]
     }
   ]

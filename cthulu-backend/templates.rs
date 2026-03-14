@@ -53,6 +53,7 @@ struct TemplateYaml {
     #[serde(default)]
     description: String,
     #[serde(default = "default_true")]
+    #[allow(dead_code)]
     enabled: bool,
     #[serde(default)]
     trigger: Option<TriggerYaml>,

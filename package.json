@@ -11,10 +11,11 @@
     "dev": "bash scripts/dev.sh",
     "dev:all": "nx run-many -t dev",
     "dev:studio": "nx dev cthulu-studio",
+    "dev:desktop": "bash scripts/dev-desktop.sh",
     "dev:site": "nx dev cthulu-site",
     "build": "nx run-many -t build",
     "build:backend": "nx build cthulu",
-
+    "build:desktop": "bash scripts/build-desktop.sh",
     "build:studio": "nx build cthulu-studio",
     "build:site": "nx build cthulu-site",
     "test": "nx run-many -t test",
@@ -24,13 +25,15 @@
   "devDependencies": {
     "@nx/next": "^22.5.4",
     "@nx/vite": "^22.5.4",
+    "@tauri-apps/cli": "^2.10.1",
     "nx": "^22.5.4",
     "vite": "^7.3.1"
   },
   "overrides": {
     "minimatch": "^10.2.1",
     "koa": "^3.1.1",
-    "webpack": "^5.105.0"
+    "webpack": "^5.105.0",
+    "serialize-javascript": ">=7.0.3"
   },
   "dependencies": {
     "@uiw/react-md-editor": "^4.0.11"

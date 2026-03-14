@@ -1,5 +1,7 @@
 pub mod chat;
 pub mod handlers;
+pub mod heartbeat_handlers;
+pub mod task_handlers;
 
 use axum::routing::{delete, get, post};
 use axum::Router;
@@ -10,6 +12,14 @@ pub fn router() -> Router<AppState> {
     Router::new()
         // Agent CRUD
         .route("/agents", get(handlers::list_agents).post(handlers::create_agent))
+        // Claude environment health (must be before /agents/{id} to avoid capture)
+        .route("/agents/claude/status", get(heartbeat_handlers::claude_status))
+        // Tasks (must be before /agents/{id} to avoid capture)
+        .route("/agents/tasks", get(task_handlers::list_tasks).post(task_handlers::create_task))
+        .route(
+            "/agents/tasks/{task_id}",
+            axum::routing::put(task_handlers::update_task).delete(task_handlers::delete_task),
+        )
         .route(
             "/agents/{id}",
             get(handlers::get_agent)
@@ -55,6 +65,17 @@ pub fn router() -> Router<AppState> {
         )
         .route("/agents/{id}/chat", post(chat::chat))
         .route("/agents/{id}/chat/stop", post(chat::stop_chat))
+        // Heartbeat
+        .route("/agents/{id}/wakeup", post(heartbeat_handlers::wakeup))
+        .route("/agents/{id}/heartbeat-runs", get(heartbeat_handlers::list_runs))
+        .route(
+            "/agents/{id}/heartbeat-runs/{run_id}",
+            get(heartbeat_handlers::get_run),
+        )
+        .route(
+            "/agents/{id}/heartbeat-runs/{run_id}/log",
+            get(heartbeat_handlers::get_run_log),
+        )
         // File explorer (read-only)
         .route(
             "/agents/{id}/sessions/{session_id}/files",

@@ -5,6 +5,12 @@ pub struct Config {
     pub port: u16,
     pub sentry_dsn: Option<String>,
     pub environment: String,
+    /// Allowed CORS origins. Empty = allow any (dev default).
+    pub cors_origins: Vec<String>,
+    /// Rate limit: requests per second per IP.
+    pub rate_limit_rps: u64,
+    /// Rate limit: burst size.
+    pub rate_limit_burst: u32,
 }
 
 impl Config {
@@ -13,6 +19,9 @@ impl Config {
             std::env::var("PORT").ok().as_deref(),
             std::env::var("SENTRY_DSN").ok().as_deref(),
             std::env::var("ENVIRONMENT").ok().as_deref(),
+            std::env::var("CORS_ALLOWED_ORIGINS").ok().as_deref(),
+            std::env::var("RATE_LIMIT_RPS").ok().as_deref(),
+            std::env::var("RATE_LIMIT_BURST").ok().as_deref(),
         )
     }
 
@@ -22,6 +31,9 @@ impl Config {
         port: Option<&str>,
         sentry_dsn: Option<&str>,
         environment: Option<&str>,
+        cors_origins: Option<&str>,
+        rate_limit_rps: Option<&str>,
+        rate_limit_burst: Option<&str>,
     ) -> Self {
         let port = port.and_then(|v| v.parse().ok()).unwrap_or(8081);
 
@@ -32,10 +44,22 @@ impl Config {
             .map(String::from)
             .unwrap_or_else(|| "local".to_string());
 
+        let cors_origins = cors_origins
+            .filter(|s| !s.is_empty())
+            .map(|s| s.split(',').map(|o| o.trim().to_string()).collect())
+            .unwrap_or_default();
+
+        let rate_limit_rps = rate_limit_rps.and_then(|v| v.parse().ok()).unwrap_or(10);
+
+        let rate_limit_burst = rate_limit_burst.and_then(|v| v.parse().ok()).unwrap_or(50);
+
         Config {
             port,
             sentry_dsn,
             environment,
+            cors_origins,
+            rate_limit_rps,
+            rate_limit_burst,
         }
     }
 }
@@ -111,6 +135,10 @@ pub enum SinkConfig {
         token_env: String,
         database_id: String,
     },
+    Telegram {
+        bot_token_env: Option<String>,
+        chat_id: String,
+    },
 }
 
 #[cfg(test)]
@@ -119,37 +147,61 @@ mod tests {
 
     #[test]
     fn test_config_invalid_port_uses_default() {
-        let config = Config::from_raw_values(Some("not-a-number"), None, None);
+        let config = Config::from_raw_values(Some("not-a-number"), None, None, None, None, None);
         assert_eq!(config.port, 8081);
     }
 
     #[test]
     fn test_config_valid_port() {
-        let config = Config::from_raw_values(Some("3000"), None, None);
+        let config = Config::from_raw_values(Some("3000"), None, None, None, None, None);
         assert_eq!(config.port, 3000);
     }
 
     #[test]
     fn test_config_empty_sentry_dsn_is_none() {
-        let config = Config::from_raw_values(None, Some(""), None);
+        let config = Config::from_raw_values(None, Some(""), None, None, None, None);
         assert!(config.sentry_dsn.is_none());
     }
 
     #[test]
     fn test_config_present_sentry_dsn() {
-        let config = Config::from_raw_values(None, Some("https://sentry.io/123"), None);
+        let config =
+            Config::from_raw_values(None, Some("https://sentry.io/123"), None, None, None, None);
         assert_eq!(config.sentry_dsn.as_deref(), Some("https://sentry.io/123"));
     }
 
     #[test]
     fn test_config_default_environment() {
-        let config = Config::from_raw_values(None, None, None);
+        let config = Config::from_raw_values(None, None, None, None, None, None);
         assert_eq!(config.environment, "local");
     }
 
     #[test]
     fn test_config_custom_environment() {
-        let config = Config::from_raw_values(None, None, Some("production"));
+        let config = Config::from_raw_values(None, None, Some("production"), None, None, None);
         assert_eq!(config.environment, "production");
+    }
+
+    #[test]
+    fn test_config_cors_origins() {
+        let config = Config::from_raw_values(
+            None,
+            None,
+            None,
+            Some("http://localhost:5173, http://localhost:8081"),
+            None,
+            None,
+        );
+        assert_eq!(
+            config.cors_origins,
+            vec!["http://localhost:5173", "http://localhost:8081"]
+        );
+    }
+
+    #[test]
+    fn test_config_rate_limit_defaults() {
+        let config = Config::from_raw_values(None, None, None, None, None, None);
+        assert_eq!(config.rate_limit_rps, 10);
+        assert_eq!(config.rate_limit_burst, 50);
     }
 }

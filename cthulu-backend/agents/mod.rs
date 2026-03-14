@@ -1,5 +1,7 @@
 pub mod file_repository;
+pub mod heartbeat;
 pub mod repository;
+pub mod tasks;
 
 use std::collections::HashMap;
 
@@ -62,8 +64,19 @@ pub struct SubAgentDef {
 fn default_model() -> String { "sonnet".into() }
 fn default_max_turns() -> u32 { 10 }
 
+// --- Heartbeat default functions ---
+fn default_heartbeat_interval() -> u64 { 300 }
+fn default_heartbeat_prompt() -> String { "Continue your work. Check for pending tasks and complete any in-progress items.".into() }
+fn default_heartbeat_max_turns() -> u32 { 25 }
+
 /// Sub-agent map keyed by agent name (e.g. "bugs-bunny").
 pub type SubAgents = HashMap<String, SubAgentDef>;
+
+/// Valid agent roles in the org hierarchy.
+pub const AGENT_ROLES: &[&str] = &[
+    "ceo", "cto", "cmo", "cfo", "engineer", "designer",
+    "pm", "qa", "devops", "researcher", "general",
+];
 
 // ---------------------------------------------------------------------------
 // Agent
@@ -85,6 +98,15 @@ pub struct Agent {
     pub append_system_prompt: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub working_dir: Option<String>,
+    /// Project this agent belongs to for GitHub repo sync. None = local-only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project: Option<String>,
+    /// Agent ID this agent reports to (org hierarchy). None = top-level.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reports_to: Option<String>,
+    /// Role in the organization (ceo, engineer, etc.).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub role: Option<String>,
     /// Per-agent hooks merged into .claude/settings.local.json alongside system hooks.
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub hooks: AgentHooks,
@@ -98,6 +120,23 @@ pub struct Agent {
     pub subagent_only: bool,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+
+    // --- Heartbeat configuration ---
+    /// Whether this agent runs autonomously on a schedule.
+    #[serde(default)]
+    pub heartbeat_enabled: bool,
+    /// Interval between heartbeats in seconds. Default: 300 (5 minutes).
+    #[serde(default = "default_heartbeat_interval")]
+    pub heartbeat_interval_secs: u64,
+    /// Prompt template for heartbeat runs.
+    #[serde(default = "default_heartbeat_prompt")]
+    pub heartbeat_prompt_template: String,
+    /// Maximum turns per heartbeat run. Default: 25.
+    #[serde(default = "default_heartbeat_max_turns")]
+    pub max_turns_per_heartbeat: u32,
+    /// If true, skip permission prompts during heartbeat runs.
+    #[serde(default)]
+    pub auto_permissions: bool,
 }
 
 impl Agent {
@@ -111,9 +150,17 @@ impl Agent {
             permissions: Vec::new(),
             append_system_prompt: None,
             working_dir: None,
+            project: None,
+            reports_to: None,
+            role: None,
             hooks: HashMap::new(),
             subagents: HashMap::new(),
             subagent_only: false,
+            heartbeat_enabled: false,
+            heartbeat_interval_secs: default_heartbeat_interval(),
+            heartbeat_prompt_template: default_heartbeat_prompt(),
+            max_turns_per_heartbeat: default_heartbeat_max_turns(),
+            auto_permissions: false,
             _state: std::marker::PhantomData,
         }
     }
@@ -132,9 +179,17 @@ pub struct AgentBuilder<State = NeedsName> {
     permissions: Vec<String>,
     append_system_prompt: Option<String>,
     working_dir: Option<String>,
+    project: Option<String>,
+    reports_to: Option<String>,
+    role: Option<String>,
     hooks: AgentHooks,
     subagents: SubAgents,
     subagent_only: bool,
+    heartbeat_enabled: bool,
+    heartbeat_interval_secs: u64,
+    heartbeat_prompt_template: String,
+    max_turns_per_heartbeat: u32,
+    auto_permissions: bool,
     _state: std::marker::PhantomData<State>,
 }
 
@@ -149,9 +204,17 @@ impl AgentBuilder<NeedsName> {
             permissions: self.permissions,
             append_system_prompt: self.append_system_prompt,
             working_dir: self.working_dir,
+            project: self.project,
+            reports_to: self.reports_to,
+            role: self.role,
             hooks: self.hooks,
             subagents: self.subagents,
             subagent_only: self.subagent_only,
+            heartbeat_enabled: self.heartbeat_enabled,
+            heartbeat_interval_secs: self.heartbeat_interval_secs,
+            heartbeat_prompt_template: self.heartbeat_prompt_template,
+            max_turns_per_heartbeat: self.max_turns_per_heartbeat,
+            auto_permissions: self.auto_permissions,
             _state: std::marker::PhantomData,
         }
     }
@@ -183,6 +246,21 @@ impl<S> AgentBuilder<S> {
         self
     }
 
+    pub fn project(mut self, p: impl Into<String>) -> Self {
+        self.project = Some(p.into());
+        self
+    }
+
+    pub fn reports_to(mut self, r: impl Into<String>) -> Self {
+        self.reports_to = Some(r.into());
+        self
+    }
+
+    pub fn role(mut self, r: impl Into<String>) -> Self {
+        self.role = Some(r.into());
+        self
+    }
+
     pub fn hooks(mut self, h: AgentHooks) -> Self {
         self.hooks = h;
         self
@@ -195,6 +273,31 @@ impl<S> AgentBuilder<S> {
 
     pub fn subagent_only(mut self, v: bool) -> Self {
         self.subagent_only = v;
+        self
+    }
+
+    pub fn heartbeat_enabled(mut self, v: bool) -> Self {
+        self.heartbeat_enabled = v;
+        self
+    }
+
+    pub fn heartbeat_interval_secs(mut self, v: u64) -> Self {
+        self.heartbeat_interval_secs = v;
+        self
+    }
+
+    pub fn heartbeat_prompt_template(mut self, v: impl Into<String>) -> Self {
+        self.heartbeat_prompt_template = v.into();
+        self
+    }
+
+    pub fn max_turns_per_heartbeat(mut self, v: u32) -> Self {
+        self.max_turns_per_heartbeat = v;
+        self
+    }
+
+    pub fn auto_permissions(mut self, v: bool) -> Self {
+        self.auto_permissions = v;
         self
     }
 }
@@ -211,11 +314,19 @@ impl AgentBuilder<Ready> {
             permissions: self.permissions,
             append_system_prompt: self.append_system_prompt,
             working_dir: self.working_dir,
+            project: self.project,
+            reports_to: self.reports_to,
+            role: self.role,
             hooks: self.hooks,
             subagents: self.subagents,
             subagent_only: self.subagent_only,
             created_at: now,
             updated_at: now,
+            heartbeat_enabled: self.heartbeat_enabled,
+            heartbeat_interval_secs: self.heartbeat_interval_secs,
+            heartbeat_prompt_template: self.heartbeat_prompt_template,
+            max_turns_per_heartbeat: self.max_turns_per_heartbeat,
+            auto_permissions: self.auto_permissions,
         }
     }
 }

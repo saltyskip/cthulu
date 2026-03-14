@@ -1,17 +1,26 @@
 "use client";
 
 import { motion } from "framer-motion";
-import FlowDemo from "./FlowDemo";
+import Image from "next/image";
+import dynamic from "next/dynamic";
+
+const FlowDemo = dynamic(() => import("./FlowDemo"), {
+  ssr: false,
+  loading: () => <div className="rounded-xl border border-[var(--border)]" style={{ height: 320 }} />,
+});
 
 export default function Hero() {
   return (
     <section className="relative px-6 pt-32 pb-20 overflow-hidden">
       {/* Cthulhu background illustration */}
       <div className="pointer-events-none absolute inset-0" aria-hidden="true">
-        <img
+        <Image
           src="/cthulu-hero.jpg"
           alt=""
-          className="h-full w-full object-cover object-top opacity-20"
+          fill
+          className="object-cover object-top opacity-20"
+          priority
+          unoptimized
         />
         <div className="absolute inset-0 bg-gradient-to-b from-bg/60 via-bg/40 to-bg" />
       </div>

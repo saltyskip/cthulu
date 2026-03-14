@@ -37,6 +37,7 @@ function applySSEEvent(
   partsRef: React.MutableRefObject<ContentPart[]>,
   setResultMeta: (meta: { cost: number; turns: number }) => void,
   setGitSnapshot?: (snapshot: MultiRepoSnapshot) => void,
+  setMaxTurnsReached?: (reached: boolean) => void,
 ): boolean {
   try {
     const data = JSON.parse(event.data);
@@ -79,6 +80,9 @@ function applySSEEvent(
         setGitSnapshot(data as MultiRepoSnapshot);
       }
       return false;
+    } else if (event.type === "max_turns") {
+      if (setMaxTurnsReached) setMaxTurnsReached(true);
+      return true;
     } else if (event.type === "result") {
       const hasText = partsRef.current.some((p) => p.type === "text");
       if (data.text && !hasText) {
@@ -119,6 +123,9 @@ export function useAgentChat(agentId: string, sessionId: string) {
 
   // Git snapshot state — updated via SSE events and initial fetch
   const [gitSnapshot, setGitSnapshot] = useState<MultiRepoSnapshot | null>(null);
+
+  // Max turns reached flag
+  const [maxTurnsReached, setMaxTurnsReached] = useState(false);
 
   // File changes tracked via PostToolUse hooks (received from global hook stream)
   const [changedFiles, setChangedFiles] = useState<string[]>([]);
@@ -251,7 +258,7 @@ export function useAgentChat(agentId: string, sessionId: string) {
           (event) => {
             if (cancelled) return;
             pushDebugEvent(event);
-            const needsFlush = applySSEEvent(event, partsRef, setResultMeta, setGitSnapshot);
+            const needsFlush = applySSEEvent(event, partsRef, setResultMeta, setGitSnapshot, setMaxTurnsReached);
             if (needsFlush) {
               setStreamingParts([...partsRef.current]);
             } else {
@@ -313,6 +320,7 @@ export function useAgentChat(agentId: string, sessionId: string) {
       setIsStreaming(true);
       setIsDone(false);
       setResultMeta(null);
+      setMaxTurnsReached(false);
       setStreamingParts([]);
       partsRef.current = [];
 
@@ -322,7 +330,7 @@ export function useAgentChat(agentId: string, sessionId: string) {
         sessionId,
         (event) => {
           pushDebugEvent(event);
-          const needsFlush = applySSEEvent(event, partsRef, setResultMeta, setGitSnapshot);
+          const needsFlush = applySSEEvent(event, partsRef, setResultMeta, setGitSnapshot, setMaxTurnsReached);
           if (needsFlush) {
             setStreamingParts([...partsRef.current]);
           } else {
@@ -390,6 +398,7 @@ export function useAgentChat(agentId: string, sessionId: string) {
     isStreaming,
     resultMeta,
     isDone,
+    maxTurnsReached,
     attachments,
     fileInputRef,
     handleSend,

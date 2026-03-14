@@ -11,7 +11,7 @@
  *  - "Use Template" one-click import
  */
 import { useState, useEffect, useRef, useMemo, useCallback, useDeferredValue } from "react";
-import { listTemplates, importTemplate, importYaml, importFromGithub, getServerUrl } from "../api/client";
+import { listTemplates, importTemplate, importYaml, importFromGithub } from "../api/client";
 import type { TemplateMetadata, Flow } from "../types/flow";
 import MiniFlowDiagram from "./MiniFlowDiagram";
 
@@ -19,6 +19,10 @@ interface TemplateGalleryProps {
   onImport: (flow: Flow) => void;
   onBlank: () => void;
   onClose: () => void;
+  /** When provided, "Use Template" passes the metadata instead of running import. */
+  onSelectTemplate?: (template: TemplateMetadata) => void;
+  /** Pre-fetched templates — skips the internal listTemplates() call when provided. */
+  cachedTemplates?: TemplateMetadata[];
 }
 
 const GITHUB_RAW_BASE =
@@ -49,9 +53,11 @@ export default function TemplateGallery({
   onImport,
   onBlank,
   onClose,
+  onSelectTemplate,
+  cachedTemplates,
 }: TemplateGalleryProps) {
-  const [templates, setTemplates] = useState<TemplateMetadata[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [templates, setTemplates] = useState<TemplateMetadata[]>(cachedTemplates ?? []);
+  const [loading, setLoading] = useState(!cachedTemplates);
   const [error, setError] = useState<string | null>(null);
   const [activeCategory, setActiveCategory] = useState<string>("all");
   const [importingSlug, setImportingSlug] = useState<string | null>(null);
@@ -71,6 +77,7 @@ export default function TemplateGallery({
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
+    if (cachedTemplates) return;          // parent already supplied data
     listTemplates()
       .then((data) => {
         setTemplates(data);
@@ -80,7 +87,15 @@ export default function TemplateGallery({
         setError((e as Error).message);
         setLoading(false);
       });
-  }, []);
+  }, [cachedTemplates]);
+
+  // Sync from parent if cachedTemplates changes
+  useEffect(() => {
+    if (cachedTemplates) {
+      setTemplates(cachedTemplates);
+      setLoading(false);
+    }
+  }, [cachedTemplates]);
 
   const categories = useMemo(() => {
     const cats = Array.from(new Set(templates.map((t) => t.category))).sort();
@@ -113,6 +128,11 @@ export default function TemplateGallery({
 
   const handleImport = useCallback(
     async (template: TemplateMetadata) => {
+      // In "select" mode, just pass the metadata back — no backend import
+      if (onSelectTemplate) {
+        onSelectTemplate(template);
+        return;
+      }
       const key = `${template.category}/${template.slug}`;
       setImportingSlug(key);
       setImportError(null);
@@ -125,7 +145,7 @@ export default function TemplateGallery({
         setImportingSlug(null);
       }
     },
-    [onImport]
+    [onImport, onSelectTemplate]
   );
 
   const toggleYaml = useCallback(

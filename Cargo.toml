@@ -4,6 +4,10 @@ version = "0.1.0"
 edition = "2024"
 default-run = "cthulu"
 
+[lib]
+name = "cthulu"
+path = "cthulu-backend/lib.rs"
+
 [[bin]]
 name = "cthulu"
 path = "cthulu-backend/main.rs"
@@ -26,6 +30,8 @@ serde_yaml = "0.9.34"
 async-trait = "0.1.89"
 hyper = { version = "1", default-features = false, features = ["http1", "http2", "server", "client"] }
 reqwest = { version = "0.12.22", default-features = false, features = ["json", "rustls-tls"] }
+base64 = "0.22"
+regex = "1"
 anyhow = "1.0.102"
 thiserror = "2.0.18"
 dotenvy = "0.15.7"
