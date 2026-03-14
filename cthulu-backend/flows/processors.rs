@@ -16,6 +16,7 @@ use crate::sandbox::provider::SandboxProvider;
 use crate::tasks::context::render_prompt;
 use crate::tasks::executors::{Executor, LineSink};
 use crate::tasks::executors::claude_code::ClaudeCodeExecutor;
+use crate::tasks::executors::python_script::PythonScriptExecutor;
 use crate::tasks::executors::sandbox::SandboxExecutor;
 use crate::tasks::pipeline::{format_items, resolve_sinks};
 use crate::tasks::sources;
@@ -85,46 +86,97 @@ async fn process_executor(
     input: NodeOutput,
     deps: &NodeDeps,
 ) -> Result<NodeOutput> {
-    // Build prompt from input
-    let rendered = render_executor_prompt(node, &input, deps).await?;
-
-    // Resolve agent config
-    let (permissions, append_system_prompt) = resolve_agent_config(node, deps).await?;
-
     // Resolve working dir
     let working_dir = node.config["working_dir"]
         .as_str()
         .map(PathBuf::from)
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
 
-    // Dispatch on runtime
+    // Dispatch on kind/runtime
     let runtime = node.config["runtime"]
         .as_str()
         .unwrap_or(node.kind.as_str());
 
-    let executor: Box<dyn Executor> = match runtime {
+    let (executor, rendered, agent_id, perms_display): (
+        Box<dyn Executor>,
+        String,
+        Option<String>,
+        String,
+    ) = match runtime {
+        "python-script" => {
+            let script = node.config["script"]
+                .as_str()
+                .context("python-script executor node missing 'script' config")?
+                .to_string();
+            let timeout_secs = node.config["timeout"].as_u64();
+
+            // For python scripts, pass upstream text directly (no prompt template rendering)
+            let input_text = input.as_text();
+            let rendered = if input_text.is_empty() {
+                node.config["prompt"]
+                    .as_str()
+                    .unwrap_or("")
+                    .to_string()
+            } else {
+                input_text
+            };
+
+            (
+                Box::new(PythonScriptExecutor::new(script, timeout_secs)),
+                rendered,
+                None,
+                "N/A (script)".to_string(),
+            )
+        }
         "sandbox" => {
+            let rendered = render_executor_prompt(node, &input, deps).await?;
+            let (permissions, append_system_prompt) = resolve_agent_config(node, deps).await?;
+            let agent_id = node.config["agent_id"]
+                .as_str()
+                .filter(|s| !s.is_empty())
+                .map(String::from);
+            let perms_display = if permissions.is_empty() {
+                "ALL".to_string()
+            } else {
+                permissions.join(", ")
+            };
             let provider = deps
                 .sandbox_provider
                 .as_ref()
                 .context("sandbox executor requested but no sandbox provider configured")?;
-            Box::new(SandboxExecutor::new(
-                provider.clone(),
-                permissions.clone(),
-                append_system_prompt,
-            ))
+            (
+                Box::new(SandboxExecutor::new(
+                    provider.clone(),
+                    permissions,
+                    append_system_prompt,
+                )),
+                rendered,
+                agent_id,
+                perms_display,
+            )
         }
-        _ => Box::new(ClaudeCodeExecutor::new(
-            permissions.clone(),
-            append_system_prompt,
-        )),
+        _ => {
+            // Default: claude-code
+            let rendered = render_executor_prompt(node, &input, deps).await?;
+            let (permissions, append_system_prompt) = resolve_agent_config(node, deps).await?;
+            let agent_id = node.config["agent_id"]
+                .as_str()
+                .filter(|s| !s.is_empty())
+                .map(String::from);
+            let perms_display = if permissions.is_empty() {
+                "ALL".to_string()
+            } else {
+                permissions.join(", ")
+            };
+            (
+                Box::new(ClaudeCodeExecutor::new(permissions, append_system_prompt)),
+                rendered,
+                agent_id,
+                perms_display,
+            )
+        }
     };
 
-    let perms_display = if permissions.is_empty() {
-        "ALL".to_string()
-    } else {
-        permissions.join(", ")
-    };
     tracing::info!(
         executor = %node.kind,
         permissions = %perms_display,
@@ -133,10 +185,6 @@ async fn process_executor(
     );
 
     // Set up session bridge for streaming into agent workspace
-    let agent_id = node.config["agent_id"]
-        .as_str()
-        .filter(|s| !s.is_empty())
-        .map(String::from);
     let line_sink = setup_flow_run_session(
         &deps.session_bridge,
         &agent_id,
@@ -562,6 +610,13 @@ pub fn parse_sink_configs(nodes: &[&Node]) -> Result<Vec<SinkConfig>> {
                 database_id: node.config["database_id"]
                     .as_str()
                     .context("notion node missing 'database_id'")?
+                    .to_string(),
+            },
+            "telegram" => SinkConfig::Telegram {
+                bot_token_env: node.config["bot_token_env"].as_str().map(String::from),
+                chat_id: node.config["chat_id"]
+                    .as_str()
+                    .context("telegram node missing 'chat_id'")?
                     .to_string(),
             },
             other => bail!("unknown sink kind: {other}"),

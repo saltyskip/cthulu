@@ -433,6 +433,16 @@ pub(crate) async fn get_node_types() -> Json<Value> {
                 }
             },
             {
+                "kind": "python-script",
+                "node_type": "executor",
+                "label": "Python Script",
+                "config_schema": {
+                    "script": { "type": "string", "description": "Inline Python script to execute", "required": true },
+                    "timeout": { "type": "number", "description": "Timeout in seconds", "default": 300 },
+                    "working_dir": { "type": "string", "description": "Working directory", "default": "." }
+                }
+            },
+            {
                 "kind": "slack",
                 "node_type": "sink",
                 "label": "Slack",
@@ -449,6 +459,15 @@ pub(crate) async fn get_node_types() -> Json<Value> {
                 "config_schema": {
                     "token_env": { "type": "string", "description": "Env var for Notion token", "required": true },
                     "database_id": { "type": "string", "description": "Notion database ID", "required": true }
+                }
+            },
+            {
+                "kind": "telegram",
+                "node_type": "sink",
+                "label": "Telegram",
+                "config_schema": {
+                    "bot_token_env": { "type": "string", "description": "Env var for bot token" },
+                    "chat_id": { "type": "string", "description": "Telegram chat ID", "required": true }
                 }
             }
          ]

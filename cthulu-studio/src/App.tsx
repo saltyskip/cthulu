@@ -666,6 +666,14 @@ function AppInner() {
             runLogOpen={runLogOpen}
             onRunLogClose={() => setRunLogOpen(false)}
             editingWorkflow={editingWorkflow}
+            openWorkflow={openWorkflow}
+            activeWorkspace={wfActiveWorkspace}
+            onWorkflowCreated={(ws, name) => {
+              // Refresh the workflows list so sidebar picks up the new entry
+              api.listWorkflows(ws).then((res) => {
+                setWfWorkflows(res.workflows);
+              }).catch(() => {});
+            }}
           />
         </div>
         {activeView === "prompt-editor" && selectedPromptId && (

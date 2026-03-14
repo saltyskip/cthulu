@@ -2,6 +2,7 @@ import { useState, useCallback, useRef, useEffect, useMemo, type RefObject } fro
 import { STUDIO_ASSISTANT_ID, type Flow, type FlowNode, type FlowEdge, type RunEvent } from "../types/flow";
 import { listAgentSessions, newAgentSession, updateAgent } from "../api/client";
 import type { UpdateSignal } from "../hooks/useFlowDispatch";
+import { useWorkflowActions } from "../hooks/useWorkflowActions";
 import { X, EyeOff, Plus } from "lucide-react";
 import Canvas, { type CanvasHandle } from "./Canvas";
 import FlowEditor, { type FlowEditorHandle } from "./FlowEditor";
@@ -42,8 +43,8 @@ NODE TYPES:
 - trigger: cron (schedule), github-pr (repo), webhook, manual
 - source: rss (url, limit?, keywords?), web-scrape (url), web-scraper (url, items_selector, title_selector, url_selector), github-merged-prs (repos, since_days?), market-data (no config), google-sheets (spreadsheet_id, range, service_account_key_env)
 - filter: keyword (keywords, mode?, field?)
-- executor: claude-code (prompt REQUIRED, permissions?, working_dir?)
-- sink: slack (webhook_url_env?, bot_token_env?, channel?), notion (token_env, database_id)
+- executor: claude-code (prompt REQUIRED, permissions?, working_dir?), python-script (script REQUIRED — inline Python code; receives upstream data via CTHULU_INPUT env var and stdin)
+- sink: slack (webhook_url_env?, bot_token_env?, channel?), notion (token_env, database_id), telegram (bot_token_env?, chat_id_env?)
 
 EDGE WIRING: trigger→source, source→executor (or source→filter→executor), executor→sink. "edges": "auto" handles this.
 
@@ -65,6 +66,12 @@ interface FlowWorkspaceViewProps {
   onRunLogClose: () => void;
   /** When set, we're editing a workflow — terminal scopes to its workspace dir. */
   editingWorkflow?: { workspace: string; name: string } | null;
+  /** Open a workflow in the canvas editor (used by auto-create from terminal). */
+  openWorkflow?: (workspace: string, name: string) => Promise<void>;
+  /** Current active workspace for workflow creation. */
+  activeWorkspace?: string | null;
+  /** Called when a workflow is auto-created from the terminal (e.g. to refresh sidebar). */
+  onWorkflowCreated?: (workspace: string, name: string) => void;
 }
 
 const MIN_EDITOR_WIDTH = 280;
@@ -96,6 +103,9 @@ export default function FlowWorkspaceView({
   runLogOpen,
   onRunLogClose,
   editingWorkflow,
+  openWorkflow,
+  activeWorkspace,
+  onWorkflowCreated,
 }: FlowWorkspaceViewProps) {
   const [editorWidth, setEditorWidth] = useState(DEFAULT_EDITOR_WIDTH);
   const [bottomHeight, setBottomHeight] = useState(DEFAULT_BOTTOM_HEIGHT);
@@ -103,6 +113,14 @@ export default function FlowWorkspaceView({
   const [bottomTab, setBottomTab] = useState<BottomTab>("log");
 
   const [studioSessionId, setStudioSessionId] = useState<string | null>(null);
+
+  // --- Auto-create workflows from Studio Assistant terminal output ---
+  useWorkflowActions({
+    sessionId: studioSessionId,
+    workspace: activeWorkspace ?? null,
+    openWorkflow: openWorkflow ?? (async () => {}),
+    onWorkflowCreated,
+  });
 
   // Tab visibility: which tabs are shown (VS Code-style toggle)
   const [visibleTabs, setVisibleTabs] = useState<Set<BottomTab>>(
