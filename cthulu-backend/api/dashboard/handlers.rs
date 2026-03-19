@@ -296,10 +296,6 @@ pub(crate) async fn generate_summary(
         ));
     }
 
-    // Sanitize: strip any XML-like tags from the serialized JSON to prevent
-    // prompt boundary spoofing (e.g., a Slack message containing "</messages>").
-    let sanitized_text = channels_text.replace("</", "&lt;/").replace("< /", "&lt; /");
-
     let meta_prompt = format!(
         r##"You are summarizing Slack channel messages for a daily dashboard.
 
@@ -312,7 +308,7 @@ Below is JSON data containing today's messages from multiple Slack channels, inc
 For EACH channel, write a concise 2-3 sentence summary of the key topics, decisions, and action items discussed.
 
 ```json
-{sanitized_text}
+{channels_text}
 ```
 
 Respond ONLY with valid JSON in this exact format:
@@ -401,8 +397,9 @@ Keep each summary under 100 words. Focus on what matters: decisions made, proble
     let output = match claude_result {
         Ok(inner) => inner?,
         Err(_) => {
-            // Timeout elapsed — kill the child process
+            // Timeout elapsed — kill the child process and reap to avoid zombies
             let _ = child.kill().await;
+            let _ = child.wait().await;
             tracing::error!("claude CLI timed out after {}s", CLAUDE_TIMEOUT.as_secs());
             return Err((
                 StatusCode::GATEWAY_TIMEOUT,

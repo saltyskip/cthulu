@@ -100,7 +100,7 @@ class SlackFetcher:
         convos = self._paginate(self.client.conversations_list, types=types, exclude_archived=True)
         convos = [c for c in convos if c.get("is_im") or c.get("is_mpim") or c.get("is_member")]
         if channel_filter:
-            names = {n.lower().lstrip("#") for n in channel_filter}
+            names = {n.lower().lstrip("#") for n in channel_filter if n.strip()}
             convos = [c for c in convos if c.get("name", "").lower() in names]
         return convos
 
