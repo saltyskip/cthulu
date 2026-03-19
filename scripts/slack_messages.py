@@ -295,6 +295,8 @@ def main():
               (f" | Mentions: {mention_patterns}" if mention_patterns else ""), file=sys.stderr)
         print(file=sys.stderr)
 
+    # NOTE: Comma-delimited split assumes channel names don't contain commas.
+    # Slack channel names cannot contain commas, so this is safe.
     channel_filter = [n.strip() for n in args.channel.split(",")] if args.channel else None
     results = fetcher.fetch(oldest, latest, ",".join(types), read_filter, mention_patterns or None, channel_filter, debug=args.debug, with_threads=args.with_threads)
 

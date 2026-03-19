@@ -173,6 +173,8 @@ pub(crate) async fn get_messages(State(state): State<AppState>) -> impl IntoResp
         })));
     }
 
+    // NOTE: Channels are comma-delimited. Slack channel names cannot contain commas,
+    // so this is safe. The Python script splits on ',' to reconstruct the list.
     let channel_list = config.channels.join(",");
 
     let result = tokio::time::timeout(
