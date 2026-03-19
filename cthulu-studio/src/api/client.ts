@@ -566,6 +566,7 @@ export async function createAgent(data: {
   permissions?: string[];
   append_system_prompt?: string | null;
   working_dir?: string | null;
+  team_id?: string | null;
 }): Promise<{ id: string }> {
   return apiFetch<{ id: string }>("/agents", {
     method: "POST",
