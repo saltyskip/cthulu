@@ -6,14 +6,14 @@
 
 use std::path::PathBuf;
 
-use crate::api::clerk_auth::{auth_enabled, AuthUser};
+use crate::api::clerk_auth::AuthUser;
 use crate::api::AppState;
 
 /// Returns the per-user data directory.
 /// Dev mode: returns `state.data_dir` directly.
 /// Auth mode: returns `state.data_dir/users/{user_id}`.
 pub fn user_data_dir(state: &AppState, auth: &AuthUser) -> PathBuf {
-    if auth_enabled() {
+    if state.auth_enabled {
         state.data_dir.join("users").join(&auth.user_id)
     } else {
         state.data_dir.clone()
@@ -22,8 +22,8 @@ pub fn user_data_dir(state: &AppState, auth: &AuthUser) -> PathBuf {
 
 /// Prefix an in-memory key with user_id for multi-tenant isolation.
 /// Dev mode: returns the key unchanged.
-pub fn user_key(auth: &AuthUser, key: &str) -> String {
-    if auth_enabled() {
+pub fn user_key(state: &AppState, auth: &AuthUser, key: &str) -> String {
+    if state.auth_enabled {
         format!("{}::{}", auth.user_id, key)
     } else {
         key.to_string()

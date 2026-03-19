@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { setAuthTokenGetter, getServerUrl } from "../api/client";
 
 interface AuthGateProps {
@@ -16,17 +16,20 @@ export default function AuthGate({ children }: AuthGateProps) {
     () => localStorage.getItem("cthulu_auth_token"),
   );
 
+  // Wire up auth token getter as a side effect, not during render
+  useEffect(() => {
+    if (token) {
+      setAuthTokenGetter(() => Promise.resolve(token));
+    }
+    return () => setAuthTokenGetter(null);
+  }, [token]);
+
   if (!authEnabled) return <>{children}</>;
-  if (token) {
-    // Set token getter so all API requests include it
-    setAuthTokenGetter(() => Promise.resolve(token));
-    return <>{children}</>;
-  }
+  if (token) return <>{children}</>;
 
   return <AuthForm onSuccess={(t) => {
     localStorage.setItem("cthulu_auth_token", t);
     setToken(t);
-    setAuthTokenGetter(() => Promise.resolve(t));
   }} />;
 }
 

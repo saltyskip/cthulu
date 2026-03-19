@@ -17,8 +17,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Arc;
-use tokio::sync::RwLock;
 
 use crate::api::AppState;
 
@@ -50,7 +48,10 @@ impl UserStore {
     pub fn save(&self, data_dir: &PathBuf) -> std::io::Result<()> {
         let path = data_dir.join("users.json");
         let json = serde_json::to_string_pretty(&self.users)?;
-        std::fs::write(path, json)
+        // Atomic write: temp file + rename (project rule #9)
+        let tmp_path = path.with_extension("json.tmp");
+        std::fs::write(&tmp_path, json)?;
+        std::fs::rename(&tmp_path, &path)
     }
 
     pub fn find_by_email(&self, email: &str) -> Option<&StoredUser> {
@@ -74,13 +75,16 @@ struct Claims {
 const JWT_EXPIRY_HOURS: i64 = 24;
 
 /// Load or generate the JWT signing secret.
+/// Panics if the secret cannot be persisted to disk (server should not start
+/// with an ephemeral secret that would invalidate all JWTs on restart).
 pub fn load_or_create_jwt_secret(data_dir: &PathBuf) -> String {
     let path = data_dir.join("jwt_secret");
     match std::fs::read_to_string(&path) {
         Ok(secret) if !secret.trim().is_empty() => secret.trim().to_string(),
         _ => {
             let secret = uuid::Uuid::new_v4().to_string();
-            let _ = std::fs::write(&path, &secret);
+            std::fs::write(&path, &secret)
+                .unwrap_or_else(|e| panic!("Failed to write JWT secret to {}: {e}", path.display()));
             secret
         }
     }
@@ -136,12 +140,6 @@ impl AuthUser {
     }
 }
 
-pub fn auth_enabled() -> bool {
-    std::env::var("AUTH_ENABLED")
-        .map(|v| v == "true")
-        .unwrap_or(false)
-}
-
 impl FromRequestParts<AppState> for AuthUser {
     type Rejection = (StatusCode, Json<Value>);
 
@@ -150,7 +148,7 @@ impl FromRequestParts<AppState> for AuthUser {
         state: &AppState,
     ) -> impl std::future::Future<Output = Result<Self, Self::Rejection>> + Send {
         let jwt_secret = state.jwt_secret.clone();
-        let auth_on = auth_enabled();
+        let auth_on = state.auth_enabled;
         let token = extract_token(parts);
 
         async move {
@@ -239,27 +237,32 @@ async fn signup(
 
     let email = body.email.trim().to_lowercase();
 
-    // Check if user exists
-    {
-        let store = state.user_store.read().await;
-        if store.find_by_email(&email).is_some() {
-            return (
-                StatusCode::CONFLICT,
-                Json(json!({ "error": "User already exists" })),
-            );
-        }
-    }
-
-    // Hash password
-    let password_hash = match bcrypt::hash(&body.password, 12) {
-        Ok(h) => h,
-        Err(e) => {
+    // Hash password outside the lock (CPU-intensive, ~250ms at cost 12)
+    let password = body.password.clone();
+    let password_hash = match tokio::task::spawn_blocking(move || bcrypt::hash(&password, 12)).await {
+        Ok(Ok(h)) => h,
+        Ok(Err(e)) => {
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({ "error": format!("Hash failed: {e}") })),
             );
         }
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": format!("Hash task failed: {e}") })),
+            );
+        }
     };
+
+    // Hold write lock for entire check-then-insert to prevent TOCTOU race
+    let mut store = state.user_store.write().await;
+    if store.find_by_email(&email).is_some() {
+        return (
+            StatusCode::CONFLICT,
+            Json(json!({ "error": "User already exists" })),
+        );
+    }
 
     let user = StoredUser {
         id: uuid::Uuid::new_v4().to_string().replace('-', "_"),
@@ -279,12 +282,16 @@ async fn signup(
         }
     };
 
-    // Save user
-    {
-        let mut store = state.user_store.write().await;
-        store.insert(user.clone());
-        let _ = store.save(&state.data_dir);
+    // Save user (still holding write lock)
+    store.insert(user.clone());
+    if let Err(e) = store.save(&state.data_dir) {
+        tracing::error!(error = %e, "failed to persist user store after signup");
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": "Failed to save user account" })),
+        );
     }
+    drop(store);
 
     (
         StatusCode::CREATED,
@@ -313,8 +320,12 @@ async fn login(
     };
     drop(store);
 
-    // Verify password
-    let valid = bcrypt::verify(&body.password, &user.password_hash).unwrap_or(false);
+    // Verify password (CPU-intensive, run off async runtime)
+    let password = body.password.clone();
+    let hash = user.password_hash.clone();
+    let valid = tokio::task::spawn_blocking(move || bcrypt::verify(&password, &hash).unwrap_or(false))
+        .await
+        .unwrap_or(false);
     if !valid {
         return (
             StatusCode::UNAUTHORIZED,
