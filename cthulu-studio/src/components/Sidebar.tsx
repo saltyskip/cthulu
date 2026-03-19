@@ -232,7 +232,7 @@ export default function Sidebar({
         </CollapsibleTrigger>
         <CollapsibleContent>
           <div className="sidebar-section-body">
-            {[...agents].sort((a, b) => {
+            {[...agents].filter((a) => !a.team_id).sort((a, b) => {
               if (a.id === STUDIO_ASSISTANT_ID) return -1;
               if (b.id === STUDIO_ASSISTANT_ID) return 1;
               return 0;
@@ -318,6 +318,40 @@ export default function Sidebar({
           </div>
         </CollapsibleContent>
       </Collapsible>
+
+      {/* Team Agents section */}
+      {agents.some((a) => a.team_id) && (
+        <Collapsible className="sidebar-section">
+          <CollapsibleTrigger asChild>
+            <div className="sidebar-section-header">
+              <span className="sidebar-chevron">▶</span>
+              <h2>Team Agents</h2>
+            </div>
+          </CollapsibleTrigger>
+          <CollapsibleContent>
+            <div className="sidebar-section-body">
+              {agents.filter((a) => a.team_id).map((agent) => {
+                const meta = agentMeta.get(agent.id);
+                const isActive = agent.id === selectedAgentId && activeView === "agent-workspace";
+                return (
+                  <div key={agent.id} className="sb-agent">
+                    <div
+                      className={`sb-agent-row${isActive ? " sb-agent-active" : ""}`}
+                      onClick={() => {
+                        const sessions = meta?.sessions ?? [];
+                        if (sessions.length > 0) onSelectSession(agent.id, sessions[0].session_id);
+                      }}
+                    >
+                      <span className="sb-agent-name">{agent.name}</span>
+                      {meta?.busy && <span className="sb-agent-dot sb-agent-busy" />}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </CollapsibleContent>
+        </Collapsible>
+      )}
 
       {/* Flows section (collapsed by default) */}
       <Collapsible className="sidebar-section">

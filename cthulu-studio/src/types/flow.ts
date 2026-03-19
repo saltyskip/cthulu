@@ -135,6 +135,7 @@ export interface Agent {
   permissions: string[];
   append_system_prompt: string | null;
   working_dir: string | null;
+  team_id: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -146,6 +147,7 @@ export interface AgentSummary {
   permissions: string[];
   subagent_only?: boolean;
   subagent_count?: number;
+  team_id?: string | null;
   created_at: string;
   updated_at: string;
 }
