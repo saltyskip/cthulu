@@ -8,6 +8,7 @@ import Sidebar from "./components/Sidebar";
 import FlowWorkspaceView from "./components/FlowWorkspaceView";
 import AgentDetailView from "./components/AgentDetailView";
 import PromptEditorView from "./components/PromptEditorView";
+import DashboardView from "./components/DashboardView";
 import { useGlobalPermissions } from "./hooks/useGlobalPermissions";
 import { type CanvasHandle } from "./components/Canvas";
 
@@ -365,9 +366,11 @@ export default function App() {
             nodeTypes={nodeTypes}
             onGrab={handleGrab}
             onCollapse={() => setSidebarCollapsed(true)}
-
+            onSelectDashboard={() => setActiveView("dashboard")}
           />
         )}
+
+        {activeView === "dashboard" && <DashboardView />}
 
         <div style={{ display: activeView === "flow-editor" ? "contents" : "none" }}>
           <FlowWorkspaceView
@@ -430,17 +433,17 @@ export default function App() {
       </div>
 
       <Dialog open={showSettings} onOpenChange={setShowSettings}>
-        <DialogContent className="bg-[var(--bg-secondary)] border-[var(--border)] text-[var(--text)]">
+        <DialogContent className="cth-dialog">
           <DialogHeader>
             <DialogTitle>Server Settings</DialogTitle>
           </DialogHeader>
-          <div className="form-group">
-            <label>Server URL</label>
+          <div className="cth-dialog-field">
+            <label className="cth-dialog-label">Server URL</label>
             <input
               value={serverUrl}
               onChange={(e) => setServerUrlState(e.target.value)}
               placeholder="http://localhost:8081"
-              className="w-full bg-[var(--bg)] border border-[var(--border)] rounded-md px-3 py-2 text-[var(--text)] text-sm outline-none focus:border-[var(--accent)]"
+              className="cth-dialog-input"
             />
           </div>
           <DialogFooter>

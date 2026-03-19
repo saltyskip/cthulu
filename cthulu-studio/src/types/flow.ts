@@ -2,7 +2,7 @@ export const STUDIO_ASSISTANT_ID = "studio-assistant";
 
 export type NodeType = "trigger" | "source" | "executor" | "sink";
 
-export type ActiveView = "flow-editor" | "agent-workspace" | "prompt-editor";
+export type ActiveView = "dashboard" | "flow-editor" | "agent-workspace" | "prompt-editor";
 
 export interface Position {
   x: number;

@@ -30,6 +30,7 @@ interface SidebarProps {
   nodeTypes: NodeTypeSchema[];
   onGrab: (nodeType: NodeTypeSchema) => void;
   onCollapse: () => void;
+  onSelectDashboard?: () => void;
 }
 
 const typeColors: Record<string, string> = {
@@ -58,6 +59,7 @@ export default function Sidebar({
   nodeTypes,
   onGrab,
   onCollapse,
+  onSelectDashboard,
 }: SidebarProps) {
   const [showGallery, setShowGallery] = useState(false);
   const [agents, setAgents] = useState<AgentSummary[]>([]);
@@ -199,6 +201,16 @@ export default function Sidebar({
       )}
 
       <LooneyTunesShow />
+
+      {/* Dashboard nav item */}
+      <div
+        className={`sidebar-item sidebar-dashboard-item${activeView === "dashboard" ? " active" : ""}`}
+        onClick={() => onSelectDashboard?.()}
+      >
+        <div className="sidebar-item-row">
+          <span className="sidebar-item-name">Dashboard</span>
+        </div>
+      </div>
 
       {/* Agents section (primary, expanded by default) */}
       <Collapsible defaultOpen className="sidebar-section">

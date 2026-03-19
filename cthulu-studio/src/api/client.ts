@@ -636,3 +636,74 @@ export async function checkConnection(): Promise<boolean> {
     return false;
   }
 }
+
+// ── Dashboard ──────────────────────────────────────────
+
+export interface DashboardConfig {
+  channels: string[];
+  slack_token_env: string;
+  first_run: boolean;
+}
+
+export interface SlackMessage {
+  time: string;
+  user: string;
+  text: string;
+  ts: string;
+  thread_ts?: string;
+  reply_count?: number;
+  replies?: SlackMessage[];
+}
+
+export interface SlackChannelMessages {
+  channel: string;
+  count: number;
+  messages: SlackMessage[];
+}
+
+export interface DashboardMessages {
+  channels: SlackChannelMessages[];
+  fetched_at: string;
+}
+
+export interface ChannelSummary {
+  channel: string;
+  summary: string;
+}
+
+export interface DashboardSummaryResponse {
+  summaries: ChannelSummary[];
+  generated_at: string;
+  raw?: boolean;
+}
+
+export async function getDashboardConfig(): Promise<DashboardConfig> {
+  return apiFetch<DashboardConfig>("/dashboard/config");
+}
+
+export async function saveDashboardConfig(
+  channels: string[],
+  slackTokenEnv?: string
+): Promise<{ ok: boolean }> {
+  return apiFetch<{ ok: boolean }>("/dashboard/config", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      channels,
+      slack_token_env: slackTokenEnv || "SLACK_USER_TOKEN",
+    }),
+  });
+}
+
+export async function getDashboardMessages(): Promise<DashboardMessages> {
+  return apiFetch<DashboardMessages>("/dashboard/messages");
+}
+
+export async function getDashboardSummary(
+  channels: SlackChannelMessages[]
+): Promise<DashboardSummaryResponse> {
+  return apiFetch<DashboardSummaryResponse>("/dashboard/summary", {
+    method: "POST",
+    body: JSON.stringify({ channels }),
+  });
+}

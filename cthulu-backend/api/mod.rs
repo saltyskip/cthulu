@@ -1,6 +1,7 @@
 pub mod agents;
 pub mod auth;
 pub mod changes;
+pub mod dashboard;
 pub mod flows;
 pub mod hooks;
 

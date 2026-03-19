@@ -260,7 +260,7 @@ function ThemeSelector() {
 
   return (
     <Select value={theme.id} onValueChange={setThemeId}>
-      <SelectTrigger size="sm" className="text-xs h-7 min-w-[120px]">
+      <SelectTrigger size="sm" className="text-xs h-8 min-w-[120px]">
         <SelectValue />
       </SelectTrigger>
       <SelectContent position="popper" sideOffset={4}>
