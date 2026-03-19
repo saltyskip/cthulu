@@ -188,6 +188,9 @@ pub(crate) async fn get_messages(State(state): State<AppState>) -> impl IntoResp
             .arg("--all")
             .arg("--quiet")
             .arg("--with-threads")
+            // Always inject as SLACK_USER_TOKEN regardless of the original env var name.
+            // The Python script reads SLACK_USER_TOKEN directly (line 278), so we resolve
+            // the configured env var on the Rust side and re-inject under the canonical name.
             .env("SLACK_USER_TOKEN", &token)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())

@@ -105,10 +105,6 @@ export default function DashboardView() {
     // If there's an "all" fallback (raw text from Claude), use that
     const fallback = summaryMap.get("all");
     if (fallback && summaryMap.size === 1) return fallback;
-    // Try partial match — find any key that contains or is contained in the channel name
-    for (const [k, v] of summaryMap) {
-      if (key.includes(k) || k.includes(key)) return v;
-    }
     return undefined;
   }, [summaryMap]);
 
