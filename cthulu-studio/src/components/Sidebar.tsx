@@ -239,15 +239,24 @@ export default function Sidebar({
             <span className="sidebar-chevron">▶</span>
             <h2>Agents</h2>
             <div style={{ flex: 1 }} />
-            <button
-              className="ghost sidebar-action-btn"
-              onClick={(e) => {
-                e.stopPropagation();
-                handleCreateAgent();
+            <select
+              className="sidebar-agent-create-select"
+              value=""
+              onClick={(e) => e.stopPropagation()}
+              onChange={(e) => {
+                const val = e.target.value;
+                if (val === "personal") handleCreateAgent();
+                else if (val) handleCreateTeamAgent(val);
+                e.target.value = "";
               }}
             >
-              +
-            </button>
+              <option value="">+</option>
+              <option value="personal">Personal Agent</option>
+              {userTeams.length > 0 && <option disabled>── Teams ──</option>}
+              {userTeams.map((t) => (
+                <option key={t.id} value={t.id}>{t.name} Agent</option>
+              ))}
+            </select>
           </div>
         </CollapsibleTrigger>
         <CollapsibleContent>
