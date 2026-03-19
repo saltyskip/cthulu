@@ -167,7 +167,7 @@ export default function DashboardView() {
         setLoading(false);
       }
     })();
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [loadConfig, loadMessages]);
 
   const handleSaveChannels = async () => {
     const names = channelInput

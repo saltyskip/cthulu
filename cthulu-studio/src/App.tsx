@@ -40,7 +40,7 @@ export default function App() {
   const [runEvents, setRunEvents] = useState<RunEvent[]>([]);
   const [nodeRunStatus, setNodeRunStatus] = useState<Record<string, "running" | "completed" | "failed">>({});
   const [runLogOpen, setRunLogOpen] = useState(false);
-  const [activeView, setActiveView] = useState<ActiveView>("dashboard");
+  const [activeView, setActiveView] = useState<ActiveView>("flow-editor");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   // --- Central flow state (extracted hook) ---

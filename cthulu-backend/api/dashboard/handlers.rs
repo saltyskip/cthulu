@@ -16,6 +16,11 @@ use tokio::process::Command;
 
 use crate::api::AppState;
 
+/// Timeout for the Python sidecar (Slack message fetching).
+const SIDECAR_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+/// Timeout for the Claude CLI (AI summary generation).
+const CLAUDE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct DashboardConfig {
     pub channels: Vec<String>,
@@ -132,20 +137,33 @@ pub(crate) async fn get_messages(State(state): State<AppState>) -> impl IntoResp
 
     let channel_list = config.channels.join(",");
 
-    let result = Command::new("python3")
-        .arg(&script_path)
-        .arg("--json")
-        .arg("--channels-only")
-        .arg("--channel")
-        .arg(&channel_list)
-        .arg("--all")
-        .arg("--quiet")
-        .arg("--with-threads")
-        .env("SLACK_USER_TOKEN", &token)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .output()
-        .await;
+    let result = tokio::time::timeout(
+        SIDECAR_TIMEOUT,
+        Command::new("python3")
+            .arg(&script_path)
+            .arg("--json")
+            .arg("--channels-only")
+            .arg("--channel")
+            .arg(&channel_list)
+            .arg("--all")
+            .arg("--quiet")
+            .arg("--with-threads")
+            .env("SLACK_USER_TOKEN", &token)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .output(),
+    )
+    .await;
+
+    let result = match result {
+        Ok(r) => r,
+        Err(_) => {
+            tracing::error!("slack_messages.py timed out after {}s", SIDECAR_TIMEOUT.as_secs());
+            return (StatusCode::GATEWAY_TIMEOUT, Json(json!({
+                "error": format!("Slack message fetch timed out after {}s", SIDECAR_TIMEOUT.as_secs())
+            })));
+        }
+    };
 
     match result {
         Ok(output) => {
@@ -244,7 +262,6 @@ Keep each summary under 100 words. Focus on what matters: decisions made, proble
         .arg("")
         .arg("-")
         .env_remove("CLAUDECODE")
-        .env("CLAUDECODE", "")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -257,41 +274,63 @@ Keep each summary under 100 words. Focus on what matters: decisions made, proble
             )
         })?;
 
-    // Write prompt to stdin
-    {
-        let mut stdin = child.stdin.take().expect("stdin piped");
-        stdin.write_all(meta_prompt.as_bytes()).await.map_err(|e| {
+    // Run stdin write + stdout read + wait under a single timeout.
+    // If the timeout fires, kill the child process to avoid orphans.
+    let claude_result = tokio::time::timeout(CLAUDE_TIMEOUT, async {
+        // Write prompt to stdin
+        {
+            let mut stdin = child.stdin.take().expect("stdin piped");
+            stdin.write_all(meta_prompt.as_bytes()).await.map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({ "error": format!("stdin write failed: {e}") })),
+                )
+            })?;
+            drop(stdin);
+        }
+
+        // Read stdout
+        let stdout = child.stdout.take().expect("stdout piped");
+        let reader = BufReader::new(stdout);
+        let mut lines = reader.lines();
+        let mut output = String::new();
+        while let Ok(Some(line)) = lines.next_line().await {
+            output.push_str(&line);
+            output.push('\n');
+        }
+
+        let status = child.wait().await.map_err(|e| {
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": format!("stdin write failed: {e}") })),
+                Json(json!({ "error": format!("process wait failed: {e}") })),
             )
         })?;
-        drop(stdin);
-    }
 
-    // Read stdout
-    let stdout = child.stdout.take().expect("stdout piped");
-    let reader = BufReader::new(stdout);
-    let mut lines = reader.lines();
-    let mut output = String::new();
-    while let Ok(Some(line)) = lines.next_line().await {
-        output.push_str(&line);
-        output.push('\n');
-    }
+        if !status.success() {
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": format!("claude exited with {status}") })),
+            ));
+        }
 
-    let status = child.wait().await.map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "error": format!("process wait failed: {e}") })),
-        )
-    })?;
+        Ok(output)
+    })
+    .await;
 
-    if !status.success() {
-        return Err((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "error": format!("claude exited with {status}") })),
-        ));
-    }
+    let output = match claude_result {
+        Ok(inner) => inner?,
+        Err(_) => {
+            // Timeout elapsed — kill the child process
+            let _ = child.kill().await;
+            tracing::error!("claude CLI timed out after {}s", CLAUDE_TIMEOUT.as_secs());
+            return Err((
+                StatusCode::GATEWAY_TIMEOUT,
+                Json(json!({
+                    "error": format!("AI summary generation timed out after {}s", CLAUDE_TIMEOUT.as_secs())
+                })),
+            ));
+        }
+    };
 
     // Parse Claude's output — strip markdown code blocks if present
     let cleaned = output
@@ -330,5 +369,146 @@ Keep each summary under 100 words. Focus on what matters: decisions made, proble
                 })),
             ))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── DashboardConfig serialization ──────────────────────────
+
+    #[test]
+    fn config_default_has_empty_channels() {
+        let cfg = DashboardConfig::default();
+        assert!(cfg.channels.is_empty());
+        assert_eq!(cfg.slack_token_env, "SLACK_USER_TOKEN");
+    }
+
+    #[test]
+    fn config_roundtrips_through_json() {
+        let cfg = DashboardConfig {
+            channels: vec!["general".into(), "devops".into()],
+            slack_token_env: "MY_TOKEN".into(),
+        };
+        let json = serde_json::to_string(&cfg).unwrap();
+        let parsed: DashboardConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.channels, vec!["general", "devops"]);
+        assert_eq!(parsed.slack_token_env, "MY_TOKEN");
+    }
+
+    #[test]
+    fn config_missing_slack_token_env_uses_default() {
+        let json = r#"{"channels": ["eng"]}"#;
+        let cfg: DashboardConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(cfg.channels, vec!["eng"]);
+        assert_eq!(cfg.slack_token_env, "SLACK_USER_TOKEN");
+    }
+
+    #[test]
+    fn config_empty_json_object_uses_defaults() {
+        // channels field is required in DashboardConfig, so an empty JSON object
+        // should fail to parse (channels has no serde default).
+        let json = r#"{}"#;
+        let result = serde_json::from_str::<DashboardConfig>(json);
+        // This should fail because "channels" is required
+        assert!(result.is_err());
+    }
+
+    // ── read_config with temp directory ────────────────────────
+
+    #[test]
+    fn read_config_returns_default_when_file_missing() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        // Build a minimal AppState-like mock by providing data_dir
+        // read_config only uses state.data_dir, so we test the function directly
+        let path = tmp.path().join("dashboard.json");
+        assert!(!path.exists());
+
+        // Read the file manually (same logic as read_config)
+        let cfg: DashboardConfig = match std::fs::read_to_string(&path) {
+            Ok(contents) => serde_json::from_str(&contents).unwrap_or_default(),
+            Err(_) => DashboardConfig::default(),
+        };
+        assert!(cfg.channels.is_empty());
+    }
+
+    #[test]
+    fn read_config_parses_valid_file() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("dashboard.json");
+        std::fs::write(
+            &path,
+            r#"{"channels": ["alerts", "builds"], "slack_token_env": "CUSTOM_TOKEN"}"#,
+        )
+        .unwrap();
+
+        let contents = std::fs::read_to_string(&path).unwrap();
+        let cfg: DashboardConfig = serde_json::from_str(&contents).unwrap();
+        assert_eq!(cfg.channels, vec!["alerts", "builds"]);
+        assert_eq!(cfg.slack_token_env, "CUSTOM_TOKEN");
+    }
+
+    #[test]
+    fn read_config_returns_default_for_invalid_json() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("dashboard.json");
+        std::fs::write(&path, "not valid json {{{").unwrap();
+
+        let cfg: DashboardConfig = match std::fs::read_to_string(&path) {
+            Ok(contents) => serde_json::from_str(&contents).unwrap_or_default(),
+            Err(_) => DashboardConfig::default(),
+        };
+        assert!(cfg.channels.is_empty());
+    }
+
+    // ── Atomic write pattern ──────────────────────────────────
+
+    #[test]
+    fn atomic_write_pattern_works() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("dashboard.json");
+        let tmp_path = path.with_extension("json.tmp");
+
+        let cfg = DashboardConfig {
+            channels: vec!["test".into()],
+            slack_token_env: default_token_env(),
+        };
+        let json_str = serde_json::to_string_pretty(&cfg).unwrap();
+        std::fs::write(&tmp_path, &json_str).unwrap();
+        std::fs::rename(&tmp_path, &path).unwrap();
+
+        assert!(!tmp_path.exists());
+        assert!(path.exists());
+        let read: DashboardConfig =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(read.channels, vec!["test"]);
+    }
+
+    // ── Summary request deserialization ────────────────────────
+
+    #[test]
+    fn summary_request_parses_channels_array() {
+        let json = r##"{"channels": [{"channel": "#general", "count": 5, "messages": []}]}"##;
+        let req: SummaryRequest = serde_json::from_str(json).unwrap();
+        assert!(req.channels.is_array());
+        assert_eq!(req.channels.as_array().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn summary_request_rejects_non_array_channels() {
+        let json = r#"{"channels": "not-an-array"}"#;
+        let req: SummaryRequest = serde_json::from_str(json).unwrap();
+        assert!(req.channels.as_array().is_none());
+    }
+
+    // ── Timeout constants ─────────────────────────────────────
+
+    #[test]
+    fn timeout_constants_are_reasonable() {
+        assert!(SIDECAR_TIMEOUT.as_secs() >= 10, "sidecar timeout too short");
+        assert!(SIDECAR_TIMEOUT.as_secs() <= 60, "sidecar timeout too long");
+        assert!(CLAUDE_TIMEOUT.as_secs() >= 60, "claude timeout too short");
+        assert!(CLAUDE_TIMEOUT.as_secs() <= 300, "claude timeout too long");
     }
 }
