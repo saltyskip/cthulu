@@ -30,6 +30,11 @@ const ALLOWED_TOKEN_ENVS: &[&str] = &["SLACK_USER_TOKEN", "SLACK_BOT_TOKEN"];
 /// Prevents excessive token usage and protects against Claude CLI input limits.
 const MAX_SUMMARY_INPUT_BYTES: usize = 200_000;
 
+/// Maximum concurrent Claude CLI processes for summary generation.
+/// Prevents resource exhaustion from rapid repeated clicks or multiple clients.
+static SUMMARY_SEMAPHORE: std::sync::LazyLock<tokio::sync::Semaphore> =
+    std::sync::LazyLock::new(|| tokio::sync::Semaphore::new(2));
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct DashboardConfig {
     pub channels: Vec<String>,
@@ -269,6 +274,13 @@ pub(crate) struct SummaryRequest {
 pub(crate) async fn generate_summary(
     Json(body): Json<SummaryRequest>,
 ) -> Result<(StatusCode, Json<serde_json::Value>), (StatusCode, Json<serde_json::Value>)> {
+    // Limit concurrent Claude CLI processes to avoid resource exhaustion.
+    let _permit = SUMMARY_SEMAPHORE.acquire().await.map_err(|_| {
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({ "error": "Summary service unavailable" })),
+        )
+    })?;
     let channels = body.channels.as_array().ok_or_else(|| {
         (
             StatusCode::BAD_REQUEST,

@@ -98,7 +98,7 @@ export default function DashboardView() {
   }, [summaries]);
 
   const getSummaryForChannel = useCallback((channelName: string): string | undefined => {
-    const key = channelName.replace(/^#/, "").replace(/^\uD83D\uDD12/, "").toLowerCase();
+    const key = channelName.replace(/^#/, "").replace(/^\u{1F512}/u, "").toLowerCase();
     // Try exact normalized match first
     const exact = summaryMap.get(key);
     if (exact) return exact;
