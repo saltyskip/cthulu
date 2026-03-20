@@ -334,6 +334,8 @@ pub struct AppState {
     pub global_hook_tx: Arc<broadcast::Sender<String>>,
     /// The port the server is listening on (used in hook URLs).
     pub server_port: u16,
+    /// Whether auth is enabled (read once at startup from config).
+    pub auth_enabled: bool,
     /// JWT signing secret for self-hosted auth.
     pub jwt_secret: String,
     /// In-memory user store (email/password accounts).

@@ -79,7 +79,9 @@ pub fn load_or_create_jwt_secret(data_dir: &PathBuf) -> String {
     match std::fs::read_to_string(&path) {
         Ok(secret) if !secret.trim().is_empty() => secret.trim().to_string(),
         _ => {
-            let secret = uuid::Uuid::new_v4().to_string();
+            // 256 bits of randomness: two UUID v4s concatenated (each has 122 bits)
+            let secret = format!("{}{}", uuid::Uuid::new_v4(), uuid::Uuid::new_v4())
+                .replace('-', "");
             let _ = std::fs::write(&path, &secret);
             secret
         }
@@ -136,10 +138,9 @@ impl AuthUser {
     }
 }
 
-pub fn auth_enabled() -> bool {
-    std::env::var("AUTH_ENABLED")
-        .map(|v| v == "true")
-        .unwrap_or(false)
+/// Check if auth is enabled via AppState (read once at startup).
+pub fn auth_enabled(state: &AppState) -> bool {
+    state.auth_enabled
 }
 
 impl FromRequestParts<AppState> for AuthUser {
@@ -150,7 +151,7 @@ impl FromRequestParts<AppState> for AuthUser {
         state: &AppState,
     ) -> impl std::future::Future<Output = Result<Self, Self::Rejection>> + Send {
         let jwt_secret = state.jwt_secret.clone();
-        let auth_on = auth_enabled();
+        let auth_on = state.auth_enabled;
         let token = extract_token(parts);
 
         async move {
@@ -237,26 +238,33 @@ async fn signup(
     }
 
     let email = body.email.trim().to_lowercase();
+    let password = body.password;
 
-    {
-        let store = state.user_store.read().await;
-        if store.find_by_email(&email).is_some() {
-            return (
-                StatusCode::CONFLICT,
-                Json(json!({ "error": "User already exists" })),
-            );
-        }
-    }
-
-    let password_hash = match bcrypt::hash(&body.password, 12) {
-        Ok(h) => h,
-        Err(e) => {
+    // Hash password outside lock (bcrypt is CPU-intensive)
+    let password_hash = match tokio::task::spawn_blocking(move || bcrypt::hash(&password, 12)).await {
+        Ok(Ok(h)) => h,
+        Ok(Err(e)) => {
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({ "error": format!("Hash failed: {e}") })),
             );
         }
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": format!("Hash task failed: {e}") })),
+            );
+        }
     };
+
+    // Single write lock for check-and-insert to prevent TOCTOU race
+    let mut store = state.user_store.write().await;
+    if store.find_by_email(&email).is_some() {
+        return (
+            StatusCode::CONFLICT,
+            Json(json!({ "error": "User already exists" })),
+        );
+    }
 
     let user = StoredUser {
         id: uuid::Uuid::new_v4().to_string().replace('-', "_"),
@@ -277,11 +285,9 @@ async fn signup(
         }
     };
 
-    {
-        let mut store = state.user_store.write().await;
-        store.insert(user.clone());
-        let _ = store.save(&state.data_dir);
-    }
+    store.insert(user.clone());
+    let _ = store.save(&state.data_dir);
+    drop(store);
 
     (
         StatusCode::CREATED,

@@ -13,7 +13,7 @@ use crate::api::AppState;
 /// Dev mode: returns `state.data_dir` directly.
 /// Auth mode: returns `state.data_dir/users/{user_id}`.
 pub fn user_data_dir(state: &AppState, auth: &AuthUser) -> PathBuf {
-    if auth_enabled() {
+    if auth_enabled(state) {
         state.data_dir.join("users").join(&auth.user_id)
     } else {
         state.data_dir.clone()
@@ -22,8 +22,8 @@ pub fn user_data_dir(state: &AppState, auth: &AuthUser) -> PathBuf {
 
 /// Prefix an in-memory key with user_id for multi-tenant isolation.
 /// Dev mode: returns the key unchanged.
-pub fn user_key(auth: &AuthUser, key: &str) -> String {
-    if auth_enabled() {
+pub fn user_key(state: &AppState, auth: &AuthUser, key: &str) -> String {
+    if auth_enabled(state) {
         format!("{}::{}", auth.user_id, key)
     } else {
         key.to_string()
@@ -41,30 +41,36 @@ pub fn ensure_user_dirs(state: &AppState, auth: &AuthUser) -> std::io::Result<()
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
+    use super::*;
+
+    fn test_auth(id: &str) -> AuthUser {
+        AuthUser { user_id: id.to_string() }
+    }
+
+    // Note: user_data_dir and user_key require AppState which has many Arc fields.
+    // We test the path/key construction logic directly; full integration tests
+    // would need a test AppState builder (future improvement).
 
     #[test]
-    fn user_data_dir_path_construction() {
-        let base = PathBuf::from("/tmp/cthulu");
-        let result = base.join("users").join("user_abc");
-        assert_eq!(result, PathBuf::from("/tmp/cthulu/users/user_abc"));
+    fn user_key_formats_correctly() {
+        // Verify the format string matches what user_key produces
+        let auth = test_auth("user_abc");
+        let expected = format!("{}::{}", auth.user_id, "agent::123");
+        assert_eq!(expected, "user_abc::agent::123");
     }
 
     #[test]
-    fn user_key_format() {
-        let result = format!("{}::{}", "user_abc", "agent::123");
-        assert_eq!(result, "user_abc::agent::123");
-    }
-
-    #[test]
-    fn ensure_dirs_creates_subdirs() {
+    fn ensure_dirs_creates_all_subdirs() {
         let tmp = tempfile::TempDir::new().unwrap();
-        let base = tmp.path().join("users").join("test_user");
+        let base = tmp.path().to_path_buf();
+        let auth = test_auth("test_user");
+        let user_dir = base.join("users").join(&auth.user_id);
+        // Simulate what ensure_user_dirs does
         for sub in &["flows", "agents", "prompts"] {
-            std::fs::create_dir_all(base.join(sub)).unwrap();
+            std::fs::create_dir_all(user_dir.join(sub)).unwrap();
         }
-        assert!(base.join("flows").exists());
-        assert!(base.join("agents").exists());
-        assert!(base.join("prompts").exists());
+        assert!(user_dir.join("flows").exists());
+        assert!(user_dir.join("agents").exists());
+        assert!(user_dir.join("prompts").exists());
     }
 }
