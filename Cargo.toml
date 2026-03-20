@@ -22,6 +22,9 @@ futures = "0.3.32"
 async-stream = "0.3.6"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
+jsonwebtoken = "9"
+base64 = "0.22"
+bcrypt = "0.19"
 serde_yaml = "0.9.34"
 async-trait = "0.1.89"
 hyper = { version = "1", default-features = false, features = ["http1", "http2", "server", "client"] }

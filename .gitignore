@@ -16,3 +16,13 @@ logs/
 .nx/
 node_modules/
 .claude/
+
+# Memory files (Claude auto-memory, not tracked)
+MEMORY.md
+
+# Superpowers (local brainstorm/dev artifacts)
+.superpowers/
+
+# Docs: plans, specs, and setup guides (separate from feature code)
+docs/superpowers/
+docs/better-auth-setup.md
