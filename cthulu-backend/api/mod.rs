@@ -1,6 +1,7 @@
 pub mod agents;
 pub mod auth;
 pub mod changes;
+pub mod clerk_auth;
 pub mod dashboard;
 pub mod flows;
 pub mod hooks;
@@ -10,6 +11,7 @@ pub mod prompts;
 mod routes;
 pub mod scheduler;
 pub mod templates;
+pub mod user_context;
 
 use axum::Router;
 use serde::{Deserialize, Serialize};
@@ -332,6 +334,10 @@ pub struct AppState {
     pub global_hook_tx: Arc<broadcast::Sender<String>>,
     /// The port the server is listening on (used in hook URLs).
     pub server_port: u16,
+    /// JWT signing secret for self-hosted auth.
+    pub jwt_secret: String,
+    /// In-memory user store (email/password accounts).
+    pub user_store: Arc<RwLock<clerk_auth::UserStore>>,
 }
 
 impl AppState {

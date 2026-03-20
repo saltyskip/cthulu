@@ -369,6 +369,10 @@ async fn run_server(start_disabled: bool) -> Result<(), Box<dyn Error>> {
         pending_permissions: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
         global_hook_tx: Arc::new(tokio::sync::broadcast::channel::<String>(256).0),
         server_port: config.port,
+        jwt_secret: crate::api::clerk_auth::load_or_create_jwt_secret(&base_dir),
+        user_store: Arc::new(tokio::sync::RwLock::new(
+            crate::api::clerk_auth::UserStore::load(&base_dir),
+        )),
     };
 
     // Start file change watcher (keeps caches in sync with external edits)
