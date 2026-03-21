@@ -28,8 +28,10 @@ use crate::api::AppState;
 pub struct StoredUser {
     pub id: String,
     pub email: String,
-    /// Never serialize to API responses — only used for JSON file persistence.
-    /// API handlers manually construct response JSON to exclude this field.
+    /// WARNING: Contains the bcrypt hash. Never expose in API responses.
+    /// This field is serialized for file persistence only. All API handlers
+    /// MUST use manual `json!()` construction to exclude it. Never use
+    /// `Json(user)` or `serde_json::to_value(user)` in HTTP responses.
     pub password_hash: String,
     pub name: Option<String>,
     pub avatar_url: Option<String>,
@@ -45,8 +47,19 @@ impl UserStore {
     pub fn load(data_dir: &PathBuf) -> Self {
         let path = data_dir.join("users.json");
         let users = match std::fs::read_to_string(&path) {
-            Ok(contents) => serde_json::from_str(&contents).unwrap_or_default(),
-            Err(_) => HashMap::new(),
+            Ok(contents) => match serde_json::from_str(&contents) {
+                Ok(parsed) => parsed,
+                Err(e) => {
+                    tracing::error!(path = %path.display(), error = %e,
+                        "corrupt users.json — starting with empty store (backup the file before next save)");
+                    HashMap::new()
+                }
+            },
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
+                tracing::error!(path = %path.display(), error = %e, "failed to read users.json");
+                HashMap::new()
+            }
+            Err(_) => HashMap::new(), // file doesn't exist yet — normal on first run
         };
         Self { users }
     }
@@ -251,7 +264,8 @@ async fn signup(
     Json(body): Json<SignupRequest>,
 ) -> (StatusCode, Json<Value>) {
     let email = body.email.trim().to_lowercase();
-    if email.is_empty() || !email.contains('@') {
+    let email_parts: Vec<&str> = email.split('@').collect();
+    if email_parts.len() != 2 || email_parts[0].is_empty() || email_parts[1].is_empty() || !email_parts[1].contains('.') {
         return (
             StatusCode::BAD_REQUEST,
             Json(json!({ "error": "Valid email required" })),

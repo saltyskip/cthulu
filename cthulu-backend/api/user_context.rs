@@ -39,13 +39,17 @@ pub fn user_key(state: &AppState, auth: &AuthUser, key: &str) -> String {
     user_key_string(auth_enabled(state), &auth.user_id, key)
 }
 
-/// Ensure the user's data directory and subdirectories exist.
-pub fn ensure_user_dirs(state: &AppState, auth: &AuthUser) -> std::io::Result<()> {
-    let base = user_data_dir(state, auth);
+/// Pure directory creation — testable without AppState.
+pub fn ensure_dirs_at(base: &Path) -> std::io::Result<()> {
     for sub in &["flows", "agents", "prompts"] {
         std::fs::create_dir_all(base.join(sub))?;
     }
     Ok(())
+}
+
+/// Ensure the user's data directory and subdirectories exist.
+pub fn ensure_user_dirs(state: &AppState, auth: &AuthUser) -> std::io::Result<()> {
+    ensure_dirs_at(&user_data_dir(state, auth))
 }
 
 #[cfg(test)]
@@ -78,12 +82,10 @@ mod tests {
     }
 
     #[test]
-    fn ensure_dirs_creates_all_subdirs() {
+    fn ensure_dirs_at_creates_all_subdirs() {
         let tmp = tempfile::TempDir::new().unwrap();
         let user_dir = user_data_dir_path(tmp.path(), true, "test_user");
-        for sub in &["flows", "agents", "prompts"] {
-            std::fs::create_dir_all(user_dir.join(sub)).unwrap();
-        }
+        ensure_dirs_at(&user_dir).unwrap();
         assert!(user_dir.join("flows").exists());
         assert!(user_dir.join("agents").exists());
         assert!(user_dir.join("prompts").exists());
