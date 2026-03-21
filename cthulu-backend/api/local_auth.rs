@@ -3,7 +3,7 @@
 //! Users stored in `{data_dir}/users.json`. Passwords hashed with bcrypt.
 //! JWTs signed with a server-generated secret stored in `{data_dir}/jwt_secret`.
 //!
-//! When `AUTH_ENABLED` env var is not "true" (default), auth is bypassed
+//! When `AUTH_ENABLED` is not "true" (default), auth is bypassed
 //! and all requests get a hardcoded "dev_user" identity.
 
 use axum::extract::FromRequestParts;
@@ -15,6 +15,8 @@ use hyper::StatusCode;
 use jsonwebtoken::{decode, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use base64::Engine;
+use percent_encoding::percent_decode_str;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
@@ -26,6 +28,8 @@ use crate::api::AppState;
 pub struct StoredUser {
     pub id: String,
     pub email: String,
+    /// Never serialize to API responses — only used for JSON file persistence.
+    /// API handlers manually construct response JSON to exclude this field.
     pub password_hash: String,
     pub name: Option<String>,
     pub avatar_url: Option<String>,
@@ -76,16 +80,27 @@ struct Claims {
 
 const JWT_EXPIRY_HOURS: i64 = 24;
 
-/// Load or generate the JWT signing secret.
+/// Load or generate the JWT signing secret (256-bit CSPRNG, base64url-encoded).
+/// The secret file is created with mode 0600 on Unix.
+/// If the file is deleted, a new secret is generated and all existing JWTs are invalidated.
 pub fn load_or_create_jwt_secret(data_dir: &PathBuf) -> String {
     let path = data_dir.join("jwt_secret");
     match std::fs::read_to_string(&path) {
         Ok(secret) if !secret.trim().is_empty() => secret.trim().to_string(),
         _ => {
-            // 256 bits of randomness: two UUID v4s concatenated (each has 122 bits)
-            let secret = format!("{}{}", uuid::Uuid::new_v4(), uuid::Uuid::new_v4())
-                .replace('-', "");
-            let _ = std::fs::write(&path, &secret);
+            let mut buf = [0u8; 32];
+            getrandom::fill(&mut buf).expect("CSPRNG failed");
+            let secret = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(&buf);
+            if let Err(e) = std::fs::write(&path, &secret) {
+                tracing::error!(path = %path.display(), error = %e,
+                    "failed to persist JWT secret — tokens will not survive restart");
+            } else {
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+                }
+            }
             secret
         }
     }
@@ -189,6 +204,7 @@ impl FromRequestParts<AppState> for AuthUser {
 }
 
 /// Extract Bearer token from Authorization header or ?token query param.
+/// Query-param support exists for SSE/WebSocket connections where headers can't be set.
 fn extract_token(parts: &Parts) -> Option<String> {
     if let Some(auth_header) = parts.headers.get(AUTHORIZATION) {
         if let Ok(value) = auth_header.to_str() {
@@ -198,10 +214,11 @@ fn extract_token(parts: &Parts) -> Option<String> {
         }
     }
 
+    // Fallback: ?token= query param (URL-decoded for safety)
     if let Some(query) = parts.uri.query() {
         for pair in query.split('&') {
             if let Some(token) = pair.strip_prefix("token=") {
-                return Some(token.to_string());
+                return Some(percent_decode_str(token).decode_utf8_lossy().into_owned());
             }
         }
     }
@@ -233,14 +250,19 @@ async fn signup(
     axum::extract::State(state): axum::extract::State<AppState>,
     Json(body): Json<SignupRequest>,
 ) -> (StatusCode, Json<Value>) {
-    if body.email.trim().is_empty() || body.password.len() < 8 {
+    let email = body.email.trim().to_lowercase();
+    if email.is_empty() || !email.contains('@') {
         return (
             StatusCode::BAD_REQUEST,
-            Json(json!({ "error": "Email required, password must be 8+ characters" })),
+            Json(json!({ "error": "Valid email required" })),
         );
     }
-
-    let email = body.email.trim().to_lowercase();
+    if body.password.len() < 8 {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "Password must be at least 8 bytes" })),
+        );
+    }
     let password = body.password;
 
     // Hash password outside lock (bcrypt is CPU-intensive)
@@ -289,7 +311,9 @@ async fn signup(
     };
 
     store.insert(user.clone());
-    let _ = store.save(&state.data_dir);
+    if let Err(e) = store.save(&state.data_dir) {
+        tracing::error!(error = %e, "failed to persist user store");
+    }
     drop(store);
 
     (

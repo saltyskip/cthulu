@@ -4,32 +4,39 @@
 //! `~/.cthulu/users/{user_id}/`. When disabled (dev mode), uses the
 //! flat legacy structure at `~/.cthulu/`.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-use crate::api::clerk_auth::{auth_enabled, AuthUser};
+use crate::api::local_auth::{auth_enabled, AuthUser};
 use crate::api::AppState;
 
-/// Returns the per-user data directory.
-/// Dev mode: returns `state.data_dir` directly.
-/// Auth mode: returns `state.data_dir/users/{user_id}`.
-/// Safety: user_id is validated to [a-zA-Z0-9_-] in AuthUser extractor,
-/// preventing path traversal.
-pub fn user_data_dir(state: &AppState, auth: &AuthUser) -> PathBuf {
-    if auth_enabled(state) {
-        state.data_dir.join("users").join(&auth.user_id)
+/// Pure path computation — testable without AppState.
+pub fn user_data_dir_path(base: &Path, auth_enabled: bool, user_id: &str) -> PathBuf {
+    if auth_enabled {
+        base.join("users").join(user_id)
     } else {
-        state.data_dir.clone()
+        base.to_path_buf()
     }
 }
 
-/// Prefix an in-memory key with user_id for multi-tenant isolation.
-/// Dev mode: returns the key unchanged.
-pub fn user_key(state: &AppState, auth: &AuthUser, key: &str) -> String {
-    if auth_enabled(state) {
-        format!("{}::{}", auth.user_id, key)
+/// Pure key computation — testable without AppState.
+pub fn user_key_string(auth_enabled: bool, user_id: &str, key: &str) -> String {
+    if auth_enabled {
+        format!("{user_id}::{key}")
     } else {
         key.to_string()
     }
+}
+
+/// Returns the per-user data directory.
+/// Safety: user_id is validated to [a-zA-Z0-9_-] in AuthUser extractor,
+/// preventing path traversal.
+pub fn user_data_dir(state: &AppState, auth: &AuthUser) -> PathBuf {
+    user_data_dir_path(&state.data_dir, auth_enabled(state), &auth.user_id)
+}
+
+/// Prefix an in-memory key with user_id for multi-tenant isolation.
+pub fn user_key(state: &AppState, auth: &AuthUser, key: &str) -> String {
+    user_key_string(auth_enabled(state), &auth.user_id, key)
 }
 
 /// Ensure the user's data directory and subdirectories exist.
@@ -44,30 +51,36 @@ pub fn ensure_user_dirs(state: &AppState, auth: &AuthUser) -> std::io::Result<()
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn test_auth(id: &str) -> AuthUser {
-        AuthUser { user_id: id.to_string() }
-    }
-
-    // Note: user_data_dir and user_key require AppState which has many Arc fields.
-    // We test the path/key construction logic directly; full integration tests
-    // would need a test AppState builder (future improvement).
+    use std::path::Path;
 
     #[test]
-    fn user_key_formats_correctly() {
-        // Verify the format string matches what user_key produces
-        let auth = test_auth("user_abc");
-        let expected = format!("{}::{}", auth.user_id, "agent::123");
-        assert_eq!(expected, "user_abc::agent::123");
+    fn user_data_dir_auth_enabled() {
+        let result = user_data_dir_path(Path::new("/data"), true, "user_abc");
+        assert_eq!(result, PathBuf::from("/data/users/user_abc"));
+    }
+
+    #[test]
+    fn user_data_dir_auth_disabled() {
+        let result = user_data_dir_path(Path::new("/data"), false, "user_abc");
+        assert_eq!(result, PathBuf::from("/data"));
+    }
+
+    #[test]
+    fn user_key_auth_enabled() {
+        let result = user_key_string(true, "user_abc", "agent::123");
+        assert_eq!(result, "user_abc::agent::123");
+    }
+
+    #[test]
+    fn user_key_auth_disabled() {
+        let result = user_key_string(false, "user_abc", "agent::123");
+        assert_eq!(result, "agent::123");
     }
 
     #[test]
     fn ensure_dirs_creates_all_subdirs() {
         let tmp = tempfile::TempDir::new().unwrap();
-        let base = tmp.path().to_path_buf();
-        let auth = test_auth("test_user");
-        let user_dir = base.join("users").join(&auth.user_id);
-        // Simulate what ensure_user_dirs does
+        let user_dir = user_data_dir_path(tmp.path(), true, "test_user");
         for sub in &["flows", "agents", "prompts"] {
             std::fs::create_dir_all(user_dir.join(sub)).unwrap();
         }

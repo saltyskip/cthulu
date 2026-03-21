@@ -1,7 +1,7 @@
 pub mod agents;
 pub mod auth;
 pub mod changes;
-pub mod clerk_auth;
+pub mod local_auth;
 pub mod dashboard;
 pub mod flows;
 pub mod hooks;
@@ -339,7 +339,7 @@ pub struct AppState {
     /// JWT signing secret (Arc to avoid cloning on every request extraction).
     pub jwt_secret: Arc<String>,
     /// In-memory user store (email/password accounts).
-    pub user_store: Arc<RwLock<clerk_auth::UserStore>>,
+    pub user_store: Arc<RwLock<local_auth::UserStore>>,
 }
 
 impl AppState {

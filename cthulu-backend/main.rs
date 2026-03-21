@@ -370,9 +370,9 @@ async fn run_server(start_disabled: bool) -> Result<(), Box<dyn Error>> {
         global_hook_tx: Arc::new(tokio::sync::broadcast::channel::<String>(256).0),
         server_port: config.port,
         auth_enabled: config.auth_enabled,
-        jwt_secret: Arc::new(crate::api::clerk_auth::load_or_create_jwt_secret(&base_dir)),
+        jwt_secret: Arc::new(crate::api::local_auth::load_or_create_jwt_secret(&base_dir)),
         user_store: Arc::new(tokio::sync::RwLock::new(
-            crate::api::clerk_auth::UserStore::load(&base_dir),
+            crate::api::local_auth::UserStore::load(&base_dir),
         )),
     };
 
