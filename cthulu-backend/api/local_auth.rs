@@ -346,28 +346,26 @@ async fn login(
     let email = body.email.trim().to_lowercase();
 
     let store = state.user_store.read().await;
-    let user = match store.find_by_email(&email) {
-        Some(u) => u.clone(),
-        None => {
-            return (
-                StatusCode::UNAUTHORIZED,
-                Json(json!({ "error": "Invalid email or password" })),
-            );
-        }
-    };
+    let user = store.find_by_email(&email).cloned();
     drop(store);
 
+    // Constant-time: always run bcrypt verify to prevent user enumeration via timing.
+    // If user doesn't exist, verify against a dummy hash (same cost as real verify).
+    let dummy_hash = "$2b$12$000000000000000000000u2a5OJr0FkDxcMkGCuaLxMPqOIZJcMK";
     let password = body.password.clone();
-    let hash = user.password_hash.clone();
+    let hash = user.as_ref().map(|u| u.password_hash.clone())
+        .unwrap_or_else(|| dummy_hash.to_string());
     let valid = tokio::task::spawn_blocking(move || bcrypt::verify(&password, &hash).unwrap_or(false))
         .await
         .unwrap_or(false);
-    if !valid {
+
+    if !valid || user.is_none() {
         return (
             StatusCode::UNAUTHORIZED,
             Json(json!({ "error": "Invalid email or password" })),
         );
     }
+    let user = user.unwrap();
 
     let token = match issue_jwt(&user, &state.jwt_secret) {
         Ok(t) => t,
