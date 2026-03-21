@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { STUDIO_ASSISTANT_ID, type FlowSummary, type Flow, type NodeTypeSchema, type AgentSummary, type SavedPrompt, type ActiveView } from "../types/flow";
-import { listAgents, createAgent, deleteAgent, listPrompts, savePrompt, deletePrompt as deletePromptApi, listAgentSessions, newAgentSession } from "../api/client";
+import { listAgents, createAgent, deleteAgent, listPrompts, savePrompt, deletePrompt as deletePromptApi, listAgentSessions, newAgentSession, listTeams } from "../api/client";
 import type { InteractSessionInfo } from "../api/client";
 import { Switch } from "@/components/ui/switch";
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
@@ -66,6 +66,11 @@ export default function Sidebar({
   const [prompts, setPrompts] = useState<SavedPrompt[]>([]);
   const [agentMeta, setAgentMeta] = useState<Map<string, { busy: boolean; sessions: InteractSessionInfo[]; cost: number }>>(new Map());
   const [expandedAgents, setExpandedAgents] = useState<Set<string>>(new Set());
+  const [userTeams, setUserTeams] = useState<{ id: string; name: string }[]>([]);
+
+  useEffect(() => {
+    listTeams().then((res) => setUserTeams(res.teams.map((t) => ({ id: t.id, name: t.name })))).catch(() => {});
+  }, []);
 
   const refreshAgents = useCallback(async () => {
     try {
@@ -153,6 +158,20 @@ export default function Sidebar({
     }
   }
 
+  async function handleCreateTeamAgent(teamId: string) {
+    try {
+      const team = userTeams.find((t) => t.id === teamId);
+      const { id } = await createAgent({
+        name: `${team?.name || "Team"} Agent`,
+        team_id: teamId,
+      });
+      await refreshAgents();
+      onAgentCreated(id);
+    } catch (e) {
+      console.error("Failed to create team agent:", e);
+    }
+  }
+
   async function handleDeleteAgent(e: React.MouseEvent, agentId: string) {
     e.stopPropagation();
     if (!confirm("Delete this agent?")) return;
@@ -219,20 +238,29 @@ export default function Sidebar({
             <span className="sidebar-chevron">▶</span>
             <h2>Agents</h2>
             <div style={{ flex: 1 }} />
-            <button
-              className="ghost sidebar-action-btn"
-              onClick={(e) => {
-                e.stopPropagation();
-                handleCreateAgent();
+            <select
+              className="sidebar-agent-create-select"
+              value=""
+              onClick={(e) => e.stopPropagation()}
+              onChange={(e) => {
+                const val = e.target.value;
+                if (val === "personal") handleCreateAgent();
+                else if (val) handleCreateTeamAgent(val);
+                e.target.value = "";
               }}
             >
-              +
-            </button>
+              <option value="">+</option>
+              <option value="personal">Personal Agent</option>
+              {userTeams.length > 0 && <option disabled>── Teams ──</option>}
+              {userTeams.map((t) => (
+                <option key={t.id} value={t.id}>{t.name} Agent</option>
+              ))}
+            </select>
           </div>
         </CollapsibleTrigger>
         <CollapsibleContent>
           <div className="sidebar-section-body">
-            {[...agents].sort((a, b) => {
+            {[...agents].filter((a) => !a.team_id).sort((a, b) => {
               if (a.id === STUDIO_ASSISTANT_ID) return -1;
               if (b.id === STUDIO_ASSISTANT_ID) return 1;
               return 0;
@@ -318,6 +346,49 @@ export default function Sidebar({
           </div>
         </CollapsibleContent>
       </Collapsible>
+
+      {/* Team Agents — one sub-section per team */}
+      {userTeams.map((team) => {
+        const teamAgents = agents.filter((a) => a.team_id === team.id);
+        return (
+          <Collapsible key={team.id} defaultOpen className="sidebar-section">
+            <CollapsibleTrigger asChild>
+              <div className="sidebar-section-header">
+                <span className="sidebar-chevron">▶</span>
+                <h2 className="sidebar-team-name">
+                  <span className="sidebar-team-badge" />
+                  {team.name}
+                </h2>
+                <div style={{ flex: 1 }} />
+                <button className="ghost sidebar-action-btn"
+                  onClick={(e) => { e.stopPropagation(); handleCreateTeamAgent(team.id); }}>+</button>
+              </div>
+            </CollapsibleTrigger>
+            <CollapsibleContent>
+              <div className="sidebar-section-body">
+                {teamAgents.length === 0 && <div className="sidebar-empty">No agents yet</div>}
+                {teamAgents.map((agent) => {
+                  const meta = agentMeta.get(agent.id);
+                  const isActive = agent.id === selectedAgentId && activeView === "agent-workspace";
+                  return (
+                    <div key={agent.id} className="sb-agent">
+                      <div className={`sb-agent-row sb-agent-team${isActive ? " sb-agent-active" : ""}`}
+                        onClick={() => {
+                          const sessions = meta?.sessions ?? [];
+                          if (sessions.length > 0) onSelectSession(agent.id, sessions[0].session_id);
+                        }}>
+                        <span className="sb-agent-name">{agent.name}</span>
+                        {meta?.busy && <span className="sb-agent-dot sb-agent-busy" />}
+                        <span className="sb-agent-team-tag">team</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </CollapsibleContent>
+          </Collapsible>
+        );
+      })}
 
       {/* Flows section (collapsed by default) */}
       <Collapsible className="sidebar-section">

@@ -781,6 +781,7 @@ fn chat_sdk_stream(
 
 /// POST /agents/{id}/chat — SSE stream for agent chat
 pub(crate) async fn chat(
+    auth: crate::api::local_auth::AuthUser,
     State(state): State<AppState>,
     Path(id): Path<String>,
     Json(body): Json<ChatRequest>,
@@ -792,6 +793,15 @@ pub(crate) async fn chat(
         (StatusCode::NOT_FOUND, Json(json!({ "error": "agent not found" })))
     })?;
 
+    // If team agent, verify sender is a team member
+    if let Some(ref team_id) = agent.team_id {
+        let ts = state.team_store.read().await;
+        if !ts.teams.get(team_id).map(|t| t.members.contains(&auth.user_id)).unwrap_or(false) {
+            return Err((StatusCode::FORBIDDEN, Json(json!({ "error": "Not a member of this team" }))));
+        }
+    }
+
+    let sender_user_id = auth.user_id.clone();
     let prompt = body.prompt;
     let images = body.images.unwrap_or_default();
     if prompt.trim().is_empty() && images.is_empty() {
@@ -1208,6 +1218,8 @@ pub(crate) async fn chat(
     let live_processes = state.live_processes.clone();
     let session_streams = state.session_streams.clone();
     let chat_event_buffers = state.chat_event_buffers.clone();
+    let sender_id_for_bc = sender_user_id.clone();
+    let prompt_for_bc = prompt.chars().take(200).collect::<String>();
 
     let stream = async_stream::stream! {
         use std::process::Stdio;
@@ -1438,6 +1450,16 @@ pub(crate) async fn chat(
                 proc_key = %proc_key_for_stream,
                 "[RECONNECT-DEBUG] Created event buffer"
             );
+        }
+
+        // Broadcast sender attribution for team session spectators
+        {
+            let evt = format!("user_message:{}", serde_json::to_string(&json!({
+                "user_id": sender_id_for_bc, "text": prompt_for_bc,
+            })).unwrap_or_default());
+            let _ = bc_tx.send(evt.clone());
+            let mut bufs = chat_event_buffers.lock().await;
+            if let Some(b) = bufs.get_mut(&proc_key_for_stream) { b.push(evt); }
         }
 
         // Spawn the background reader task

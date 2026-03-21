@@ -37,6 +37,39 @@ export function getServerUrl(): string {
   return getBaseUrl();
 }
 
+// ── Auth token injection ─────────────────────────────────────
+
+let getTokenFn: (() => Promise<string | null>) | null = null;
+
+/** Called by AuthGate to wire token getter into all API requests. */
+export function setAuthTokenGetter(fn: (() => Promise<string | null>) | null) {
+  getTokenFn = fn;
+}
+
+/** Get the current auth token (if available). Used by SSE EventSource callers. */
+export async function getAuthToken(): Promise<string | null> {
+  return getTokenFn ? getTokenFn() : null;
+}
+
+/** Get auth token synchronously from localStorage (for EventSource URLs). */
+export function getAuthTokenSync(): string | null {
+  return localStorage.getItem("cthulu_auth_token");
+}
+
+/** Append ?token= to a URL for EventSource connections (which can't set headers). */
+export function withAuthToken(url: string): string {
+  const token = getAuthTokenSync();
+  if (!token) return url;
+  const sep = url.includes("?") ? "&" : "?";
+  return `${url}${sep}token=${encodeURIComponent(token)}`;
+}
+
+/** Get auth headers for fetch-based streaming (non-apiFetch callers). */
+export async function getAuthHeaders(): Promise<Record<string, string>> {
+  const token = await getAuthToken();
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
 async function apiFetch<T>(
   path: string,
   options: RequestInit = {}
@@ -47,11 +80,21 @@ async function apiFetch<T>(
   log("http", `${method} ${path}`);
   const start = performance.now();
 
+  // Attach auth token if available
+  const authHeaders: Record<string, string> = {};
+  if (getTokenFn) {
+    const token = await getTokenFn();
+    if (token) {
+      authHeaders["Authorization"] = `Bearer ${token}`;
+    }
+  }
+
   try {
     const res = await fetch(url, {
       ...options,
       headers: {
         "Content-Type": "application/json",
+        ...authHeaders,
         ...options.headers,
       },
     });
@@ -59,6 +102,11 @@ async function apiFetch<T>(
     const elapsed = Math.round(performance.now() - start);
 
     if (!res.ok) {
+      // Auto-logout on 401 (expired/invalid token)
+      if (res.status === 401 && getTokenFn) {
+        localStorage.removeItem("cthulu_auth_token");
+        window.location.reload();
+      }
       const body = await res.text();
       log("error", `${method} ${path} -> ${res.status} (${elapsed}ms)`, body);
       throw new Error(`API error ${res.status}: ${body}`);
@@ -326,7 +374,7 @@ export function streamSessionLog(
   onLine: (line: string) => void,
   onDone: () => void
 ): () => void {
-  const url = `${getBaseUrl()}/api/agents/${agentId}/sessions/${sessionId}/stream`;
+  const url = withAuthToken(`${getBaseUrl()}/api/agents/${agentId}/sessions/${sessionId}/stream`);
   const source = new EventSource(url);
 
   source.addEventListener("line", (e: MessageEvent) => {
@@ -540,6 +588,7 @@ export async function createAgent(data: {
   permissions?: string[];
   append_system_prompt?: string | null;
   working_dir?: string | null;
+  team_id?: string | null;
 }): Promise<{ id: string }> {
   return apiFetch<{ id: string }>("/agents", {
     method: "POST",
@@ -586,7 +635,7 @@ export interface ResourceChangeEvent {
 export function subscribeToChanges(
   onEvent: (event: ResourceChangeEvent) => void
 ): () => void {
-  const url = `${getBaseUrl()}/api/changes`;
+  const url = withAuthToken(`${getBaseUrl()}/api/changes`);
   const source = new EventSource(url);
 
   const handler = (e: MessageEvent) => {
@@ -706,4 +755,68 @@ export async function getDashboardSummary(
     method: "POST",
     body: JSON.stringify({ channels }),
   });
+}
+
+// ── Profile ──────────────────────────────────────────────────
+
+export interface UserProfile {
+  id: string;
+  email: string;
+  name: string | null;
+  avatar_url: string | null;
+  created_at: string;
+}
+
+export async function getProfile(): Promise<UserProfile> {
+  return apiFetch<UserProfile>("/auth/me");
+}
+
+export async function updateProfile(data: { name?: string; avatar_url?: string }): Promise<UserProfile> {
+  return apiFetch<UserProfile>("/auth/me", { method: "PUT", body: JSON.stringify(data) });
+}
+
+export interface UserSearchResult {
+  id: string;
+  email: string;
+  name: string | null;
+}
+
+export async function searchUsers(query: string): Promise<{ users: UserSearchResult[] }> {
+  return apiFetch<{ users: UserSearchResult[] }>(`/auth/users/search?q=${encodeURIComponent(query)}`);
+}
+
+// ── Teams ────────────────────────────────────────────────────
+
+export interface TeamMember {
+  id: string;
+  email: string;
+  name: string | null;
+}
+
+export interface Team {
+  id: string;
+  name: string;
+  created_by: string;
+  members: TeamMember[] | string[];
+  created_at: string;
+}
+
+export async function listTeams(): Promise<{ teams: Team[] }> {
+  return apiFetch<{ teams: Team[] }>("/teams");
+}
+
+export async function createTeam(name: string): Promise<{ team: Team }> {
+  return apiFetch<{ team: Team }>("/teams", { method: "POST", body: JSON.stringify({ name }) });
+}
+
+export async function getTeam(id: string): Promise<{ team: Team }> {
+  return apiFetch<{ team: Team }>(`/teams/${id}`);
+}
+
+export async function addTeamMember(teamId: string, email: string): Promise<{ ok: boolean }> {
+  return apiFetch<{ ok: boolean }>(`/teams/${teamId}/members`, { method: "POST", body: JSON.stringify({ email }) });
+}
+
+export async function removeTeamMember(teamId: string, userId: string): Promise<{ ok: boolean }> {
+  return apiFetch<{ ok: boolean }>(`/teams/${teamId}/members/${userId}`, { method: "DELETE" });
 }

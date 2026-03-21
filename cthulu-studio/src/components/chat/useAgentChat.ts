@@ -79,6 +79,15 @@ function applySSEEvent(
         setGitSnapshot(data as MultiRepoSnapshot);
       }
       return false;
+    } else if (event.type === "user_message") {
+      // Team session: another user sent a message — show attribution
+      const sender = data.user_id || "unknown";
+      const text = data.text || "";
+      partsRef.current = [...partsRef.current, {
+        type: "text",
+        text: `[${sender}]: ${text}`,
+      }];
+      return true;
     } else if (event.type === "result") {
       const hasText = partsRef.current.some((p) => p.type === "text");
       if (data.text && !hasText) {

@@ -96,6 +96,9 @@ pub struct Agent {
     /// If true, this agent is only usable as a sub-agent and is hidden from the UI agent list.
     #[serde(default)]
     pub subagent_only: bool,
+    /// When set, this agent belongs to a team. All team members can access it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub team_id: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -214,6 +217,7 @@ impl AgentBuilder<Ready> {
             hooks: self.hooks,
             subagents: self.subagents,
             subagent_only: self.subagent_only,
+            team_id: None,
             created_at: now,
             updated_at: now,
         }

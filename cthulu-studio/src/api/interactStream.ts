@@ -1,4 +1,4 @@
-import { getServerUrl } from "./client";
+import { getServerUrl, getAuthTokenSync } from "./client";
 import { log } from "./logger";
 
 export interface InteractSSEEvent {
@@ -43,9 +43,13 @@ export function startAgentChat(
     body.images = images;
   }
 
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  const token = getAuthTokenSync();
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+
   fetch(url, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers,
     body: JSON.stringify(body),
     signal: controller.signal,
   })
@@ -121,8 +125,13 @@ export function reconnectAgentChat(
   log("http", `GET /agents/${agentId}/sessions/${sessionId}/chat/stream (reconnect)`);
   console.log(`[RECONNECT-DEBUG] interactStream: fetching ${url}`);
 
+  const reconnectHeaders: Record<string, string> = {};
+  const reconnectToken = getAuthTokenSync();
+  if (reconnectToken) reconnectHeaders["Authorization"] = `Bearer ${reconnectToken}`;
+
   fetch(url, {
     method: "GET",
+    headers: reconnectHeaders,
     signal: controller.signal,
   })
     .then(async (response) => {
