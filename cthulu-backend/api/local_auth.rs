@@ -7,7 +7,7 @@
 //! and all requests get a hardcoded "dev_user" identity.
 
 use axum::extract::FromRequestParts;
-use axum::routing::post;
+use axum::routing::{get, post, put};
 use axum::{Json, Router};
 use hyper::header::AUTHORIZATION;
 use hyper::http::request::Parts;
@@ -260,6 +260,8 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/auth/signup", post(signup))
         .route("/auth/login", post(login))
+        .route("/auth/me", get(get_profile).put(update_profile))
+        .route("/auth/users/search", get(search_users))
 }
 
 async fn signup(
@@ -387,6 +389,83 @@ async fn login(
             "user": { "id": user.id, "email": user.email }
         })),
     )
+}
+
+// ── Profile Handlers ─────────────────────────────────────────
+
+async fn get_profile(
+    auth: AuthUser,
+    axum::extract::State(state): axum::extract::State<AppState>,
+) -> (StatusCode, Json<Value>) {
+    let store = state.user_store.read().await;
+    let user = store.users.values().find(|u| u.id == auth.user_id);
+    match user {
+        Some(u) => (StatusCode::OK, Json(json!({
+            "id": u.id, "email": u.email, "name": u.name,
+            "avatar_url": u.avatar_url, "created_at": u.created_at,
+        }))),
+        None => (StatusCode::NOT_FOUND, Json(json!({ "error": "User not found" }))),
+    }
+}
+
+#[derive(Deserialize)]
+struct UpdateProfileRequest {
+    name: Option<String>,
+    avatar_url: Option<String>,
+}
+
+async fn update_profile(
+    auth: AuthUser,
+    axum::extract::State(state): axum::extract::State<AppState>,
+    Json(body): Json<UpdateProfileRequest>,
+) -> (StatusCode, Json<Value>) {
+    let mut store = state.user_store.write().await;
+    let email_key = store.users.iter()
+        .find(|(_, u)| u.id == auth.user_id)
+        .map(|(email, _)| email.clone());
+
+    let Some(email) = email_key else {
+        return (StatusCode::NOT_FOUND, Json(json!({ "error": "User not found" })));
+    };
+    let Some(user) = store.users.get_mut(&email) else {
+        return (StatusCode::NOT_FOUND, Json(json!({ "error": "User not found" })));
+    };
+    if let Some(name) = body.name {
+        user.name = Some(name);
+    }
+    if let Some(avatar_url) = body.avatar_url {
+        user.avatar_url = Some(avatar_url);
+    }
+    let updated = user.clone();
+    let _ = store.save(&state.data_dir);
+
+    (StatusCode::OK, Json(json!({
+        "id": updated.id, "email": updated.email,
+        "name": updated.name, "avatar_url": updated.avatar_url,
+    })))
+}
+
+async fn search_users(
+    _auth: AuthUser,
+    axum::extract::State(state): axum::extract::State<AppState>,
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> (StatusCode, Json<Value>) {
+    let query = params.get("q").map(|s| s.trim().to_lowercase()).unwrap_or_default();
+    if query.is_empty() {
+        return (StatusCode::OK, Json(json!({ "users": [] })));
+    }
+
+    let store = state.user_store.read().await;
+    let results: Vec<Value> = store.users.values()
+        .filter(|u| {
+            u.email.to_lowercase().contains(&query)
+                || u.name.as_ref().map(|n| n.to_lowercase().contains(&query)).unwrap_or(false)
+        })
+        .take(10)
+        .map(|u| json!({ "id": u.id, "email": u.email, "name": u.name }))
+        .collect();
+
+    (StatusCode::OK, Json(json!({ "users": results })))
 }
 
 // ── Tests ────────────────────────────────────────────────────

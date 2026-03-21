@@ -374,6 +374,9 @@ async fn run_server(start_disabled: bool) -> Result<(), Box<dyn Error>> {
         user_store: Arc::new(tokio::sync::RwLock::new(
             crate::api::local_auth::UserStore::load(&base_dir),
         )),
+        team_store: Arc::new(tokio::sync::RwLock::new(
+            crate::api::teams::TeamStore::load(&base_dir),
+        )),
     };
 
     // Start file change watcher (keeps caches in sync with external edits)
