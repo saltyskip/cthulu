@@ -1,12 +1,12 @@
 import type { RunEvent } from "../types/flow";
-import { getServerUrl } from "./client";
+import { getServerUrl, withAuthToken } from "./client";
 
 export function subscribeToRuns(
   flowId: string,
   onEvent: (event: RunEvent) => void,
   onError?: (err: Event) => void
 ): () => void {
-  const url = `${getServerUrl()}/api/flows/${flowId}/runs/live`;
+  const url = withAuthToken(`${getServerUrl()}/api/flows/${flowId}/runs/live`);
   const es = new EventSource(url);
 
   const eventTypes = [

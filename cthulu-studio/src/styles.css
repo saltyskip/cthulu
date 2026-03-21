@@ -1,6 +1,87 @@
 @import "tailwindcss";
 @import "tw-shimmer";
 
+/* ── Auth Gate ────────────────────────────────────────────────── */
+.auth-container {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100vh;
+  background: var(--bg);
+}
+.auth-card {
+  width: 360px;
+  padding: 32px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.auth-title {
+  font-size: 24px;
+  font-weight: 600;
+  color: var(--text);
+  text-align: center;
+  margin-bottom: 4px;
+}
+.auth-subtitle {
+  font-size: 13px;
+  color: var(--text-secondary);
+  text-align: center;
+  margin-bottom: 24px;
+}
+.auth-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.auth-input {
+  width: 100%;
+  padding: 10px 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 13px;
+  font-family: inherit;
+  outline: none;
+  transition: border-color 0.15s;
+  box-sizing: border-box;
+}
+.auth-input:focus { border-color: var(--accent); }
+.auth-input::placeholder { color: var(--text-secondary); opacity: 0.7; }
+.auth-button {
+  width: 100%;
+  padding: 10px;
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+.auth-button:hover { opacity: 0.9; }
+.auth-button:disabled { opacity: 0.5; cursor: not-allowed; }
+.auth-error {
+  color: #ef4444;
+  font-size: 12px;
+  margin: 0;
+}
+.auth-toggle {
+  display: block;
+  width: 100%;
+  margin-top: 16px;
+  padding: 0;
+  background: none;
+  border: none;
+  color: var(--accent);
+  font-size: 12px;
+  cursor: pointer;
+  text-align: center;
+}
+.auth-toggle:hover { text-decoration: underline; }
+
 /* ── Register shadcn color tokens for Tailwind v4 ──────────────────────
    Maps Tailwind utility names (bg-popover, text-muted-foreground, etc.)
    to our :root CSS variables. Without this, bg-popover etc. are transparent. */
