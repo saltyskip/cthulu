@@ -58,6 +58,7 @@ fn api_router() -> Router<AppState> {
         .merge(super::hooks::router())
         .merge(super::dashboard::router())
         .merge(super::local_auth::router())
+        .merge(super::teams::router())
 }
 
 async fn not_found(req: axum::extract::Request) -> impl IntoResponse {
