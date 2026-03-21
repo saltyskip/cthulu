@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import AuthGate from "./components/AuthGate";
 import * as api from "./api/client";
 import { log } from "./api/logger";
 import { subscribeToRuns } from "./api/runStream";
@@ -318,6 +319,7 @@ export default function App() {
   };
 
   return (
+    <AuthGate>
     <div className="app">
       <TopBar
         activeView={activeView}
@@ -457,5 +459,6 @@ export default function App() {
         </DialogContent>
       </Dialog>
     </div>
+    </AuthGate>
   );
 }
