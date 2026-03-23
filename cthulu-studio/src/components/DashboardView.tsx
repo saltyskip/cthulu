@@ -79,6 +79,7 @@ export default function DashboardView() {
   const [showChannelDialog, setShowChannelDialog] = useState(false);
   const [channelInput, setChannelInput] = useState("");
   const [fetchedAt, setFetchedAt] = useState<string | null>(null);
+  const [range, setRange] = useState("today");
 
   // Summary state
   const [summaries, setSummaries] = useState<ChannelSummary[]>([]);
@@ -119,23 +120,22 @@ export default function DashboardView() {
     }
   }, []);
 
-  const loadMessages = useCallback(async () => {
+  const loadMessages = useCallback(async (r?: string) => {
     setLoading(true);
     setError(null);
     try {
-      const data = await getDashboardMessages();
+      const data = await getDashboardMessages(r ?? range);
       setChannels(data.channels || []);
       setFetchedAt(data.fetched_at || null);
     } catch (e) {
       const msg = (e as Error).message;
-      // Don't show error if just no channels configured
       if (!msg.includes("No channels configured")) {
         setError(msg);
       }
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [range]);
 
   const loadSummary = useCallback(async (channelData: SlackChannelMessages[]) => {
     if (channelData.length === 0) return;
@@ -212,7 +212,18 @@ export default function DashboardView() {
 
       <div className="dashboard-content">
         <div className="dashboard-section-header">
-          <h2>Today&apos;s Messages</h2>
+          <h2>Messages</h2>
+          <select
+            className="dashboard-range-select"
+            value={range}
+            onChange={(e) => { setRange(e.target.value); loadMessages(e.target.value); }}
+          >
+            <option value="today">Today</option>
+            <option value="1d">Past 24h</option>
+            <option value="2d">Past 2 days</option>
+            <option value="7d">Past 7 days</option>
+            <option value="30d">Past 30 days</option>
+          </select>
           <div className="dashboard-actions">
             {fetchedAt && (
               <span className="dashboard-fetched-at">

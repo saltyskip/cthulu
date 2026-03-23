@@ -17,8 +17,8 @@ use tokio::process::Command;
 use crate::api::AppState;
 
 /// Timeout for the Python sidecar (Slack message fetching).
-/// 60s to account for --with-threads: each threaded message incurs an API call + 0.4s sleep.
-const SIDECAR_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+/// 120s to account for --with-threads: each threaded message incurs an API call + rate-limit sleep.
+const SIDECAR_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
 /// Timeout for the Claude CLI (AI summary generation).
 const CLAUDE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
 
@@ -123,8 +123,12 @@ pub(crate) async fn save_config(
     }
 }
 
-/// GET /api/dashboard/messages
-pub(crate) async fn get_messages(State(state): State<AppState>) -> impl IntoResponse {
+/// GET /api/dashboard/messages?range=today|1d|2d|7d|30d
+pub(crate) async fn get_messages(
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    let range = params.get("range").map(|s| s.as_str()).unwrap_or("today");
     let config = read_config(&state);
 
     if config.channels.is_empty() {
@@ -183,26 +187,29 @@ pub(crate) async fn get_messages(State(state): State<AppState>) -> impl IntoResp
     // so this is safe. The Python script splits on ',' to reconstruct the list.
     let channel_list = config.channels.join(",");
 
-    let result = tokio::time::timeout(
-        SIDECAR_TIMEOUT,
-        Command::new("python3")
-            .arg(&script_path)
-            .arg("--json")
-            .arg("--channels-only")
-            .arg("--channel")
-            .arg(&channel_list)
-            .arg("--all")
-            .arg("--quiet")
-            .arg("--with-threads")
-            // Always inject as SLACK_USER_TOKEN regardless of the original env var name.
-            // The Python script reads SLACK_USER_TOKEN directly (line 278), so we resolve
-            // the configured env var on the Rust side and re-inject under the canonical name.
-            .env("SLACK_USER_TOKEN", &token)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .output(),
-    )
-    .await;
+    let mut cmd = Command::new("python3");
+    cmd.arg(&script_path)
+        .arg("--json")
+        .arg("--channels-only")
+        .arg("--channel")
+        .arg(&channel_list)
+        .arg("--all")
+        .arg("--quiet")
+        .arg("--with-threads")
+        .env("SLACK_USER_TOKEN", &token)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+
+    // Map range param to Python script flags
+    match range {
+        "1d" => { cmd.arg("--days").arg("1"); }
+        "2d" => { cmd.arg("--days").arg("2"); }
+        "7d" => { cmd.arg("--days").arg("7"); }
+        "30d" => { cmd.arg("--days").arg("30"); }
+        _ => {} // "today" is the Python script's default
+    }
+
+    let result = tokio::time::timeout(SIDECAR_TIMEOUT, cmd.output()).await;
 
     let result = match result {
         Ok(r) => r,
@@ -595,8 +602,8 @@ mod tests {
 
     #[test]
     fn timeout_constants_are_reasonable() {
-        assert!(SIDECAR_TIMEOUT.as_secs() >= 30, "sidecar timeout too short for threaded fetches");
-        assert!(SIDECAR_TIMEOUT.as_secs() <= 120, "sidecar timeout too long");
+        assert!(SIDECAR_TIMEOUT.as_secs() >= 60, "sidecar timeout too short for threaded fetches");
+        assert!(SIDECAR_TIMEOUT.as_secs() <= 180, "sidecar timeout too long");
         assert!(CLAUDE_TIMEOUT.as_secs() >= 60, "claude timeout too short");
         assert!(CLAUDE_TIMEOUT.as_secs() <= 300, "claude timeout too long");
     }
