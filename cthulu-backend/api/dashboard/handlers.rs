@@ -123,8 +123,12 @@ pub(crate) async fn save_config(
     }
 }
 
-/// GET /api/dashboard/messages
-pub(crate) async fn get_messages(State(state): State<AppState>) -> impl IntoResponse {
+/// GET /api/dashboard/messages?range=today|1d|2d|7d|30d
+pub(crate) async fn get_messages(
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    let range = params.get("range").map(|s| s.as_str()).unwrap_or("today");
     let config = read_config(&state);
 
     if config.channels.is_empty() {
@@ -183,26 +187,29 @@ pub(crate) async fn get_messages(State(state): State<AppState>) -> impl IntoResp
     // so this is safe. The Python script splits on ',' to reconstruct the list.
     let channel_list = config.channels.join(",");
 
-    let result = tokio::time::timeout(
-        SIDECAR_TIMEOUT,
-        Command::new("python3")
-            .arg(&script_path)
-            .arg("--json")
-            .arg("--channels-only")
-            .arg("--channel")
-            .arg(&channel_list)
-            .arg("--all")
-            .arg("--quiet")
-            .arg("--with-threads")
-            // Always inject as SLACK_USER_TOKEN regardless of the original env var name.
-            // The Python script reads SLACK_USER_TOKEN directly (line 278), so we resolve
-            // the configured env var on the Rust side and re-inject under the canonical name.
-            .env("SLACK_USER_TOKEN", &token)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .output(),
-    )
-    .await;
+    let mut cmd = Command::new("python3");
+    cmd.arg(&script_path)
+        .arg("--json")
+        .arg("--channels-only")
+        .arg("--channel")
+        .arg(&channel_list)
+        .arg("--all")
+        .arg("--quiet")
+        .arg("--with-threads")
+        .env("SLACK_USER_TOKEN", &token)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+
+    // Map range param to Python script flags
+    match range {
+        "1d" => { cmd.arg("--days").arg("1"); }
+        "2d" => { cmd.arg("--days").arg("2"); }
+        "7d" => { cmd.arg("--days").arg("7"); }
+        "30d" => { cmd.arg("--days").arg("30"); }
+        _ => {} // "today" is the Python script's default
+    }
+
+    let result = tokio::time::timeout(SIDECAR_TIMEOUT, cmd.output()).await;
 
     let result = match result {
         Ok(r) => r,

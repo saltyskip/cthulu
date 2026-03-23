@@ -695,8 +695,9 @@ export async function saveDashboardConfig(
   });
 }
 
-export async function getDashboardMessages(): Promise<DashboardMessages> {
-  return apiFetch<DashboardMessages>("/dashboard/messages");
+export async function getDashboardMessages(range?: string): Promise<DashboardMessages> {
+  const q = range && range !== "today" ? `?range=${range}` : "";
+  return apiFetch<DashboardMessages>(`/dashboard/messages${q}`);
 }
 
 export async function getDashboardSummary(

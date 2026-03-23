@@ -5325,6 +5325,19 @@ button:disabled {
   margin: 0;
 }
 
+.dashboard-range-select {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  font-size: 12px;
+  padding: 4px 8px;
+  cursor: pointer;
+  outline: none;
+  margin-left: 8px;
+}
+.dashboard-range-select:focus { border-color: var(--accent); }
+
 .dashboard-actions {
   display: flex;
   align-items: center;
