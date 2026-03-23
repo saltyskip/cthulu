@@ -17,8 +17,8 @@ use tokio::process::Command;
 use crate::api::AppState;
 
 /// Timeout for the Python sidecar (Slack message fetching).
-/// 60s to account for --with-threads: each threaded message incurs an API call + 0.4s sleep.
-const SIDECAR_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+/// 120s to account for --with-threads: each threaded message incurs an API call + rate-limit sleep.
+const SIDECAR_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
 /// Timeout for the Claude CLI (AI summary generation).
 const CLAUDE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
 
@@ -595,8 +595,8 @@ mod tests {
 
     #[test]
     fn timeout_constants_are_reasonable() {
-        assert!(SIDECAR_TIMEOUT.as_secs() >= 30, "sidecar timeout too short for threaded fetches");
-        assert!(SIDECAR_TIMEOUT.as_secs() <= 120, "sidecar timeout too long");
+        assert!(SIDECAR_TIMEOUT.as_secs() >= 60, "sidecar timeout too short for threaded fetches");
+        assert!(SIDECAR_TIMEOUT.as_secs() <= 180, "sidecar timeout too long");
         assert!(CLAUDE_TIMEOUT.as_secs() >= 60, "claude timeout too short");
         assert!(CLAUDE_TIMEOUT.as_secs() <= 300, "claude timeout too long");
     }
