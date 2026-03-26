@@ -1,0 +1,58 @@
+meta:
+  title: "PR Review → Slack"
+  description: "Automated code review of merged PRs, results posted to Slack"
+  tags: [github, pr, review, slack, cron]
+  estimated_cost: "~$0.05 / run"
+  icon: "🔍"
+
+name: pr-review-slack
+description: Daily review of merged PRs — Claude analyzes code changes, finds issues, and posts a summary to Slack
+enabled: false
+
+trigger:
+  kind: cron
+  config:
+    schedule: "0 10 * * 1-5"
+    working_dir: "."
+
+sources:
+  - kind: github-merged-prs
+    label: "GitHub: merged PRs (last 24h)"
+    config:
+      repos:
+        - "your-org/your-repo"
+      since_days: 1
+
+executors:
+  - kind: claude-code
+    label: "Claude: pr-review"
+    config:
+      prompt: |
+        You are a senior code reviewer. Review these recently merged pull requests.
+
+        PRs:
+        {{content}}
+
+        For each PR, provide:
+        1. **Summary** — what changed in 1-2 sentences
+        2. **Risk Level** — 🟢 Low / 🟡 Medium / 🔴 High
+        3. **Concerns** — any bugs, security issues, or missed edge cases (or "None")
+
+        Then provide an overall summary:
+
+        *🔍 Daily PR Review — {{timestamp}}*
+        • Total PRs reviewed: N
+        • Risk breakdown: 🟢 X / 🟡 Y / 🔴 Z
+        • Action items: (list anything that needs follow-up)
+
+        Be concise. Flag only real issues, not style preferences.
+      permissions:
+        - Read
+        - Bash
+        - Grep
+        - Glob
+
+sinks:
+  - kind: slack
+    config:
+      webhook_url_env: SLACK_WEBHOOK_URL

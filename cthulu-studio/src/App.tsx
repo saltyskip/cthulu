@@ -1,8 +1,8 @@
-import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { useEffect, useCallback, useRef, useMemo } from "react";
 import * as api from "./api/client";
 import { log } from "./api/logger";
 import { subscribeToRuns } from "./api/runStream";
-import type { Flow, FlowNode, FlowEdge, FlowSummary, NodeTypeSchema, RunEvent, ActiveView } from "./types/flow";
+import type { Flow, FlowNode, FlowEdge, NodeTypeSchema } from "./types/flow";
 import TopBar from "./components/TopBar";
 import Sidebar from "./components/Sidebar";
 import FlowWorkspaceView from "./components/FlowWorkspaceView";
@@ -10,6 +10,7 @@ import AgentDetailView from "./components/AgentDetailView";
 import PromptEditorView from "./components/PromptEditorView";
 import DashboardView from "./components/DashboardView";
 import { useGlobalPermissions } from "./hooks/useGlobalPermissions";
+import AuthGate from "./components/AuthGate";
 import { type CanvasHandle } from "./components/Canvas";
 
 import {
@@ -21,41 +22,59 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { useFlowDispatch } from "./hooks/useFlowDispatch";
+import { useFlowStore } from "./stores/useFlowStore";
+import { useAgentStore } from "./stores/useAgentStore";
+import { useViewStore } from "./stores/useViewStore";
+import { useState } from "react";
 
 export default function App() {
   const globalPermissions = useGlobalPermissions();
-  const [flows, setFlows] = useState<FlowSummary[]>([]);
-  const [activeFlowId, setActiveFlowId] = useState<string | null>(null);
-  const [nodeTypes, setNodeTypes] = useState<NodeTypeSchema[]>([]);
 
-  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
-  const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
-  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
-  const [selectedAgentName, setSelectedAgentName] = useState<string | null>(null);
-  const [visitedAgents, setVisitedAgents] = useState<Map<string, { name: string; sessionId: string }>>(new Map());
-  const [agentListKey, setAgentListKey] = useState(0);
-  const [selectedPromptId, setSelectedPromptId] = useState<string | null>(null);
-  const [promptListKey, setPromptListKey] = useState(0);
-  const [showSettings, setShowSettings] = useState(false);
-  const [runEvents, setRunEvents] = useState<RunEvent[]>([]);
-  const [nodeRunStatus, setNodeRunStatus] = useState<Record<string, "running" | "completed" | "failed">>({});
-  const [runLogOpen, setRunLogOpen] = useState(false);
-  const [activeView, setActiveView] = useState<ActiveView>("flow-editor");
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  // --- Zustand stores ---
+  const flows = useFlowStore((s) => s.flows);
+  const activeFlowId = useFlowStore((s) => s.activeFlowId);
+  const setActiveFlowId = useFlowStore((s) => s.setActiveFlowId);
+  const nodeTypes = useFlowStore((s) => s.nodeTypes);
+  const runEvents = useFlowStore((s) => s.runEvents);
+  const nodeRunStatus = useFlowStore((s) => s.nodeRunStatus);
+  const runLogOpen = useFlowStore((s) => s.runLogOpen);
+  const setRunLogOpen = useFlowStore((s) => s.setRunLogOpen);
+  const addRunEvent = useFlowStore((s) => s.addRunEvent);
+  const loadFlows = useFlowStore((s) => s.loadFlows);
+  const loadNodeTypes = useFlowStore((s) => s.loadNodeTypes);
+  const toggleFlowEnabled = useFlowStore((s) => s.toggleFlowEnabled);
+
+  const selectedAgentId = useAgentStore((s) => s.selectedAgentId);
+  const selectedSessionId = useAgentStore((s) => s.selectedSessionId);
+  const selectedAgentName = useAgentStore((s) => s.selectedAgentName);
+  const visitedAgents = useAgentStore((s) => s.visitedAgents);
+  const agentListKey = useAgentStore((s) => s.agentListKey);
+  const selectSession = useAgentStore((s) => s.selectSession);
+  const removeVisitedAgent = useAgentStore((s) => s.removeVisited);
+  const bumpAgentListKey = useAgentStore((s) => s.bumpAgentListKey);
+
+  const activeView = useViewStore((s) => s.activeView);
+  const setActiveView = useViewStore((s) => s.setActiveView);
+  const selectedNodeId = useViewStore((s) => s.selectedNodeId);
+  const setSelectedNodeId = useViewStore((s) => s.setSelectedNodeId);
+  const selectedPromptId = useViewStore((s) => s.selectedPromptId);
+  const setSelectedPromptId = useViewStore((s) => s.setSelectedPromptId);
+  const promptListKey = useViewStore((s) => s.promptListKey);
+  const bumpPromptListKey = useViewStore((s) => s.bumpPromptListKey);
+  const sidebarCollapsed = useViewStore((s) => s.sidebarCollapsed);
+  const setSidebarCollapsed = useViewStore((s) => s.setSidebarCollapsed);
+  const showSettings = useViewStore((s) => s.showSettings);
+  const setShowSettings = useViewStore((s) => s.setShowSettings);
 
   // --- Central flow state (extracted hook) ---
   const activeFlowIdRef = useRef(activeFlowId);
   activeFlowIdRef.current = activeFlowId;
 
-  const loadFlows = async () => {
-    try { setFlows(await api.listFlows()); } catch { /* logged */ }
-  };
-
   const dispatchApi = useMemo(() => ({
     onSaveComplete: loadFlows,
     updateFlow: api.updateFlow,
     getFlow: api.getFlow,
-  }), []);
+  }), [loadFlows]);
 
   const {
     canonicalFlow,
@@ -124,38 +143,18 @@ export default function App() {
 
   // --- SSE run event subscription ---
   const clearTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const handleRunEvent = useCallback((event: RunEvent) => {
-    setRunEvents((prev) => {
-      const next = [...prev, event];
-      return next.length > 500 ? next.slice(-500) : next;
-    });
-
-    // Auto-open run log when a run starts
-    if (event.event_type === "run_started") {
-      if (clearTimer.current) clearTimeout(clearTimer.current);
-      setNodeRunStatus({});
-      setRunLogOpen(true);
-    }
-
-    if (event.node_id) {
-      if (event.event_type === "node_started") {
-        setNodeRunStatus((prev) => ({ ...prev, [event.node_id!]: "running" }));
-      } else if (event.event_type === "node_completed") {
-        setNodeRunStatus((prev) => ({ ...prev, [event.node_id!]: "completed" }));
-      } else if (event.event_type === "node_failed") {
-        setNodeRunStatus((prev) => ({ ...prev, [event.node_id!]: "failed" }));
-      }
-    }
+  const handleRunEvent = useCallback((event: import("./types/flow").RunEvent) => {
+    addRunEvent(event);
 
     if (event.event_type === "run_completed" || event.event_type === "run_failed") {
-      clearTimer.current = setTimeout(() => setNodeRunStatus({}), 10000);
+      if (clearTimer.current) clearTimeout(clearTimer.current);
+      clearTimer.current = setTimeout(() => useFlowStore.getState().setNodeRunStatus({}), 10000);
     }
-  }, []);
+  }, [addRunEvent]);
 
   useEffect(() => {
     if (!activeFlowId) return;
-    setRunEvents([]);
-    setNodeRunStatus({});
+    useFlowStore.getState().clearRunEvents();
     const cleanup = subscribeToRuns(activeFlowId, handleRunEvent);
     return cleanup;
   }, [activeFlowId, handleRunEvent]);
@@ -169,14 +168,13 @@ export default function App() {
     log("info", `Server URL: ${api.getServerUrl()}`);
     loadFlows();
     loadNodeTypes();
-  }, []);
+  }, [loadFlows, loadNodeTypes]);
 
   // --- File change subscription (SSE) ---
   useEffect(() => {
     const cleanup = api.subscribeToChanges((event) => {
       if (event.resource_type === "flow") {
         loadFlows();
-        // If the active flow was updated externally, re-fetch and dispatch
         if (activeFlowIdRef.current && event.resource_id === activeFlowIdRef.current && event.change_type === "updated") {
           api.getFlow(activeFlowIdRef.current).then((flow) => {
             dispatchFlowUpdate("server", {
@@ -190,22 +188,18 @@ export default function App() {
           }).catch(() => { /* logged */ });
         }
       } else if (event.resource_type === "agent") {
-        setAgentListKey((k) => k + 1);
+        bumpAgentListKey();
       } else if (event.resource_type === "prompt") {
-        setPromptListKey((k) => k + 1);
+        bumpPromptListKey();
       }
     });
     return cleanup;
-  }, [dispatchFlowUpdate]);
-
-  const loadNodeTypes = async () => {
-    try { setNodeTypes(await api.getNodeTypes()); } catch { /* logged */ }
-  };
+  }, [dispatchFlowUpdate, loadFlows, bumpAgentListKey, bumpPromptListKey]);
 
   const handleReconnect = useCallback(() => {
     loadFlows();
     loadNodeTypes();
-  }, []);
+  }, [loadFlows, loadNodeTypes]);
 
   const selectFlow = async (id: string) => {
     try {
@@ -218,16 +212,10 @@ export default function App() {
   };
 
   const handleSelectSession = useCallback(async (agentId: string, sessionId: string) => {
-    try {
-      const agent = await api.getAgent(agentId);
-      setSelectedAgentId(agentId);
-      setSelectedSessionId(sessionId);
-      setSelectedAgentName(agent.name);
-      setVisitedAgents((prev) => new Map(prev).set(agentId, { name: agent.name, sessionId }));
-      setSelectedNodeId(null);
-      setActiveView("agent-workspace");
-    } catch { /* logged */ }
-  }, []);
+    await selectSession(agentId, sessionId);
+    setSelectedNodeId(null);
+    setActiveView("agent-workspace");
+  }, [selectSession, setSelectedNodeId, setActiveView]);
 
   const handleBackToFlow = () => {
     setActiveView("flow-editor");
@@ -253,18 +241,14 @@ export default function App() {
     } catch { /* logged */ }
   };
 
-  // --- Canvas change callback ---
   const handleCanvasChange = useCallback((updates: { nodes: FlowNode[]; edges: FlowEdge[] }) => {
     dispatchFlowUpdate("canvas", updates);
   }, [dispatchFlowUpdate]);
 
-  // --- Editor change callback ---
   const handleEditorChange = useCallback((text: string) => {
     try {
       const parsed = JSON.parse(text) as Flow;
       if (!Array.isArray(parsed.nodes) || !Array.isArray(parsed.edges)) return;
-
-      // Strip version — version is server-controlled only
       dispatchFlowUpdate("editor", {
         nodes: parsed.nodes,
         edges: parsed.edges,
@@ -278,7 +262,7 @@ export default function App() {
 
   const handleSelectionChange = useCallback((nodeId: string | null) => {
     setSelectedNodeId(nodeId);
-  }, []);
+  }, [setSelectedNodeId]);
 
   const handleRename = async (name: string) => {
     if (!activeFlowMeta || !activeFlowId) return;
@@ -295,19 +279,13 @@ export default function App() {
   };
 
   const handleToggleFlowEnabled = async (flowId: string) => {
-    const flow = flows.find((f) => f.id === flowId);
-    if (!flow) return;
-    const newEnabled = !flow.enabled;
-    setFlows((prev) =>
-      prev.map((f) => (f.id === flowId ? { ...f, enabled: newEnabled } : f))
-    );
+    await toggleFlowEnabled(flowId);
     if (activeFlowMeta && activeFlowMeta.id === flowId) {
-      dispatchFlowUpdate("app", { enabled: newEnabled });
+      const flow = useFlowStore.getState().flows.find((f) => f.id === flowId);
+      if (flow) {
+        dispatchFlowUpdate("app", { enabled: flow.enabled });
+      }
     }
-    try {
-      await api.updateFlow(flowId, { enabled: newEnabled });
-      loadFlows();
-    } catch { /* logged */ }
   };
 
   const handleSaveSettings = () => {
@@ -318,6 +296,7 @@ export default function App() {
   };
 
   return (
+    <AuthGate>
     <div className="app">
       <TopBar
         activeView={activeView}
@@ -349,7 +328,6 @@ export default function App() {
             onSelectSession={handleSelectSession}
             agentListKey={agentListKey}
             onAgentCreated={(id) => {
-              // When a new agent is created, create its first session and select it
               (async () => {
                 try {
                   const result = await api.newAgentSession(id);
@@ -384,7 +362,7 @@ export default function App() {
             selectedNodeId={selectedNodeId}
             nodeRunStatus={nodeRunStatus}
             runEvents={runEvents}
-            onRunEventsClear={() => setRunEvents([])}
+            onRunEventsClear={() => useFlowStore.getState().clearRunEvents()}
             runLogOpen={runLogOpen}
             onRunLogClose={() => setRunLogOpen(false)}
           />
@@ -395,12 +373,12 @@ export default function App() {
             promptId={selectedPromptId}
             onDeleted={() => {
               setSelectedPromptId(null);
-              setPromptListKey((k) => k + 1);
+              bumpPromptListKey();
               setActiveView("flow-editor");
             }}
             onBack={handleBackToFlow}
             onTitleChanged={() => {
-              setPromptListKey((k) => k + 1);
+              bumpPromptListKey();
             }}
           />
         )}
@@ -420,11 +398,8 @@ export default function App() {
               onClearHookDebug={globalPermissions.clearHookDebugEvents}
               fileChanges={globalPermissions.fileChanges}
               onDeleted={() => {
-                setVisitedAgents((prev) => { const next = new Map(prev); next.delete(agentId); return next; });
-                setSelectedAgentId(null);
-                setSelectedSessionId(null);
-                setSelectedAgentName(null);
-                setAgentListKey((k) => k + 1);
+                removeVisitedAgent(agentId);
+                bumpAgentListKey();
                 setActiveView("flow-editor");
               }}
             />
@@ -457,5 +432,6 @@ export default function App() {
         </DialogContent>
       </Dialog>
     </div>
+    </AuthGate>
   );
 }

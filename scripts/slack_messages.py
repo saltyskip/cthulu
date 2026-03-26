@@ -141,7 +141,7 @@ class SlackFetcher:
             except (SlackApiError, RuntimeError) as e:
                 print(f"  Skipping {name}: {e}", file=sys.stderr)
                 continue
-            time.sleep(0.4)
+            time.sleep(0.2)
 
             msgs = resp.get("messages", [])
             if resp.get("has_more", False):
@@ -193,7 +193,7 @@ class SlackFetcher:
                         }
                         for r in raw_replies
                     ]
-                    time.sleep(0.4)
+                    time.sleep(0.2)
                 formatted.append(msg_data)
             results.append({
                 "channel": name,

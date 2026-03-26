@@ -299,6 +299,9 @@ impl FlowScheduler {
             sandbox_provider: Some(self.sandbox_provider.clone()),
             agent_repo: Some(self.agent_repo.clone()),
             session_bridge: Some(self.build_session_bridge()),
+            ssh_port: None,
+            vm_host: None,
+            user_env: std::collections::HashMap::new(),
         };
 
         runner
@@ -380,6 +383,9 @@ async fn cron_loop(
             sandbox_provider: Some(sandbox_provider.clone()),
             agent_repo: Some(agent_repo.clone()),
             session_bridge: Some(session_bridge.clone()),
+            ssh_port: None,
+            vm_host: None,
+            user_env: std::collections::HashMap::new(),
         };
 
         if let Err(e) = runner.execute(&flow, &*flow_repo, None).await {
@@ -635,6 +641,9 @@ async fn github_pr_loop(
                     sandbox_provider: Some(sandbox_provider.clone()),
                     agent_repo: Some(agent_repo.clone()),
                     session_bridge: Some(session_bridge.clone()),
+                    ssh_port: None,
+                    vm_host: None,
+                    user_env: std::collections::HashMap::new(),
                 };
 
                 match runner

@@ -10,6 +10,7 @@ pub mod middleware;
 pub mod prompts;
 mod routes;
 pub mod scheduler;
+pub mod teams;
 pub mod templates;
 pub mod user_context;
 
@@ -263,31 +264,6 @@ pub fn save_sessions(
     }
 }
 
-/// A persistent Claude CLI process kept alive between messages.
-/// Uses `--input-format stream-json` so we can write multiple prompts to stdin.
-pub struct LiveClaudeProcess {
-    /// Writer end of the child's stdin.
-    pub stdin: tokio::process::ChildStdin,
-    /// Reader that yields stdout lines.
-    pub stdout_lines: tokio::sync::mpsc::UnboundedReceiver<String>,
-    /// Reader that yields stderr lines.
-    pub stderr_lines: tokio::sync::mpsc::UnboundedReceiver<String>,
-    /// The child process handle (for kill).
-    pub child: tokio::process::Child,
-    /// Whether the process is currently processing a message.
-    pub busy: bool,
-}
-
-impl Drop for LiveClaudeProcess {
-    fn drop(&mut self) {
-        if let Err(e) = self.child.start_kill() {
-            tracing::trace!(error = %e, "LiveClaudeProcess kill on drop");
-        } else {
-            tracing::info!("killed LiveClaudeProcess on drop");
-        }
-    }
-}
-
 #[derive(Clone)]
 pub struct AppState {
     pub github_client: Option<Arc<dyn GithubClient>>,
@@ -306,8 +282,6 @@ pub struct AppState {
     pub data_dir: PathBuf,
     /// Path to the `static/` directory (template YAML files live in `static/workflows/`).
     pub static_dir: PathBuf,
-    /// Persistent Claude CLI processes keyed by session key (flow_id::node_id).
-    pub live_processes: Arc<Mutex<HashMap<String, LiveClaudeProcess>>>,
     /// Sandbox provider for isolated executor runs.
     pub sandbox_provider: Arc<dyn SandboxProvider>,
     /// Claude OAuth access token (read from macOS Keychain or CLAUDE_CODE_OAUTH_TOKEN env).
@@ -340,12 +314,65 @@ pub struct AppState {
     pub jwt_secret: Arc<String>,
     /// In-memory user store (email/password accounts).
     pub user_store: Arc<RwLock<local_auth::UserStore>>,
+    /// In-memory team store (teams.json).
+    pub team_store: Arc<RwLock<teams::TeamStore>>,
+    /// Optional MongoDB connection for session persistence (when STORAGE=mongo).
+    pub mongo_db: Option<Arc<crate::storage::mongo::MongoDb>>,
 }
 
 impl AppState {
-    /// Save sessions to sessions.yaml.
+    /// Save all sessions — to MongoDB if available, else to YAML file.
+    /// Prefer `save_session_to_db` when only one key changed.
     pub fn save_sessions_to_disk(&self, sessions: &HashMap<String, FlowSessions>) {
-        save_sessions(&self.sessions_path, sessions);
+        if let Some(ref db) = self.mongo_db {
+            let db = db.clone();
+            let sessions = sessions.clone();
+            tokio::spawn(async move {
+                db.save_sessions(&sessions).await;
+            });
+        } else {
+            save_sessions(&self.sessions_path, sessions);
+        }
+    }
+
+    /// Save a single session entry. Uses MongoDB single-doc upsert when available,
+    /// falls back to full YAML write otherwise.
+    pub fn save_session_to_db(&self, key: &str, flow_sessions: &FlowSessions) {
+        if let Some(ref db) = self.mongo_db {
+            let db = db.clone();
+            let key = key.to_string();
+            let fs = flow_sessions.clone();
+            tokio::spawn(async move {
+                db.save_session(&key, &fs).await;
+            });
+        } else {
+            // File backend has no single-key write — fall back to full save.
+            // Caller must pass the full sessions map for this path.
+            // This is best-effort; callers in the file-backend path should
+            // continue using save_sessions_to_disk.
+            tracing::debug!("save_session_to_db: no MongoDB, skipping (use save_sessions_to_disk for file backend)");
+        }
+    }
+
+    /// Save a single session if MongoDB is available, otherwise save all sessions to disk.
+    pub fn save_session_or_all(&self, key: &str, flow_sessions: &FlowSessions, all_sessions: &HashMap<String, FlowSessions>) {
+        if self.mongo_db.is_some() {
+            self.save_session_to_db(key, flow_sessions);
+        } else {
+            save_sessions(&self.sessions_path, all_sessions);
+        }
+    }
+
+    /// Save user store to both file and MongoDB (if available).
+    pub fn save_user_store(&self, store: &local_auth::UserStore) {
+        let _ = store.save(&self.data_dir);
+        if let Some(ref db) = self.mongo_db {
+            let db = db.clone();
+            let users = store.users.clone();
+            tokio::spawn(async move {
+                db.save_users(&users).await;
+            });
+        }
     }
 }
 

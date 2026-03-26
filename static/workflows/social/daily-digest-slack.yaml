@@ -1,0 +1,75 @@
+meta:
+  title: "Daily Digest → Slack"
+  description: "Morning digest of news, GitHub PRs, and market data delivered to Slack"
+  tags: [daily, digest, slack, rss, github, cron]
+  estimated_cost: "~$0.03 / run"
+  icon: "📬"
+
+name: daily-digest-slack
+description: Automated morning digest — aggregates RSS feeds, GitHub activity, and market data, then sends a summary to Slack via webhook
+enabled: false
+
+trigger:
+  kind: cron
+  config:
+    schedule: "0 9 * * 1-5"
+    working_dir: "."
+
+sources:
+  - kind: rss
+    label: "RSS: Hacker News"
+    config:
+      url: "https://hnrss.org/frontpage"
+      limit: 10
+      keywords:
+        - AI
+        - crypto
+        - startup
+        - funding
+
+  - kind: rss
+    label: "RSS: TechCrunch"
+    config:
+      url: "https://techcrunch.com/feed/"
+      limit: 10
+
+  - kind: github-merged-prs
+    label: "GitHub: merged PRs"
+    config:
+      repos:
+        - "your-org/your-repo"
+      since_days: 1
+
+executors:
+  - kind: claude-code
+    label: "Claude: daily-digest"
+    config:
+      prompt: |
+        You are a daily briefing assistant. Create a concise morning digest from the data below.
+
+        Data:
+        {{content}}
+
+        Format the output as a Slack message using markdown:
+
+        *📬 Daily Digest — {{timestamp}}*
+
+        *🔥 Top Stories*
+        • (3-5 most important news items with one-line summaries)
+
+        *🔀 Code Activity*
+        • (Merged PRs summary — what shipped yesterday)
+
+        *💡 Key Takeaways*
+        • (2-3 actionable insights or things to watch)
+
+        Keep it under 500 words. Be punchy and useful.
+      permissions:
+        - Read
+        - Bash
+        - Grep
+
+sinks:
+  - kind: slack
+    config:
+      webhook_url_env: SLACK_WEBHOOK_URL

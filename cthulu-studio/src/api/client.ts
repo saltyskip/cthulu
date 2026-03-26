@@ -12,7 +12,31 @@ import type {
   AgentSummary,
 } from "../types/flow";
 
-const DEFAULT_BASE_URL = "http://localhost:8081";
+// In production (served by the Rust backend), use same origin.
+// In dev (Vite on :5173), fall back to localhost:8082.
+const DEFAULT_BASE_URL = typeof window !== "undefined" && window.location.port !== "5173"
+  ? window.location.origin
+  : "http://localhost:8082";
+
+// ── Auth token injection ─────────────────────────────────────
+
+let _authTokenGetter: (() => string | null) | null = null;
+
+export function setAuthTokenGetter(fn: () => string | null) {
+  _authTokenGetter = fn;
+}
+
+export function getAuthTokenSync(): string | null {
+  return _authTokenGetter ? _authTokenGetter() : localStorage.getItem("cthulu_auth_token");
+}
+
+/** Append ?token= query param to a URL (for EventSource connections). */
+export function withAuthToken(url: string): string {
+  const token = getAuthTokenSync();
+  if (!token) return url;
+  const sep = url.includes("?") ? "&" : "?";
+  return `${url}${sep}token=${encodeURIComponent(token)}`;
+}
 
 function ensureProtocol(url: string): string {
   const trimmed = url.trim().replace(/\/+$/, "");
@@ -23,6 +47,10 @@ function ensureProtocol(url: string): string {
 }
 
 function getBaseUrl(): string {
+  // In production (non-dev port), use relative paths — same origin
+  if (typeof window !== "undefined" && window.location.port !== "5173") {
+    return "";
+  }
   const stored = localStorage.getItem("cthulu_server_url");
   return stored ? ensureProtocol(stored) : DEFAULT_BASE_URL;
 }
@@ -48,15 +76,28 @@ async function apiFetch<T>(
   const start = performance.now();
 
   try {
+    const authHeaders: Record<string, string> = {};
+    const authToken = getAuthTokenSync();
+    if (authToken) {
+      authHeaders["Authorization"] = `Bearer ${authToken}`;
+    }
+
     const res = await fetch(url, {
       ...options,
       headers: {
         "Content-Type": "application/json",
+        ...authHeaders,
         ...options.headers,
       },
     });
 
     const elapsed = Math.round(performance.now() - start);
+
+    if (res.status === 401) {
+      localStorage.removeItem("cthulu_auth_token");
+      window.location.reload();
+      throw new Error("Unauthorized — session expired");
+    }
 
     if (!res.ok) {
       const body = await res.text();
@@ -326,7 +367,7 @@ export function streamSessionLog(
   onLine: (line: string) => void,
   onDone: () => void
 ): () => void {
-  const url = `${getBaseUrl()}/api/agents/${agentId}/sessions/${sessionId}/stream`;
+  const url = withAuthToken(`${getBaseUrl()}/api/agents/${agentId}/sessions/${sessionId}/stream`);
   const source = new EventSource(url);
 
   source.addEventListener("line", (e: MessageEvent) => {
@@ -540,6 +581,7 @@ export async function createAgent(data: {
   permissions?: string[];
   append_system_prompt?: string | null;
   working_dir?: string | null;
+  team_id?: string;
 }): Promise<{ id: string }> {
   return apiFetch<{ id: string }>("/agents", {
     method: "POST",
@@ -586,7 +628,7 @@ export interface ResourceChangeEvent {
 export function subscribeToChanges(
   onEvent: (event: ResourceChangeEvent) => void
 ): () => void {
-  const url = `${getBaseUrl()}/api/changes`;
+  const url = withAuthToken(`${getBaseUrl()}/api/changes`);
   const source = new EventSource(url);
 
   const handler = (e: MessageEvent) => {
@@ -637,73 +679,159 @@ export async function checkConnection(): Promise<boolean> {
   }
 }
 
-// ── Dashboard ──────────────────────────────────────────
+// ── Dashboard (Task Runner) ──────────────────────────────
 
-export interface DashboardConfig {
-  channels: string[];
-  slack_token_env: string;
-  first_run: boolean;
+export interface TaskTemplate {
+  id: string;
+  name: string;
+  description: string;
+  prompt: string;
+  category: string;
+  created_at: string;
 }
 
-export interface SlackMessage {
-  time: string;
-  user: string;
-  text: string;
-  ts: string;
-  thread_ts?: string;
-  reply_count?: number;
-  replies?: SlackMessage[];
+export interface TaskRun {
+  id: string;
+  task_name: string;
+  prompt: string;
+  status: "running" | "completed" | "failed";
+  result?: string;
+  error?: string;
+  started_at: string;
+  finished_at?: string;
 }
 
-export interface SlackChannelMessages {
-  channel: string;
-  count: number;
-  messages: SlackMessage[];
+export interface TaskRunResponse {
+  run_id: string;
+  status: string;
+  result?: string;
+  error?: string;
+  started_at: string;
+  finished_at: string;
 }
 
-export interface DashboardMessages {
-  channels: SlackChannelMessages[];
-  fetched_at: string;
+export async function listTaskTemplates(): Promise<{ tasks: TaskTemplate[] }> {
+  return apiFetch<{ tasks: TaskTemplate[] }>("/dashboard/tasks");
 }
 
-export interface ChannelSummary {
-  channel: string;
-  summary: string;
-}
-
-export interface DashboardSummaryResponse {
-  summaries: ChannelSummary[];
-  generated_at: string;
-  raw?: boolean;
-}
-
-export async function getDashboardConfig(): Promise<DashboardConfig> {
-  return apiFetch<DashboardConfig>("/dashboard/config");
-}
-
-export async function saveDashboardConfig(
-  channels: string[],
-  slackTokenEnv?: string
-): Promise<{ ok: boolean }> {
-  return apiFetch<{ ok: boolean }>("/dashboard/config", {
+export async function saveTaskTemplate(task: Partial<TaskTemplate>): Promise<{ task: TaskTemplate }> {
+  return apiFetch<{ task: TaskTemplate }>("/dashboard/tasks", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      channels,
-      slack_token_env: slackTokenEnv || "SLACK_USER_TOKEN",
-    }),
+    body: JSON.stringify(task),
   });
 }
 
-export async function getDashboardMessages(): Promise<DashboardMessages> {
-  return apiFetch<DashboardMessages>("/dashboard/messages");
+export async function deleteTaskTemplate(id: string): Promise<{ deleted: boolean }> {
+  return apiFetch<{ deleted: boolean }>(`/dashboard/tasks/${id}`, {
+    method: "DELETE",
+  });
 }
 
-export async function getDashboardSummary(
-  channels: SlackChannelMessages[]
-): Promise<DashboardSummaryResponse> {
-  return apiFetch<DashboardSummaryResponse>("/dashboard/summary", {
+export async function runTask(prompt: string, taskName?: string): Promise<TaskRunResponse> {
+  return apiFetch<TaskRunResponse>("/dashboard/run", {
     method: "POST",
-    body: JSON.stringify({ channels }),
+    body: JSON.stringify({ prompt, task_name: taskName || "" }),
+  });
+}
+
+export async function getTaskHistory(): Promise<{ history: TaskRun[] }> {
+  return apiFetch<{ history: TaskRun[] }>("/dashboard/history");
+}
+
+export interface ExtractTodosResponse {
+  run_id: string;
+  status: string;
+  files: string[];
+  todos?: string;
+  error?: string;
+}
+
+export async function extractTodos(
+  repo: string,
+  path: string,
+  branch?: string
+): Promise<ExtractTodosResponse> {
+  return apiFetch<ExtractTodosResponse>("/dashboard/extract-todos", {
+    method: "POST",
+    body: JSON.stringify({ repo, path, branch: branch || undefined }),
+  });
+}
+
+// ── Profile ──────────────────────────────────────────────
+
+export interface UserProfile {
+  id: string;
+  email: string;
+  name?: string;
+  avatar_url?: string;
+  has_api_key?: boolean;
+  has_oauth_token?: boolean;
+  vm_id?: number;
+  ssh_port?: number;
+}
+
+export async function getProfile(): Promise<UserProfile> {
+  return apiFetch<UserProfile>("/auth/me");
+}
+
+export async function updateProfile(data: { name?: string; avatar_url?: string; anthropic_api_key?: string }): Promise<UserProfile> {
+  return apiFetch<UserProfile>("/auth/me", {
+    method: "PUT",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function searchUsers(query: string): Promise<{ users: UserProfile[] }> {
+  return apiFetch<{ users: UserProfile[] }>(`/auth/users/search?q=${encodeURIComponent(query)}`);
+}
+
+// ── Teams ────────────────────────────────────────────────
+
+export interface TeamSummary {
+  id: string;
+  name: string;
+  member_count: number;
+  created_at: string;
+}
+
+export interface TeamMember {
+  user_id: string;
+  email?: string;
+  name?: string;
+}
+
+export interface TeamDetail {
+  id: string;
+  name: string;
+  created_by: string;
+  members: TeamMember[];
+  created_at: string;
+}
+
+export async function listTeams(): Promise<{ teams: TeamSummary[] }> {
+  return apiFetch<{ teams: TeamSummary[] }>("/teams");
+}
+
+export async function createTeam(name: string): Promise<{ id: string }> {
+  return apiFetch<{ id: string }>("/teams", {
+    method: "POST",
+    body: JSON.stringify({ name }),
+  });
+}
+
+export async function getTeam(id: string): Promise<TeamDetail> {
+  return apiFetch<TeamDetail>(`/teams/${id}`);
+}
+
+export async function addTeamMember(teamId: string, email: string): Promise<{ ok: boolean }> {
+  return apiFetch<{ ok: boolean }>(`/teams/${teamId}/members`, {
+    method: "POST",
+    body: JSON.stringify({ email }),
+  });
+}
+
+export async function removeTeamMember(teamId: string, userId: string): Promise<{ ok: boolean }> {
+  return apiFetch<{ ok: boolean }>(`/teams/${teamId}/members/${userId}`, {
+    method: "DELETE",
   });
 }

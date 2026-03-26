@@ -35,6 +35,24 @@ pub struct StoredUser {
     pub password_hash: String,
     pub name: Option<String>,
     pub avatar_url: Option<String>,
+    /// Personal Anthropic API key. When set, personal agents use this key
+    /// instead of the server-level ANTHROPIC_API_KEY env var.
+    /// Stored as-is (not hashed) because we need the plaintext to call the API.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub anthropic_api_key: Option<String>,
+    /// Personal Claude OAuth token (sk-ant-oat01-*). Used for Claude Code CLI sessions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub oauth_token: Option<String>,
+    /// User's dedicated VM ID from VM Manager.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vm_id: Option<u32>,
+    /// SSH port for the user's VM.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ssh_port: Option<u16>,
+    /// Per-user environment variables (SLACK_WEBHOOK_URL, etc).
+    /// Available on the VM (via .bashrc) and on the Cthulu backend (for sinks).
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub env_vars: HashMap<String, String>,
     pub created_at: String,
 }
 
@@ -93,10 +111,19 @@ struct Claims {
 
 const JWT_EXPIRY_HOURS: i64 = 24;
 
-/// Load or generate the JWT signing secret (256-bit CSPRNG, base64url-encoded).
-/// The secret file is created with mode 0600 on Unix.
-/// If the file is deleted, a new secret is generated and all existing JWTs are invalidated.
+/// Load JWT signing secret. Priority:
+/// 1. JWT_SECRET env var (for cloud — shared across replicas via Vault)
+/// 2. File at {data_dir}/jwt_secret (for local dev)
+/// 3. Generate new random secret (first run)
 pub fn load_or_create_jwt_secret(data_dir: &PathBuf) -> String {
+    // Cloud: use env var so all pods share the same secret
+    if let Ok(secret) = std::env::var("JWT_SECRET") {
+        if !secret.trim().is_empty() {
+            tracing::info!("JWT secret loaded from env");
+            return secret.trim().to_string();
+        }
+    }
+
     let path = data_dir.join("jwt_secret");
     match std::fs::read_to_string(&path) {
         Ok(secret) if !secret.trim().is_empty() => secret.trim().to_string(),
@@ -257,9 +284,16 @@ struct LoginRequest {
 }
 
 pub fn router() -> Router<AppState> {
+    use axum::routing::{get, put};
     Router::new()
         .route("/auth/signup", post(signup))
         .route("/auth/login", post(login))
+        .route("/auth/vm-status", get(vm_status))
+        .route("/auth/provision-vm", get(provision_vm_sse))
+        .route("/auth/vm-env", post(set_vm_env))
+        .route("/auth/google", post(google_oauth_callback))
+        .route("/auth/me", get(get_profile).put(update_profile))
+        .route("/auth/users/search", get(search_users))
 }
 
 async fn signup(
@@ -314,6 +348,11 @@ async fn signup(
         password_hash,
         name: None,
         avatar_url: None,
+        anthropic_api_key: None,
+        oauth_token: None,
+        vm_id: None,
+        ssh_port: None,
+        env_vars: HashMap::new(),
         created_at: chrono::Utc::now().to_rfc3339(),
     };
 
@@ -328,9 +367,7 @@ async fn signup(
     };
 
     store.insert(user.clone());
-    if let Err(e) = store.save(&state.data_dir) {
-        tracing::error!(error = %e, "failed to persist user store");
-    }
+    state.save_user_store(&store);
     drop(store);
 
     (
@@ -389,6 +426,646 @@ async fn login(
     )
 }
 
+// ── VM Provisioning ──────────────────────────────────────────
+
+#[derive(Deserialize)]
+struct ProvisionVmRequest {
+    /// Claude OAuth token to inject into the VM.
+    oauth_token: String,
+}
+
+/// GET /api/auth/vm-status — check if user's VM is running.
+/// Returns: { has_vm, vm_id, running, terminal_url } or { has_vm: false }
+/// If VM exists in profile but is dead on VM Manager, clears vm_id from profile.
+async fn vm_status(
+    auth: AuthUser,
+    axum::extract::State(state): axum::extract::State<AppState>,
+) -> Json<Value> {
+    let (vm_id, ssh_port) = {
+        let store = state.user_store.read().await;
+        let user = store.users.values().find(|u| u.id == auth.user_id);
+        match user {
+            Some(u) => (u.vm_id, u.ssh_port),
+            None => return Json(json!({ "has_vm": false })),
+        }
+    };
+
+    let Some(vm_id) = vm_id else {
+        return Json(json!({ "has_vm": false }));
+    };
+
+    // Check if VM is actually running
+    let vm_client = crate::vm_manager::VmManagerClient::new((*state.http_client).clone());
+    match vm_client.get_vm(vm_id).await {
+        Ok(Some(vm)) => {
+            let terminal_url = vm.web_terminal.unwrap_or_else(|| {
+                let host = vm_client.ssh_host();
+                format!("http://{}:{}", host, vm.web_port)
+            });
+            Json(json!({
+                "has_vm": true,
+                "vm_id": vm.vm_id,
+                "ssh_port": vm.ssh_port,
+                "running": true,
+                "terminal_url": terminal_url,
+            }))
+        }
+        Ok(None) => {
+            // VM was deleted externally — clear from profile
+            tracing::warn!(vm_id, user_id = %auth.user_id, "VM not found, clearing from profile");
+            {
+                let mut store = state.user_store.write().await;
+                if let Some(user) = store.users.values_mut().find(|u| u.id == auth.user_id) {
+                    user.vm_id = None;
+                    user.ssh_port = None;
+                }
+                state.save_user_store(&store);
+            }
+            Json(json!({ "has_vm": false, "was_deleted": true }))
+        }
+        Err(e) => {
+            // Can't reach VM Manager — report unknown
+            tracing::warn!(vm_id, error = %e, "VM Manager unreachable during status check");
+            Json(json!({
+                "has_vm": true,
+                "vm_id": vm_id,
+                "ssh_port": ssh_port,
+                "running": false,
+                "error": "VM Manager unreachable",
+            }))
+        }
+    }
+}
+
+/// POST /api/auth/vm-env — set environment variables on the user's VM.
+/// Writes to /root/.env on the VM (sourced by claude via .bashrc).
+#[derive(Deserialize)]
+struct SetVmEnvRequest {
+    /// Key-value pairs to set on the VM.
+    env: std::collections::HashMap<String, String>,
+}
+
+async fn set_vm_env(
+    auth: AuthUser,
+    axum::extract::State(state): axum::extract::State<AppState>,
+    Json(body): Json<SetVmEnvRequest>,
+) -> (StatusCode, Json<Value>) {
+    // Validate keys
+    for key in body.env.keys() {
+        if !key.chars().all(|c| c.is_alphanumeric() || c == '_') {
+            return (StatusCode::BAD_REQUEST, Json(json!({ "error": format!("Invalid env var name: {key}") })));
+        }
+    }
+
+    // 1. Save to user profile in MongoDB (available to backend sinks)
+    {
+        let mut store = state.user_store.write().await;
+        if let Some(user) = store.users.values_mut().find(|u| u.id == auth.user_id) {
+            for (key, value) in &body.env {
+                user.env_vars.insert(key.clone(), value.clone());
+            }
+        }
+        state.save_user_store(&store);
+    }
+
+    // 2. Also write to VM via SSH (available to claude CLI on the VM)
+    let ssh_port = {
+        let store = state.user_store.read().await;
+        store.users.values()
+            .find(|u| u.id == auth.user_id)
+            .and_then(|u| u.ssh_port)
+    };
+
+    if let Some(ssh_port) = ssh_port {
+        let vm_client = crate::vm_manager::VmManagerClient::new((*state.http_client).clone());
+        let mut env_lines = Vec::new();
+        for (key, value) in &body.env {
+            env_lines.push(format!("export {}='{}'", key, value.replace('\'', "'\\''")));
+        }
+        let cmd = format!(
+            "cat >> /root/.bashrc << 'CTHULU_ENV'\n# Cthulu env vars\n{}\nCTHULU_ENV",
+            env_lines.join("\n")
+        );
+        if let Ok(mut child) = vm_client.ssh_stream(ssh_port, &cmd).await {
+            let _ = child.wait().await;
+        }
+    }
+
+    let keys: Vec<&String> = body.env.keys().collect();
+    tracing::info!(user_id = %auth.user_id, keys = ?keys, "env vars saved to profile + VM");
+    (StatusCode::OK, Json(json!({ "ok": true, "keys": keys })))
+}
+
+/// POST /api/auth/provision-vm — create a dedicated VM for the user.
+/// Called during onboarding after the user sets their OAuth token.
+/// Stores the VM ID and SSH port in the user profile.
+async fn provision_vm(
+    auth: AuthUser,
+    axum::extract::State(state): axum::extract::State<AppState>,
+    Json(body): Json<ProvisionVmRequest>,
+) -> (StatusCode, Json<Value>) {
+    // Check if user already has a VM
+    {
+        let store = state.user_store.read().await;
+        if let Some(user) = store.users.values().find(|u| u.id == auth.user_id) {
+            if user.vm_id.is_some() {
+                return (StatusCode::CONFLICT, Json(json!({ "error": "VM already provisioned", "vm_id": user.vm_id })));
+            }
+        }
+    }
+
+    // Check total VM count (max 5)
+    let vm_client = crate::vm_manager::VmManagerClient::new((*state.http_client).clone());
+    match vm_client.list_vms().await {
+        Ok(vms) if vms.len() >= 5 => {
+            return (StatusCode::TOO_MANY_REQUESTS, Json(json!({ "error": "Maximum 5 VMs reached. Contact admin." })));
+        }
+        Err(e) => {
+            return (StatusCode::BAD_GATEWAY, Json(json!({ "error": format!("VM Manager unreachable: {e}") })));
+        }
+        _ => {}
+    }
+
+    // Create VM
+    let vm = match vm_client.create_vm(&body.oauth_token, "nano").await {
+        Ok(vm) => vm,
+        Err(e) => {
+            tracing::error!(error = %e, "VM creation failed");
+            return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": format!("VM creation failed: {e}") })));
+        }
+    };
+
+    tracing::info!(vm_id = vm.vm_id, ssh_port = ?vm.ssh_port, user_id = %auth.user_id, "VM provisioned for user");
+
+    // Store VM info + OAuth token in user profile
+    {
+        let mut store = state.user_store.write().await;
+        if let Some(user) = store.users.values_mut().find(|u| u.id == auth.user_id) {
+            user.vm_id = Some(vm.vm_id);
+            user.ssh_port = Some(vm.ssh_port);
+            user.oauth_token = Some(body.oauth_token);
+        }
+        state.save_user_store(&store);
+    }
+
+    (StatusCode::CREATED, Json(json!({
+        "vm_id": vm.vm_id,
+        "ssh_port": vm.ssh_port,
+        "status": "created",
+    })))
+}
+
+/// GET /api/auth/provision-vm — SSE stream that creates a VM and sends progress events.
+async fn provision_vm_sse(
+    auth: AuthUser,
+    axum::extract::State(state): axum::extract::State<AppState>,
+) -> axum::response::sse::Sse<impl futures::stream::Stream<Item = Result<axum::response::sse::Event, std::convert::Infallible>>> {
+    use axum::response::sse::Event;
+
+    let stream = async_stream::stream! {
+        // Step 1: Check if already has VM
+        {
+            let store = state.user_store.read().await;
+            if let Some(user) = store.users.values().find(|u| u.id == auth.user_id) {
+                if let Some(vm_id) = user.vm_id {
+                    yield Ok(Event::default().event("done").data(
+                        serde_json::to_string(&json!({"vm_id": vm_id, "ssh_port": user.ssh_port, "status": "already_exists"})).unwrap()
+                    ));
+                    return;
+                }
+            }
+        }
+
+        yield Ok(Event::default().event("progress").data(
+            serde_json::to_string(&json!({"step": "checking", "message": "Checking VM availability..."})).unwrap()
+        ));
+
+        // Step 2: Check VM count
+        let vm_client = crate::vm_manager::VmManagerClient::new((*state.http_client).clone());
+        match vm_client.list_vms().await {
+            Ok(vms) if vms.len() >= 5 => {
+                yield Ok(Event::default().event("error").data(
+                    serde_json::to_string(&json!({"message": "Maximum 5 VMs reached. Contact admin."})).unwrap()
+                ));
+                return;
+            }
+            Err(e) => {
+                yield Ok(Event::default().event("error").data(
+                    serde_json::to_string(&json!({"message": format!("VM Manager unreachable: {e}")})).unwrap()
+                ));
+                return;
+            }
+            _ => {}
+        }
+
+        yield Ok(Event::default().event("progress").data(
+            serde_json::to_string(&json!({"step": "creating", "message": "Creating your VM..."})).unwrap()
+        ));
+
+        // Step 3: Create VM
+        let vm = match vm_client.create_vm("pending", "nano").await {
+            Ok(vm) => vm,
+            Err(e) => {
+                yield Ok(Event::default().event("error").data(
+                    serde_json::to_string(&json!({"message": format!("VM creation failed: {e}")})).unwrap()
+                ));
+                return;
+            }
+        };
+
+        tracing::info!(vm_id = vm.vm_id, ssh_port = ?vm.ssh_port, user_id = %auth.user_id, "VM provisioned");
+
+        yield Ok(Event::default().event("progress").data(
+            serde_json::to_string(&json!({"step": "saving", "message": format!("VM #{} created, saving...", vm.vm_id)})).unwrap()
+        ));
+
+        // Step 4: Store in user profile
+        {
+            let mut store = state.user_store.write().await;
+            if let Some(user) = store.users.values_mut().find(|u| u.id == auth.user_id) {
+                user.vm_id = Some(vm.vm_id);
+                user.ssh_port = Some(vm.ssh_port);
+            }
+            state.save_user_store(&store);
+        }
+
+        // Step 5: Copy prompts to the VM
+        yield Ok(Event::default().event("progress").data(
+            serde_json::to_string(&json!({"step": "prompts", "message": "Copying workflow prompts to VM..."})).unwrap()
+        ));
+
+        let host = vm_client.ssh_host();
+        let prompts_dir = std::path::Path::new("/app/prompts");
+        if prompts_dir.exists() {
+            // Create prompts directory on VM
+            if let Ok(mut child) = vm_client.ssh_stream(vm.ssh_port, "mkdir -p /root/prompts").await {
+                let _ = child.wait().await;
+            }
+
+            // SCP each prompt file
+            if let Ok(entries) = std::fs::read_dir(prompts_dir) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.extension().map_or(false, |e| e == "md") {
+                        let filename = path.file_name().unwrap_or_default().to_string_lossy();
+                        let scp_result = tokio::process::Command::new("scp")
+                            .args([
+                                "-o", "StrictHostKeyChecking=no",
+                                "-o", "UserKnownHostsFile=/dev/null",
+                                "-P", &vm.ssh_port.to_string(),
+                                &path.to_string_lossy(),
+                                &format!("root@{host}:/root/prompts/{filename}"),
+                            ])
+                            .output()
+                            .await;
+
+                        match scp_result {
+                            Ok(out) if out.status.success() => {
+                                tracing::info!(file = %filename, "copied prompt to VM");
+                            }
+                            Ok(out) => {
+                                tracing::warn!(file = %filename, stderr = %String::from_utf8_lossy(&out.stderr), "scp failed");
+                            }
+                            Err(e) => {
+                                tracing::warn!(file = %filename, error = %e, "scp error");
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Use terminal URL from VM Manager response, or build one
+        let terminal_url = vm.web_terminal.unwrap_or_else(|| {
+            format!("http://{}:{}", host, vm.web_port)
+        });
+
+        // Build prompt list for the user
+        let prompt_files: Vec<String> = std::fs::read_dir("/app/prompts")
+            .ok()
+            .map(|entries| {
+                entries.flatten()
+                    .filter(|e| e.path().extension().map_or(false, |ext| ext == "md"))
+                    .map(|e| e.file_name().to_string_lossy().to_string())
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        yield Ok(Event::default().event("done").data(
+            serde_json::to_string(&json!({
+                "vm_id": vm.vm_id,
+                "ssh_port": vm.ssh_port,
+                "status": "created",
+                "terminal_url": terminal_url,
+                "prompts_copied": prompt_files,
+            })).unwrap()
+        ));
+    };
+
+    axum::response::sse::Sse::new(stream)
+        .keep_alive(axum::response::sse::KeepAlive::new().interval(std::time::Duration::from_secs(5)))
+}
+
+// ── Google OAuth ─────────────────────────────────────────────
+
+#[derive(Deserialize)]
+struct GoogleOAuthRequest {
+    /// Authorization code from Google's OAuth consent flow.
+    code: String,
+    /// The redirect_uri used in the frontend (must match exactly).
+    redirect_uri: String,
+}
+
+/// POST /api/auth/google — exchange Google OAuth code for Cthulu JWT.
+///
+/// Env vars required:
+///   GOOGLE_CLIENT_ID     — OAuth client ID from Google Cloud Console
+///   GOOGLE_CLIENT_SECRET — OAuth client secret
+async fn google_oauth_callback(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    Json(body): Json<GoogleOAuthRequest>,
+) -> (StatusCode, Json<Value>) {
+    let client_id = match std::env::var("GOOGLE_CLIENT_ID") {
+        Ok(v) if !v.is_empty() => v,
+        _ => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": "Google OAuth not configured (GOOGLE_CLIENT_ID missing)" }))),
+    };
+    let client_secret = match std::env::var("GOOGLE_CLIENT_SECRET") {
+        Ok(v) if !v.is_empty() => v,
+        _ => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": "Google OAuth not configured (GOOGLE_CLIENT_SECRET missing)" }))),
+    };
+
+    // 1. Exchange authorization code for tokens
+    let token_resp = match state.http_client
+        .post("https://oauth2.googleapis.com/token")
+        .form(&[
+            ("code", body.code.as_str()),
+            ("client_id", client_id.as_str()),
+            ("client_secret", client_secret.as_str()),
+            ("redirect_uri", body.redirect_uri.as_str()),
+            ("grant_type", "authorization_code"),
+        ])
+        .send()
+        .await
+    {
+        Ok(r) => r,
+        Err(e) => return (StatusCode::BAD_GATEWAY, Json(json!({ "error": format!("Google token exchange failed: {e}") }))),
+    };
+
+    let token_data: Value = match token_resp.json().await {
+        Ok(v) => v,
+        Err(e) => return (StatusCode::BAD_GATEWAY, Json(json!({ "error": format!("Invalid Google token response: {e}") }))),
+    };
+
+    let access_token = match token_data["access_token"].as_str() {
+        Some(t) => t.to_string(),
+        None => {
+            let err = token_data["error_description"].as_str().unwrap_or("unknown error");
+            return (StatusCode::BAD_REQUEST, Json(json!({ "error": format!("Google OAuth error: {err}") })));
+        }
+    };
+
+    // 2. Fetch user profile from Google
+    let userinfo_resp = match state.http_client
+        .get("https://www.googleapis.com/oauth2/v2/userinfo")
+        .header("Authorization", format!("Bearer {access_token}"))
+        .send()
+        .await
+    {
+        Ok(r) => r,
+        Err(e) => return (StatusCode::BAD_GATEWAY, Json(json!({ "error": format!("Google userinfo failed: {e}") }))),
+    };
+
+    let userinfo: Value = match userinfo_resp.json().await {
+        Ok(v) => v,
+        Err(e) => return (StatusCode::BAD_GATEWAY, Json(json!({ "error": format!("Invalid Google userinfo: {e}") }))),
+    };
+
+    let email = match userinfo["email"].as_str() {
+        Some(e) => e.to_lowercase(),
+        None => return (StatusCode::BAD_REQUEST, Json(json!({ "error": "Google account has no email" }))),
+    };
+    let name = userinfo["name"].as_str().map(String::from);
+    let avatar = userinfo["picture"].as_str().map(String::from);
+
+    // 3. Find or create user in our store
+    let mut store = state.user_store.write().await;
+
+    let user = if let Some(existing) = store.find_by_email(&email).cloned() {
+        // Update name/avatar from Google if not set locally
+        if let Some(u) = store.users.get_mut(&email) {
+            if u.name.is_none() { u.name = name.clone(); }
+            if u.avatar_url.is_none() { u.avatar_url = avatar.clone(); }
+        }
+        existing
+    } else {
+        // Create new user (no password — Google-only account)
+        let new_user = StoredUser {
+            id: uuid::Uuid::new_v4().to_string().replace('-', "_"),
+            email: email.clone(),
+            password_hash: "GOOGLE_OAUTH".to_string(), // marker: no password login
+            name,
+            avatar_url: avatar,
+            anthropic_api_key: None,
+            oauth_token: None,
+            vm_id: None,
+            ssh_port: None,
+            env_vars: HashMap::new(),
+            created_at: chrono::Utc::now().to_rfc3339(),
+        };
+        store.insert(new_user.clone());
+        new_user
+    };
+
+    state.save_user_store(&store);
+    drop(store);
+
+    // 4. Issue Cthulu JWT
+    let token = match issue_jwt(&user, &state.jwt_secret) {
+        Ok(t) => t,
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e }))),
+    };
+
+    (StatusCode::OK, Json(json!({
+        "token": token,
+        "user": { "id": user.id, "email": user.email, "name": user.name, "avatar_url": user.avatar_url }
+    })))
+}
+
+// ── Profile + Search ─────────────────────────────────────────
+
+/// GET /api/auth/me — get current user profile
+async fn get_profile(
+    auth: AuthUser,
+    axum::extract::State(state): axum::extract::State<AppState>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let store = state.user_store.read().await;
+    let user = store
+        .users
+        .values()
+        .find(|u| u.id == auth.user_id)
+        .ok_or_else(|| {
+            (StatusCode::NOT_FOUND, Json(json!({ "error": "User not found" })))
+        })?;
+
+    Ok(Json(json!({
+        "id": user.id,
+        "email": user.email,
+        "name": user.name,
+        "avatar_url": user.avatar_url,
+        "has_api_key": user.anthropic_api_key.is_some(),
+        "has_oauth_token": user.oauth_token.is_some(),
+        "vm_id": user.vm_id,
+        "ssh_port": user.ssh_port,
+    })))
+}
+
+#[derive(Deserialize)]
+struct UpdateProfileRequest {
+    name: Option<String>,
+    avatar_url: Option<String>,
+    /// Set personal Anthropic API key. Send empty string to clear.
+    anthropic_api_key: Option<String>,
+    /// Set personal Claude OAuth token (sk-ant-oat01-*). Send empty string to clear.
+    oauth_token: Option<String>,
+}
+
+/// PUT /api/auth/me — update current user profile
+async fn update_profile(
+    auth: AuthUser,
+    axum::extract::State(state): axum::extract::State<AppState>,
+    Json(body): Json<UpdateProfileRequest>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let mut store = state.user_store.write().await;
+    let user = store
+        .users
+        .values_mut()
+        .find(|u| u.id == auth.user_id)
+        .ok_or_else(|| {
+            (StatusCode::NOT_FOUND, Json(json!({ "error": "User not found" })))
+        })?;
+
+    if let Some(name) = body.name {
+        user.name = Some(name);
+    }
+    if let Some(avatar_url) = body.avatar_url {
+        user.avatar_url = if avatar_url.is_empty() { None } else { Some(avatar_url) };
+    }
+    if let Some(api_key) = body.anthropic_api_key {
+        user.anthropic_api_key = if api_key.is_empty() { None } else { Some(api_key) };
+    }
+    if let Some(token) = body.oauth_token {
+        user.oauth_token = if token.is_empty() { None } else { Some(token) };
+    }
+
+    let updated = json!({
+        "id": user.id,
+        "email": user.email,
+        "name": user.name,
+        "avatar_url": user.avatar_url,
+        "has_api_key": user.anthropic_api_key.is_some(),
+        "has_oauth_token": user.oauth_token.is_some(),
+        "vm_id": user.vm_id,
+        "ssh_port": user.ssh_port,
+    });
+
+    state.save_user_store(&store);
+
+    Ok(Json(updated))
+}
+
+/// GET /api/auth/users/search?q=query — search users by name or email
+async fn search_users(
+    _auth: AuthUser,
+    axum::extract::State(state): axum::extract::State<AppState>,
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> Json<Value> {
+    let query = params.get("q").map(|s| s.to_lowercase()).unwrap_or_default();
+    if query.is_empty() {
+        return Json(json!({ "users": [] }));
+    }
+
+    let store = state.user_store.read().await;
+    let results: Vec<Value> = store
+        .users
+        .values()
+        .filter(|u| {
+            u.email.to_lowercase().contains(&query)
+                || u.name.as_deref().unwrap_or("").to_lowercase().contains(&query)
+        })
+        .take(10)
+        .map(|u| {
+            json!({
+                "id": u.id,
+                "email": u.email,
+                "name": u.name,
+            })
+        })
+        .collect();
+
+    Json(json!({ "users": results }))
+}
+
+// ── API Key Resolution ──────────────────────────────────────
+
+/// Resolve which Anthropic API key to use for an agent session.
+///
+/// Priority:
+/// 1. If the agent has a `team_id` → use the server env `ANTHROPIC_API_KEY` (team-level key)
+/// 2. If the user has a personal `anthropic_api_key` set → use that
+/// 3. Fall back to server env `ANTHROPIC_API_KEY`
+/// 4. Fall back to the existing OAuth token from Keychain
+///
+/// Resolved credentials for an agent session.
+pub struct ResolvedCredentials {
+    /// API key (sk-ant-api03-*) — set as ANTHROPIC_API_KEY
+    pub api_key: Option<String>,
+    /// OAuth token (sk-ant-oat01-*) — set as CLAUDE_CODE_OAUTH_TOKEN
+    pub oauth_token: Option<String>,
+}
+
+/// Resolve which credentials to use for an agent session.
+///
+/// Priority:
+/// 1. User's OAuth token (personal agents)
+/// 2. User's API key (personal agents)
+/// 3. Server env CLAUDE_CODE_OAUTH_TOKEN
+/// 4. Server env ANTHROPIC_API_KEY
+pub async fn resolve_credentials(
+    state: &AppState,
+    user_id: &str,
+    agent_team_id: Option<&str>,
+) -> ResolvedCredentials {
+    // Team agent → use server-level credentials
+    if agent_team_id.is_some() {
+        return ResolvedCredentials {
+            api_key: std::env::var("ANTHROPIC_API_KEY").ok().filter(|k| !k.is_empty()),
+            oauth_token: std::env::var("CLAUDE_CODE_OAUTH_TOKEN").ok().filter(|k| !k.is_empty()),
+        };
+    }
+
+    // Personal agent → try user's credentials
+    {
+        let store = state.user_store.read().await;
+        if let Some(user) = store.users.values().find(|u| u.id == user_id) {
+            let has_oauth = user.oauth_token.as_ref().map_or(false, |t| !t.is_empty());
+            let has_key = user.anthropic_api_key.as_ref().map_or(false, |k| !k.is_empty());
+
+            if has_oauth || has_key {
+                return ResolvedCredentials {
+                    api_key: user.anthropic_api_key.clone().filter(|k| !k.is_empty()),
+                    oauth_token: user.oauth_token.clone().filter(|t| !t.is_empty()),
+                };
+            }
+        }
+    }
+
+    // Fall back to server-level credentials
+    ResolvedCredentials {
+        api_key: std::env::var("ANTHROPIC_API_KEY").ok().filter(|k| !k.is_empty()),
+        oauth_token: std::env::var("CLAUDE_CODE_OAUTH_TOKEN").ok().filter(|k| !k.is_empty()),
+    }
+}
+
 // ── Tests ────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -444,6 +1121,10 @@ mod tests {
             password_hash: "fake".into(),
             name: None,
             avatar_url: None,
+            anthropic_api_key: None,
+            oauth_token: None,
+            vm_id: None,
+            ssh_port: None,
             created_at: "2026-01-01T00:00:00Z".into(),
         }
     }

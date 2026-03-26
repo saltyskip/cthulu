@@ -1,3 +1,4 @@
+mod agent_pool;
 mod agent_sdk;
 mod agents;
 mod config;
@@ -6,9 +7,13 @@ mod git;
 mod github;
 mod prompts;
 mod sandbox;
+mod slack;
+mod storage;
 mod api;
 mod tasks;
 mod templates;
+mod vm_manager;
+mod vm_monitor;
 mod watcher;
 
 use anyhow::{Context, Result};
@@ -120,30 +125,89 @@ async fn run_server(start_disabled: bool) -> Result<(), Box<dyn Error>> {
         .unwrap_or_else(|| std::path::PathBuf::from("."))
         .join(".cthulu");
 
-    // Initialize flow repository (flows + runs)
-    // Keep concrete Arc for the file watcher, upcast to trait object for AppState.
-    let file_flow_repo = Arc::new(FileFlowRepository::new(base_dir.clone()));
-    file_flow_repo
-        .load_all()
-        .await
-        .context("failed to load flow repository")?;
-    let flow_repo: Arc<dyn FlowRepository> = file_flow_repo.clone();
+    // Storage backend: STORAGE=sqlite uses SQLite, default uses file-based JSON.
+    let storage_backend = std::env::var("STORAGE")
+        .map(|v| v.to_lowercase())
+        .unwrap_or_else(|_| "file".to_string());
 
-    // Initialize prompt repository
-    let file_prompt_repo = Arc::new(FilePromptRepository::new(base_dir.clone()));
-    file_prompt_repo
-        .load_all()
-        .await
-        .context("failed to load prompt repository")?;
-    let prompt_repo: Arc<dyn PromptRepository> = file_prompt_repo.clone();
+    // Initialize repositories (file-based, SQLite, or MongoDB)
+    let mut mongo_db_ref: Option<Arc<crate::storage::mongo::MongoDb>> = None;
 
-    // Initialize agent repository
-    let file_agent_repo = Arc::new(FileAgentRepository::new(base_dir.clone()));
-    file_agent_repo
-        .load_all()
-        .await
-        .context("failed to load agent repository")?;
-    let agent_repo: Arc<dyn AgentRepository> = file_agent_repo.clone();
+    let (flow_repo, prompt_repo, agent_repo, file_flow_repo, file_agent_repo, file_prompt_repo): (
+        Arc<dyn FlowRepository>,
+        Arc<dyn PromptRepository>,
+        Arc<dyn AgentRepository>,
+        Option<Arc<FileFlowRepository>>,
+        Option<Arc<FileAgentRepository>>,
+        Option<Arc<FilePromptRepository>>,
+    ) = if storage_backend == "mongo" || storage_backend == "mongodb" {
+        let mongo_uri = std::env::var("MONGODB_URI")
+            .unwrap_or_else(|_| "mongodb://root:checkOne@localhost:27017".to_string());
+        let mongo_db = std::env::var("MONGODB_DB")
+            .unwrap_or_else(|_| "cthulu".to_string());
+
+        let db = Arc::new(
+            crate::storage::mongo::MongoDb::connect(&mongo_uri, &mongo_db)
+                .await
+                .context("failed to connect to MongoDB")?,
+        );
+        // Redact credentials from log
+        let redacted_uri = mongo_uri.split('@').last().unwrap_or("***");
+        tracing::info!(host = %redacted_uri, db = %mongo_db, "using MongoDB storage backend");
+
+        let flow_repo: Arc<dyn FlowRepository> = Arc::new(
+            crate::storage::mongo::MongoFlowRepository::new(db.clone()),
+        );
+        let prompt_repo: Arc<dyn PromptRepository> = Arc::new(
+            crate::storage::mongo::MongoPromptRepository::new(db.clone()),
+        );
+        mongo_db_ref = Some(db.clone());
+        let agent_repo: Arc<dyn AgentRepository> = Arc::new(
+            crate::storage::mongo::MongoAgentRepository::new(db),
+        );
+        (flow_repo, prompt_repo, agent_repo, None, None, None)
+    } else if storage_backend == "sqlite" {
+        let db_path = base_dir.join("cthulu.db");
+        let db = Arc::new(
+            crate::storage::sqlite::SqliteDb::open(&db_path)
+                .context("failed to open SQLite database")?,
+        );
+        tracing::info!(path = %db_path.display(), "using SQLite storage backend");
+
+        let flow_repo: Arc<dyn FlowRepository> = Arc::new(
+            crate::storage::sqlite::SqliteFlowRepository::new(db.clone()),
+        );
+        let prompt_repo: Arc<dyn PromptRepository> = Arc::new(
+            crate::storage::sqlite::SqlitePromptRepository::new(db.clone()),
+        );
+        let agent_repo: Arc<dyn AgentRepository> = Arc::new(
+            crate::storage::sqlite::SqliteAgentRepository::new(db),
+        );
+        (flow_repo, prompt_repo, agent_repo, None, None, None)
+    } else {
+        let file_flow_repo = Arc::new(FileFlowRepository::new(base_dir.clone()));
+        file_flow_repo
+            .load_all()
+            .await
+            .context("failed to load flow repository")?;
+        let flow_repo: Arc<dyn FlowRepository> = file_flow_repo.clone();
+
+        let file_prompt_repo = Arc::new(FilePromptRepository::new(base_dir.clone()));
+        file_prompt_repo
+            .load_all()
+            .await
+            .context("failed to load prompt repository")?;
+        let prompt_repo: Arc<dyn PromptRepository> = file_prompt_repo.clone();
+
+        let file_agent_repo = Arc::new(FileAgentRepository::new(base_dir.clone()));
+        file_agent_repo
+            .load_all()
+            .await
+            .context("failed to load agent repository")?;
+        let agent_repo: Arc<dyn AgentRepository> = file_agent_repo.clone();
+
+        (flow_repo, prompt_repo, agent_repo, Some(file_flow_repo), Some(file_agent_repo), Some(file_prompt_repo))
+    };
 
     // Seed or migrate the built-in Studio Assistant with sub-agents.
     // Sub-agents (code-reviewer, bugs-bunny, daffy-duck, tweety-bird) are embedded
@@ -176,7 +240,12 @@ async fn run_server(start_disabled: bool) -> Result<(), Box<dyn Error>> {
 
     // Load persisted interact sessions from ~/.cthulu/sessions.yaml
     let sessions_path = base_dir.join("sessions.yaml");
-    let persisted_sessions = api::load_sessions(&sessions_path);
+    // Load sessions from MongoDB if available, else from YAML file
+    let persisted_sessions = if let Some(ref db) = mongo_db_ref {
+        db.load_sessions().await
+    } else {
+        api::load_sessions(&sessions_path)
+    };
 
     // Read OAuth token: macOS Keychain first, then CLAUDE_CODE_OAUTH_TOKEN env
     let oauth_token: Option<String> = {
@@ -360,7 +429,6 @@ async fn run_server(start_disabled: bool) -> Result<(), Box<dyn Error>> {
         sessions_path,
         data_dir: base_dir.clone(),
         static_dir,
-        live_processes: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
         sandbox_provider,
         oauth_token: Arc::new(tokio::sync::RwLock::new(oauth_token)),
         session_streams,
@@ -371,22 +439,43 @@ async fn run_server(start_disabled: bool) -> Result<(), Box<dyn Error>> {
         server_port: config.port,
         auth_enabled: config.auth_enabled,
         jwt_secret: Arc::new(crate::api::local_auth::load_or_create_jwt_secret(&base_dir)),
-        user_store: Arc::new(tokio::sync::RwLock::new(
-            crate::api::local_auth::UserStore::load(&base_dir),
+        user_store: {
+            let mut store = crate::api::local_auth::UserStore::load(&base_dir);
+            if let Some(ref db) = mongo_db_ref {
+                let mongo_users = db.load_users().await;
+                if !mongo_users.is_empty() {
+                    for (email, user) in mongo_users {
+                        store.users.insert(email, user);
+                    }
+                    tracing::info!(count = store.users.len(), "merged users from MongoDB");
+                }
+            }
+            Arc::new(tokio::sync::RwLock::new(store))
+        },
+        team_store: Arc::new(tokio::sync::RwLock::new(
+            crate::api::teams::TeamStore::load(&base_dir),
         )),
+        mongo_db: mongo_db_ref,
     };
 
-    // Start file change watcher (keeps caches in sync with external edits)
-    let _watcher = watcher::FileChangeWatcher::start(
-        base_dir,
-        file_flow_repo,
-        file_agent_repo,
-        file_prompt_repo,
-        changes_tx,
-    )
-    .context("failed to start file change watcher")?;
+    // Start VM health monitor (pings user VMs every 60s)
+    vm_monitor::spawn_vm_monitor(
+        app_state.http_client.clone(),
+        app_state.user_store.clone(),
+    );
 
-    let live_processes = app_state.live_processes.clone();
+    // Start file change watcher (keeps caches in sync with external edits).
+    // Only needed for file-based storage — SQLite doesn't use the filesystem for data.
+    let _watcher = if let (Some(ffr), Some(far), Some(fpr)) = (file_flow_repo, file_agent_repo, file_prompt_repo) {
+        Some(
+            watcher::FileChangeWatcher::start(base_dir, ffr, far, fpr, changes_tx)
+                .context("failed to start file change watcher")?,
+        )
+    } else {
+        tracing::info!("file watcher disabled (SQLite storage backend)");
+        None
+    };
+
     let sdk_sessions = app_state.sdk_sessions.clone();
 
     let app = api::create_app(app_state)
@@ -401,16 +490,8 @@ async fn run_server(start_disabled: bool) -> Result<(), Box<dyn Error>> {
         .with_graceful_shutdown(shutdown_signal())
         .await?;
 
-    // Server has stopped — kill all child processes then exit.
-    tracing::info!("shutting down: killing child processes");
-    {
-        let mut pool = live_processes.lock().await;
-        for (key, mut proc) in pool.drain() {
-            if let Err(e) = proc.child.kill().await {
-                tracing::trace!(key = %key, error = %e, "live process kill on shutdown");
-            }
-        }
-    }
+    // Server has stopped — disconnect all SDK sessions then exit.
+    tracing::info!("shutting down: disconnecting agent sessions");
     {
         let mut pool = sdk_sessions.lock().await;
         for (key, mut session) in pool.drain() {

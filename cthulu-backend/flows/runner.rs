@@ -46,6 +46,12 @@ pub struct FlowRunner {
     pub agent_repo: Option<Arc<dyn AgentRepository>>,
     /// Session bridge for routing executor output to agent workspaces.
     pub session_bridge: Option<SessionBridge>,
+    /// SSH port for the user's VM (executor runs via SSH when set).
+    pub ssh_port: Option<u16>,
+    /// VM Manager host for SSH execution.
+    pub vm_host: Option<String>,
+    /// Per-user environment variables (for sinks).
+    pub user_env: std::collections::HashMap<String, String>,
 }
 
 impl FlowRunner {
@@ -377,6 +383,9 @@ impl FlowRunner {
             session_bridge: self.session_bridge.clone(),
             run_id: Some(run_id.to_string()),
             flow_name: Some(flow.name.clone()),
+            ssh_port: self.ssh_port,
+            vm_host: self.vm_host.clone(),
+            user_env: self.user_env.clone(),
         };
 
         let mut any_failed = false;

@@ -23,11 +23,7 @@ impl AgentSession {
     ) -> Result<Self> {
         let sdk_options = config.into_sdk();
         let mut client = ClaudeSDKClient::new(sdk_options);
-
-        client
-            .connect(None)
-            .await
-            .context("failed to connect to Claude Code CLI")?;
+        client.connect(None).await.context("failed to connect")?;
 
         info!(agent_id, session_id, "agent session created via SDK");
 
