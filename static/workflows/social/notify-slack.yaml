@@ -1,0 +1,39 @@
+meta:
+  title: "Notify Slack"
+  description: "Simple workflow: run a task with Claude and send the result to Slack"
+  tags: [slack, webhook, manual, simple]
+  estimated_cost: "~$0.01 / run"
+  icon: "💬"
+
+name: notify-slack
+description: Manual trigger — runs a Claude task and posts the output to a Slack channel via webhook
+enabled: true
+
+trigger:
+  kind: manual
+  config:
+    working_dir: "."
+
+sources: []
+
+executors:
+  - kind: claude-code
+    label: "Claude: generate message"
+    config:
+      prompt: |
+        Generate a brief status update for our team Slack channel.
+
+        Include:
+        - Current date and time
+        - A motivational quote
+        - One interesting tech fact
+
+        Format as a clean Slack message with emoji.
+        Keep it under 200 words.
+      permissions:
+        - Read
+
+sinks:
+  - kind: slack
+    config:
+      webhook_url_env: SLACK_WEBHOOK_URL

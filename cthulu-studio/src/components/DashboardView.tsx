@@ -1,21 +1,16 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback } from "react";
 import {
-  getDashboardConfig,
-  saveDashboardConfig,
-  getDashboardMessages,
-  getDashboardSummary,
-  type DashboardConfig,
-  type SlackChannelMessages,
-  type SlackMessage,
-  type ChannelSummary,
+  listTaskTemplates,
+  saveTaskTemplate,
+  deleteTaskTemplate,
+  runTask,
+  getTaskHistory,
+  extractTodos,
+  type TaskTemplate,
+  type TaskRun,
+  type TaskRunResponse,
+  type ExtractTodosResponse,
 } from "../api/client";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-} from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 
 function getGreeting(): string {
@@ -34,174 +29,124 @@ function formatDate(): string {
   });
 }
 
-function formatTime(isoTime: string): string {
+function formatTime(iso: string): string {
   try {
-    const d = new Date(isoTime);
-    return d.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false });
+    return new Date(iso).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
   } catch {
     return "";
   }
 }
 
-function ThreadReplies({ replies }: { replies: SlackMessage[] }) {
-  const [expanded, setExpanded] = useState(false);
-
-  if (replies.length === 0) return null;
-
-  return (
-    <div className="dashboard-thread">
-      <button
-        className="dashboard-thread-toggle"
-        onClick={() => setExpanded((prev) => !prev)}
-      >
-        {expanded ? "\u25BE" : "\u25B8"} {replies.length} repl{replies.length === 1 ? "y" : "ies"}
-      </button>
-      {expanded && (
-        <div className="dashboard-thread-replies">
-          {replies.map((reply) => (
-            <div key={reply.ts} className="dashboard-message dashboard-thread-reply">
-              <span className="dashboard-msg-time">{formatTime(reply.time)}</span>
-              <span className="dashboard-msg-user">{reply.user}</span>
-              <span className="dashboard-msg-text">{reply.text}</span>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
+const categoryColors: Record<string, string> = {
+  shopping: "#10b981",
+  research: "#6366f1",
+  "data-entry": "#f59e0b",
+};
 
 export default function DashboardView() {
-  const [config, setConfig] = useState<DashboardConfig | null>(null);
-  const [channels, setChannels] = useState<SlackChannelMessages[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [showChannelDialog, setShowChannelDialog] = useState(false);
-  const [channelInput, setChannelInput] = useState("");
-  const [fetchedAt, setFetchedAt] = useState<string | null>(null);
-  const [range, setRange] = useState("today");
+  const [tasks, setTasks] = useState<TaskTemplate[]>([]);
+  const [history, setHistory] = useState<TaskRun[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [runningTaskId, setRunningTaskId] = useState<string | null>(null);
+  const [lastResult, setLastResult] = useState<TaskRunResponse | null>(null);
+  const [customPrompt, setCustomPrompt] = useState("");
 
-  // Summary state
-  const [summaries, setSummaries] = useState<ChannelSummary[]>([]);
-  const [summaryLoading, setSummaryLoading] = useState(false);
-  const [summaryError, setSummaryError] = useState<string | null>(null);
+  // Repo todo extractor state
+  const [repoInput, setRepoInput] = useState("");
+  const [pathInput, setPathInput] = useState("");
+  const [branchInput, setBranchInput] = useState("");
+  const [todoResult, setTodoResult] = useState<ExtractTodosResponse | null>(null);
+  const [todoLoading, setTodoLoading] = useState(false);
 
-  // Map summaries by channel name for quick lookup.
-  // Normalize keys: strip leading # and lowercase to handle mismatches
-  // between Slack channel names and Claude's response format.
-  const summaryMap = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const s of summaries) {
-      const key = s.channel.replace(/^#/, "").toLowerCase();
-      map.set(key, s.summary);
-    }
-    return map;
-  }, [summaries]);
-
-  const getSummaryForChannel = useCallback((channelName: string): string | undefined => {
-    const key = channelName.replace(/^#/, "").replace(/^\u{1F512}/u, "").toLowerCase();
-    // Try exact normalized match first
-    const exact = summaryMap.get(key);
-    if (exact) return exact;
-    // If there's an "all" fallback (raw text from Claude), use that
-    const fallback = summaryMap.get("all");
-    if (fallback && summaryMap.size === 1) return fallback;
-    return undefined;
-  }, [summaryMap]);
-
-  const loadConfig = useCallback(async () => {
+  const loadTasks = useCallback(async () => {
     try {
-      const cfg = await getDashboardConfig();
-      setConfig(cfg);
-      return cfg;
-    } catch (e) {
-      setError(`Failed to load config: ${(e as Error).message}`);
-      return null;
-    }
+      const { tasks: t } = await listTaskTemplates();
+      setTasks(t);
+    } catch { /* logged */ }
   }, []);
 
-  const loadMessages = useCallback(async (r?: string) => {
-    setLoading(true);
-    setError(null);
+  const loadHistory = useCallback(async () => {
     try {
-      const data = await getDashboardMessages(r ?? range);
-      setChannels(data.channels || []);
-      setFetchedAt(data.fetched_at || null);
-    } catch (e) {
-      const msg = (e as Error).message;
-      if (!msg.includes("No channels configured")) {
-        setError(msg);
-      }
-    } finally {
-      setLoading(false);
-    }
-  }, [range]);
-
-  const loadSummary = useCallback(async (channelData: SlackChannelMessages[]) => {
-    if (channelData.length === 0) return;
-    setSummaryLoading(true);
-    setSummaryError(null);
-    try {
-      const data = await getDashboardSummary(channelData);
-      setSummaries(data.summaries || []);
-    } catch (e) {
-      setSummaryError(`Summary failed: ${(e as Error).message}`);
-    } finally {
-      setSummaryLoading(false);
-    }
+      const { history: h } = await getTaskHistory();
+      setHistory(h);
+    } catch { /* logged */ }
   }, []);
 
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      const cfg = await loadConfig();
-      if (cancelled) return;
-      if (cfg?.first_run) {
-        setShowChannelDialog(true);
-        setLoading(false);
-      } else if (cfg && cfg.channels.length > 0) {
-        await loadMessages();
-      } else {
-        setLoading(false);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [loadConfig, loadMessages]);
+    loadTasks();
+    loadHistory();
+  }, [loadTasks, loadHistory]);
 
-  const handleSaveChannels = async () => {
-    const names = channelInput
-      .split(",")
-      .map((s) => s.trim().replace(/^#/, ""))
-      .filter(Boolean);
-    if (names.length === 0) return;
-
+  const handleRun = async (task: TaskTemplate) => {
+    setLoading(true);
+    setRunningTaskId(task.id);
+    setLastResult(null);
     try {
-      await saveDashboardConfig(names);
-      setShowChannelDialog(false);
-      // Clear old summaries when channels change
-      setSummaries([]);
-      const cfg = await loadConfig();
-      if (cfg && cfg.channels.length > 0) {
-        await loadMessages();
-      }
+      const result = await runTask(task.prompt, task.name);
+      setLastResult(result);
+      await loadHistory();
     } catch (e) {
-      setError(`Failed to save config: ${(e as Error).message}`);
+      setLastResult({
+        run_id: "",
+        status: "failed",
+        error: (e as Error).message,
+        started_at: new Date().toISOString(),
+        finished_at: new Date().toISOString(),
+      });
+    } finally {
+      setLoading(false);
+      setRunningTaskId(null);
     }
   };
 
-  const handleRefresh = async () => {
-    setSummaries([]);
-    await loadMessages();
+  const handleRunCustom = async () => {
+    if (!customPrompt.trim()) return;
+    setLoading(true);
+    setRunningTaskId("custom");
+    setLastResult(null);
+    try {
+      const result = await runTask(customPrompt, "Custom Task");
+      setLastResult(result);
+      await loadHistory();
+    } catch (e) {
+      setLastResult({
+        run_id: "",
+        status: "failed",
+        error: (e as Error).message,
+        started_at: new Date().toISOString(),
+        finished_at: new Date().toISOString(),
+      });
+    } finally {
+      setLoading(false);
+      setRunningTaskId(null);
+    }
   };
 
-  const handleSummarize = () => {
-    loadSummary(channels);
+  const handleDelete = async (id: string) => {
+    if (!confirm("Delete this task template?")) return;
+    await deleteTaskTemplate(id);
+    await loadTasks();
   };
 
-  const totalMessages = useMemo(
-    () => channels.reduce((sum, ch) => sum + ch.count, 0),
-    [channels],
-  );
+  const handleExtractTodos = async () => {
+    if (!repoInput.trim() || !pathInput.trim()) return;
+    setTodoLoading(true);
+    setTodoResult(null);
+    try {
+      const result = await extractTodos(repoInput, pathInput, branchInput || undefined);
+      setTodoResult(result);
+      await loadHistory();
+    } catch (e) {
+      setTodoResult({
+        run_id: "",
+        status: "failed",
+        files: [],
+        error: (e as Error).message,
+      });
+    } finally {
+      setTodoLoading(false);
+    }
+  };
 
   return (
     <div className="dashboard-view">
@@ -211,136 +156,238 @@ export default function DashboardView() {
       </div>
 
       <div className="dashboard-content">
+        {/* Task Templates */}
         <div className="dashboard-section-header">
-          <h2>Messages</h2>
-          <select
-            className="dashboard-range-select"
-            value={range}
-            onChange={(e) => { setRange(e.target.value); loadMessages(e.target.value); }}
-          >
-            <option value="today">Today</option>
-            <option value="1d">Past 24h</option>
-            <option value="2d">Past 2 days</option>
-            <option value="7d">Past 7 days</option>
-            <option value="30d">Past 30 days</option>
-          </select>
-          <div className="dashboard-actions">
-            {fetchedAt && (
-              <span className="dashboard-fetched-at">
-                {formatTime(fetchedAt)}
-              </span>
-            )}
-            <button className="dashboard-btn" onClick={handleRefresh} disabled={loading}>
-              {loading ? "Loading..." : "Refresh"}
-            </button>
-            <button
-              className="dashboard-btn dashboard-btn-summarize"
-              onClick={handleSummarize}
-              disabled={summaryLoading || channels.length === 0}
-            >
-              {summaryLoading ? "Summarizing..." : "Summarize"}
-            </button>
-            <button
-              className="dashboard-btn"
-              onClick={() => {
-                setChannelInput(config?.channels.join(", ") || "");
-                setShowChannelDialog(true);
-              }}
-            >
-              Channels
-            </button>
-          </div>
+          <h2>Tasks</h2>
         </div>
-
-        {error && <div className="dashboard-error">{error}</div>}
-        {summaryError && <div className="dashboard-error">{summaryError}</div>}
-
-        {loading && channels.length === 0 && !error && (
-          <div className="dashboard-loading">Fetching messages from Slack...</div>
-        )}
-
-        {!loading && channels.length === 0 && !error && (
-          <div className="dashboard-empty">
-            {config?.first_run || config?.channels.length === 0
-              ? "No channels configured yet. Click 'Channels' to get started."
-              : "No messages found for today."}
-          </div>
-        )}
-
-        {totalMessages > 0 && (
-          <div className="dashboard-stats">
-            {totalMessages} message{totalMessages !== 1 ? "s" : ""} across {channels.length} channel{channels.length !== 1 ? "s" : ""}
-          </div>
-        )}
 
         <div className="dashboard-channels">
-          {channels.map((ch) => {
-            const channelSummary = getSummaryForChannel(ch.channel);
-            return (
-              <div key={ch.channel} className="dashboard-channel">
-                <div className="dashboard-channel-header">
-                  <span className="dashboard-channel-name">{ch.channel}</span>
-                  <span className="dashboard-channel-count">{ch.count}</span>
-                </div>
-                {channelSummary && (
-                  <div className="dashboard-channel-summary">
-                    <span className="dashboard-channel-summary-label">AI Summary</span>
-                    <p className="dashboard-channel-summary-text">{channelSummary}</p>
-                  </div>
-                )}
-                <div className="dashboard-messages">
-                  {ch.messages.map((msg) => (
-                    <div key={msg.ts}>
-                      <div className="dashboard-message">
-                        <span className="dashboard-msg-time">{formatTime(msg.time)}</span>
-                        <span className="dashboard-msg-user">{msg.user}</span>
-                        <span className="dashboard-msg-text">{msg.text}</span>
-                      </div>
-                      {msg.replies && msg.replies.length > 0 && (
-                        <ThreadReplies replies={msg.replies} />
-                      )}
-                    </div>
-                  ))}
+          {tasks.map((task) => (
+            <div key={task.id} className="dashboard-channel">
+              <div className="dashboard-channel-header">
+                <span className="dashboard-channel-name">
+                  {task.category && (
+                    <span
+                      style={{
+                        display: "inline-block",
+                        width: 8,
+                        height: 8,
+                        borderRadius: "50%",
+                        background: categoryColors[task.category] || "var(--muted)",
+                        marginRight: 8,
+                      }}
+                    />
+                  )}
+                  {task.name}
+                </span>
+                <div style={{ display: "flex", gap: 6 }}>
+                  <Button
+                    size="sm"
+                    onClick={() => handleRun(task)}
+                    disabled={loading}
+                  >
+                    {runningTaskId === task.id ? "Running..." : "Run"}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => handleDelete(task.id)}
+                  >
+                    x
+                  </Button>
                 </div>
               </div>
-            );
-          })}
-        </div>
-      </div>
-
-      <Dialog open={showChannelDialog} onOpenChange={setShowChannelDialog}>
-        <DialogContent className="cth-dialog">
-          <DialogHeader>
-            <DialogTitle>Slack Channels</DialogTitle>
-          </DialogHeader>
-          <div className="cth-dialog-field">
-            <label className="cth-dialog-label">
-              Enter channel names (comma-separated, without #)
-            </label>
-            <input
-              value={channelInput}
-              onChange={(e) => setChannelInput(e.target.value)}
-              placeholder="general, devops, engineering"
-              className="cth-dialog-input"
-              onKeyDown={(e) => {
-                if (e.key === "Enter") handleSaveChannels();
-              }}
-              autoFocus
-            />
-            {config && config.channels.length > 0 && (
-              <p className="cth-dialog-hint">
-                Current: {config.channels.map((c) => `#${c}`).join(", ")}
+              <p style={{ margin: "4px 0 0", opacity: 0.7, fontSize: 13 }}>
+                {task.description}
               </p>
-            )}
+            </div>
+          ))}
+
+          {tasks.length === 0 && (
+            <div className="dashboard-empty">No task templates yet.</div>
+          )}
+        </div>
+
+        {/* Custom task input */}
+        <div style={{ marginTop: 16 }}>
+          <div className="dashboard-section-header">
+            <h2>Run Custom Task</h2>
           </div>
-          <DialogFooter>
-            <Button variant="ghost" onClick={() => setShowChannelDialog(false)}>
-              Cancel
+          <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+            <textarea
+              value={customPrompt}
+              onChange={(e) => setCustomPrompt(e.target.value)}
+              placeholder="Describe a task... e.g. 'Find the cheapest flight from SFO to JFK next Friday'"
+              style={{
+                flex: 1,
+                minHeight: 60,
+                padding: 8,
+                borderRadius: 6,
+                border: "1px solid var(--border)",
+                background: "var(--bg)",
+                color: "var(--fg)",
+                fontFamily: "inherit",
+                fontSize: 13,
+                resize: "vertical",
+              }}
+            />
+            <Button
+              onClick={handleRunCustom}
+              disabled={loading || !customPrompt.trim()}
+              style={{ alignSelf: "flex-end" }}
+            >
+              {runningTaskId === "custom" ? "Running..." : "Run"}
             </Button>
-            <Button onClick={handleSaveChannels}>Save</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          </div>
+        </div>
+
+        {/* Repo Todo Extractor */}
+        <div style={{ marginTop: 24 }}>
+          <div className="dashboard-section-header">
+            <h2>Extract Todos from Repo</h2>
+          </div>
+          <p style={{ fontSize: 13, opacity: 0.7, margin: "4px 0 8px" }}>
+            Point to a GitHub repo path with markdown files — we'll pull them and create a todo list.
+          </p>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <input
+              value={repoInput}
+              onChange={(e) => setRepoInput(e.target.value)}
+              placeholder="owner/repo (e.g. bitcoin-portal/web-monorepo)"
+              style={{
+                flex: "2 1 200px",
+                padding: 8,
+                borderRadius: 6,
+                border: "1px solid var(--border)",
+                background: "var(--bg)",
+                color: "var(--fg)",
+                fontSize: 13,
+              }}
+            />
+            <input
+              value={pathInput}
+              onChange={(e) => setPathInput(e.target.value)}
+              placeholder="path (e.g. docs/daily)"
+              style={{
+                flex: "1 1 150px",
+                padding: 8,
+                borderRadius: 6,
+                border: "1px solid var(--border)",
+                background: "var(--bg)",
+                color: "var(--fg)",
+                fontSize: 13,
+              }}
+            />
+            <input
+              value={branchInput}
+              onChange={(e) => setBranchInput(e.target.value)}
+              placeholder="branch (default: main)"
+              style={{
+                flex: "1 1 100px",
+                padding: 8,
+                borderRadius: 6,
+                border: "1px solid var(--border)",
+                background: "var(--bg)",
+                color: "var(--fg)",
+                fontSize: 13,
+              }}
+            />
+            <Button
+              onClick={handleExtractTodos}
+              disabled={todoLoading || !repoInput.trim() || !pathInput.trim()}
+            >
+              {todoLoading ? "Extracting..." : "Extract Todos"}
+            </Button>
+          </div>
+
+          {todoResult && (
+            <div style={{ marginTop: 12 }}>
+              <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8 }}>
+                <span
+                  style={{
+                    fontSize: 12,
+                    padding: "2px 8px",
+                    borderRadius: 4,
+                    background: todoResult.status === "completed" ? "var(--success)" : "var(--error)",
+                    color: "#fff",
+                  }}
+                >
+                  {todoResult.status}
+                </span>
+                {todoResult.files.length > 0 && (
+                  <span style={{ fontSize: 12, opacity: 0.6 }}>
+                    {todoResult.files.length} file{todoResult.files.length !== 1 ? "s" : ""}: {todoResult.files.join(", ")}
+                  </span>
+                )}
+              </div>
+              <div
+                className="dashboard-channel"
+                style={{ whiteSpace: "pre-wrap", fontFamily: "var(--font-mono, monospace)", fontSize: 13 }}
+              >
+                {todoResult.todos || todoResult.error || "No output"}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Last Result */}
+        {lastResult && (
+          <div style={{ marginTop: 16 }}>
+            <div className="dashboard-section-header">
+              <h2>Result</h2>
+              <span
+                style={{
+                  fontSize: 12,
+                  padding: "2px 8px",
+                  borderRadius: 4,
+                  background: lastResult.status === "completed" ? "var(--success)" : "var(--error)",
+                  color: "#fff",
+                }}
+              >
+                {lastResult.status}
+              </span>
+            </div>
+            <div
+              className="dashboard-channel"
+              style={{ marginTop: 8, whiteSpace: "pre-wrap", fontFamily: "var(--font-mono, monospace)", fontSize: 13 }}
+            >
+              {lastResult.result || lastResult.error || "No output"}
+            </div>
+          </div>
+        )}
+
+        {/* History */}
+        {history.length > 0 && (
+          <div style={{ marginTop: 24 }}>
+            <div className="dashboard-section-header">
+              <h2>Recent Runs</h2>
+            </div>
+            <div className="dashboard-channels">
+              {history.slice(0, 10).map((run) => (
+                <div key={run.id} className="dashboard-channel" style={{ padding: "8px 12px" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <span style={{ fontWeight: 500 }}>{run.task_name || "Task"}</span>
+                    <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                      <span
+                        style={{
+                          fontSize: 11,
+                          padding: "1px 6px",
+                          borderRadius: 3,
+                          background: run.status === "completed" ? "var(--success)" : run.status === "running" ? "var(--accent)" : "var(--error)",
+                          color: "#fff",
+                        }}
+                      >
+                        {run.status}
+                      </span>
+                      <span style={{ fontSize: 12, opacity: 0.6 }}>{formatTime(run.started_at)}</span>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

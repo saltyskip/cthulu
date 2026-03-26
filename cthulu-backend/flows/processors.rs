@@ -35,6 +35,12 @@ pub struct NodeDeps {
     pub run_id: Option<String>,
     /// Flow name (for flow-run session metadata).
     pub flow_name: Option<String>,
+    /// SSH port for the user's VM (when set, executor runs via SSH instead of locally).
+    pub ssh_port: Option<u16>,
+    /// VM Manager host for SSH execution.
+    pub vm_host: Option<String>,
+    /// Per-user environment variables (from MongoDB profile).
+    pub user_env: std::collections::HashMap<String, String>,
 }
 
 /// Process a single node, dispatching by type.
@@ -86,10 +92,49 @@ async fn process_executor(
     deps: &NodeDeps,
 ) -> Result<NodeOutput> {
     // Build prompt from input
-    let rendered = render_executor_prompt(node, &input, deps).await?;
+    let mut rendered = render_executor_prompt(node, &input, deps).await?;
+
+    // When running on a VM, append sink instructions so Claude handles delivery too.
+    if deps.ssh_port.is_some() {
+        tracing::info!(
+            ssh_port = ?deps.ssh_port,
+            user_env_keys = ?deps.user_env.keys().collect::<Vec<_>>(),
+            "VM mode: checking for sink env vars"
+        );
+        if let Some(webhook) = deps.user_env.get("SLACK_WEBHOOK_URL") {
+            let slack_instructions = format!(
+                "\n\n---\n\
+                 CRITICAL FINAL STEP — DO NOT SKIP:\n\
+                 After generating your response above, you MUST post it to Slack.\n\
+                 Run this Bash command (replace the message content with your actual output):\n\n\
+                 curl -s -X POST '{webhook}' \\\n\
+                 -H 'Content-Type: application/json' \\\n\
+                 -d '{{\"text\": \"<PASTE YOUR FULL OUTPUT HERE>\"}}'  \n\n\
+                 This is mandatory. The workflow is not complete until the Slack message is sent."
+            );
+            rendered.push_str(&slack_instructions);
+            tracing::info!(
+                webhook_len = webhook.len(),
+                prompt_len = rendered.len(),
+                "appended Slack curl instructions to executor prompt"
+            );
+        } else {
+            tracing::warn!("VM mode but no SLACK_WEBHOOK_URL in user_env — sink will fail");
+        }
+    }
 
     // Resolve agent config
-    let (permissions, append_system_prompt) = resolve_agent_config(node, deps).await?;
+    let (mut permissions, append_system_prompt) = resolve_agent_config(node, deps).await?;
+
+    // When running on VM with sinks, ensure Bash and WebFetch are allowed
+    if deps.ssh_port.is_some() && !deps.user_env.is_empty() {
+        for tool in &["Bash", "WebFetch", "Read"] {
+            if !permissions.contains(&tool.to_string()) {
+                permissions.push(tool.to_string());
+            }
+        }
+        tracing::info!(permissions = ?permissions, "VM mode: expanded permissions for sink delivery");
+    }
 
     // Resolve working dir
     let working_dir = node.config["working_dir"]
@@ -114,10 +159,19 @@ async fn process_executor(
                 append_system_prompt,
             ))
         }
-        _ => Box::new(ClaudeCodeExecutor::new(
-            permissions.clone(),
-            append_system_prompt,
-        )),
+        _ => {
+            let mut exec = ClaudeCodeExecutor::new(
+                permissions.clone(),
+                append_system_prompt,
+            );
+            if let (Some(port), Some(host)) = (deps.ssh_port, deps.vm_host.as_ref()) {
+                exec = exec.with_ssh(crate::tasks::executors::claude_code::SshTarget {
+                    host: host.clone(),
+                    port,
+                });
+            }
+            Box::new(exec)
+        }
     };
 
     let perms_display = if permissions.is_empty() {
@@ -165,10 +219,12 @@ async fn process_executor(
 
     let exec_result = exec_result?;
 
+    let preview: String = exec_result.text.chars().take(300).collect();
     tracing::info!(
         turns = exec_result.num_turns,
         cost = format_args!("${:.4}", exec_result.cost_usd),
         output_chars = exec_result.text.len(),
+        output_preview = %preview,
         "Executor finished",
     );
 
@@ -269,6 +325,16 @@ async fn resolve_agent_config(
 // ── Sink Processing ────────────────────────────────────────────────────
 
 async fn process_sink(node: &Node, input: NodeOutput, deps: &NodeDeps) -> Result<NodeOutput> {
+    // When running on VM, sinks are handled by Claude as part of the executor prompt
+    if deps.ssh_port.is_some() && deps.user_env.contains_key("SLACK_WEBHOOK_URL") {
+        tracing::info!(
+            node = %node.label,
+            ssh_port = ?deps.ssh_port,
+            "sink skipped — Slack delivery handled by executor on VM via curl"
+        );
+        return Ok(NodeOutput::Empty);
+    }
+
     let text = input.as_text();
     if text.is_empty() {
         tracing::warn!(node = %node.label, "Sink received empty input, skipping delivery");
@@ -276,7 +342,7 @@ async fn process_sink(node: &Node, input: NodeOutput, deps: &NodeDeps) -> Result
     }
 
     let configs = parse_sink_configs(&[node])?;
-    let resolved = resolve_sinks(&configs, &deps.http_client)?;
+    let resolved = resolve_sinks(&configs, &deps.http_client, &deps.user_env)?;
 
     for sink in &resolved {
         sink.deliver(&text)

@@ -38,13 +38,16 @@ chrono = { version = "0.4.44", features = ["serde"] }
 uuid = { version = "1.21.0", features = ["v4"] }
 feed-rs = "2.3.1"
 gcp_auth = "0.12"
+openssl = { version = "0.10", features = ["vendored"] }
 scraper = "0.23"
 croner = "2"
 dirs = "6.0.0"
-tower-http = { version = "0.6.8", features = ["cors"] }
+tower-http = { version = "0.6.8", features = ["cors", "fs"] }
 clap = { version = "4.5.60", features = ["derive"] }
 notify = "7"
 notify-debouncer-mini = "0.5"
+rusqlite = { version = "0.32", features = ["bundled"] }
+mongodb = { version = "2.8", features = ["openssl-tls"] }
 
 # Claude Agent SDK
 claude-agent-sdk-rust = { version = "1", features = ["tracing-support"] }

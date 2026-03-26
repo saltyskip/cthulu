@@ -1,0 +1,25 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  annotations:
+    alb.ingress.kubernetes.io/backend-protocol: HTTP
+    alb.ingress.kubernetes.io/backend-protocol-version: HTTP1
+    alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:ap-northeast-1:558659058402:certificate/84224a15-9a59-4944-aada-28980b8f7b59
+    alb.ingress.kubernetes.io/healthcheck-interval-seconds: "15"
+    alb.ingress.kubernetes.io/healthcheck-path: /health
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+  name: cthulu-ingress
+  namespace: cthulu-bot
+spec:
+  rules:
+  - host: cthulu-dev.capybara.systems
+    http:
+      paths:
+      - backend:
+          service:
+            name: cthulu
+            port:
+              number: 80
+        path: /*
+        pathType: ImplementationSpecific

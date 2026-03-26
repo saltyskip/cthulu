@@ -11,14 +11,28 @@ use super::{ExecutionResult, Executor, LineSink};
 
 const PROCESS_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 
+/// SSH connection info for running Claude on a remote VM.
+#[derive(Debug, Clone)]
+pub struct SshTarget {
+    pub host: String,
+    pub port: u16,
+}
+
 pub struct ClaudeCodeExecutor {
     permissions: Vec<String>,
     append_system_prompt: Option<String>,
+    /// When set, execute via SSH to the user's VM instead of locally.
+    ssh_target: Option<SshTarget>,
 }
 
 impl ClaudeCodeExecutor {
     pub fn new(permissions: Vec<String>, append_system_prompt: Option<String>) -> Self {
-        Self { permissions, append_system_prompt }
+        Self { permissions, append_system_prompt, ssh_target: None }
+    }
+
+    pub fn with_ssh(mut self, ssh_target: SshTarget) -> Self {
+        self.ssh_target = Some(ssh_target);
+        self
     }
 
     pub fn build_args(&self) -> Vec<String> {
@@ -41,9 +55,209 @@ impl ClaudeCodeExecutor {
             args.push(self.permissions.join(","));
         }
 
+        // Allow multiple turns so Claude can generate output AND run tools (curl to Slack)
+        if self.permissions.contains(&"Bash".to_string()) {
+            args.push("--max-turns".to_string());
+            args.push("5".to_string());
+        }
+
         args.push("-".to_string()); // read from stdin
         args
     }
+
+    /// Build the full claude command string for SSH execution.
+    fn build_ssh_command(&self, _working_dir: &Path) -> String {
+        let args = self.build_args();
+        let escaped_args: Vec<String> = args.iter().map(|a| shell_escape(a)).collect();
+        // Source .bashrc for env vars (SLACK_WEBHOOK_URL etc), then run claude in /root
+        format!("source /root/.bashrc 2>/dev/null; cd /root && claude {}", escaped_args.join(" "))
+    }
+
+    /// Execute via SSH to a remote VM.
+    async fn execute_ssh(
+        &self,
+        prompt: &str,
+        working_dir: &Path,
+        line_sink: Option<LineSink>,
+        ssh: &SshTarget,
+    ) -> Result<ExecutionResult> {
+        let remote_cmd = self.build_ssh_command(working_dir);
+
+        let mut child = Command::new("ssh")
+            .args([
+                "-o", "StrictHostKeyChecking=no",
+                "-o", "UserKnownHostsFile=/dev/null",
+                "-o", "ConnectTimeout=10",
+                "-p", &ssh.port.to_string(),
+                &format!("root@{}", ssh.host),
+                &remote_cmd,
+            ])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .context("failed to spawn SSH process for claude execution")?;
+
+        // Write prompt to stdin
+        {
+            use tokio::io::AsyncWriteExt;
+            let mut stdin = child.stdin.take().expect("stdin piped");
+            if let Err(e) = stdin.write_all(prompt.as_bytes()).await {
+                let _ = child.kill().await;
+                return Err(e).context("failed to write prompt to SSH stdin");
+            }
+        }
+
+        // Stream stderr
+        let stderr = child.stderr.take().expect("stderr piped");
+        let stderr_handle = tokio::spawn(async move {
+            let reader = BufReader::new(stderr);
+            let mut lines = reader.lines();
+            while let Ok(Some(line)) = lines.next_line().await {
+                if !line.is_empty() {
+                    tracing::debug!(source = "claude-ssh-stderr", "{}", line);
+                }
+            }
+        });
+
+        // Stream stdout — same JSON parsing as local execution
+        let stdout = child.stdout.take().expect("stdout piped");
+        let stdout_handle = tokio::spawn(async move {
+            parse_stream_json(stdout, line_sink).await
+        });
+
+        let status = match timeout(PROCESS_TIMEOUT, child.wait()).await {
+            Ok(result) => result.context("failed to wait on SSH claude")?,
+            Err(_elapsed) => {
+                tracing::error!(
+                    "SSH claude process timed out after {}s, killing",
+                    PROCESS_TIMEOUT.as_secs()
+                );
+                let _ = child.kill().await;
+                stderr_handle.abort();
+                stdout_handle.abort();
+                anyhow::bail!("claude process timed out after {}s", PROCESS_TIMEOUT.as_secs());
+            }
+        };
+        let _ = stderr_handle.await;
+        let (result_text, cost_usd, num_turns) = stdout_handle
+            .await
+            .unwrap_or((None, 0.0, 0));
+
+        if !status.success() {
+            anyhow::bail!("claude (SSH) exited with {}", status);
+        }
+
+        Ok(ExecutionResult {
+            text: result_text.unwrap_or_default(),
+            cost_usd,
+            num_turns,
+        })
+    }
+}
+
+/// POSIX shell-escape: wrap in single quotes, escape internal single quotes.
+fn shell_escape(s: &str) -> String {
+    format!("'{}'", s.replace('\'', "'\\''"))
+}
+
+/// Parse stream-json output from Claude CLI stdout. Returns (result_text, cost, turns).
+async fn parse_stream_json<R: tokio::io::AsyncRead + Unpin>(
+    stdout: R,
+    line_sink: Option<LineSink>,
+) -> (Option<String>, f64, u64) {
+    let mut result_text: Option<String> = None;
+    let mut total_cost: f64 = 0.0;
+    let mut total_turns: u64 = 0;
+
+    let reader = BufReader::new(stdout);
+    let mut lines = reader.lines();
+    while let Ok(Some(line)) = lines.next_line().await {
+        if line.is_empty() {
+            continue;
+        }
+
+        if let Some(ref sink) = line_sink {
+            sink(line.clone());
+        }
+
+        if let Ok(event) = serde_json::from_str::<serde_json::Value>(&line) {
+            let event_type = event
+                .get("type")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown");
+            match event_type {
+                "system" => {
+                    tracing::debug!(source = "claude", "Session initialized");
+                }
+                "assistant" => {
+                    if let Some(content) = event
+                        .get("message")
+                        .and_then(|m| m.get("content"))
+                        .and_then(|c| c.as_array())
+                    {
+                        for block in content {
+                            let block_type = block
+                                .get("type")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("");
+                            match block_type {
+                                "tool_use" => {
+                                    let tool = block
+                                        .get("name")
+                                        .and_then(|v| v.as_str())
+                                        .unwrap_or("?");
+                                    tracing::debug!(
+                                        source = "claude",
+                                        tool,
+                                        "Tool: {}",
+                                        tool,
+                                    );
+                                }
+                                "text" => {
+                                    let text_len = block
+                                        .get("text")
+                                        .and_then(|v| v.as_str())
+                                        .map(|t| t.len())
+                                        .unwrap_or(0);
+                                    tracing::debug!(
+                                        source = "claude",
+                                        len = text_len,
+                                        "Text output ({} chars)",
+                                        text_len,
+                                    );
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                }
+                "result" => {
+                    total_cost = event
+                        .get("total_cost_usd")
+                        .and_then(|v| v.as_f64())
+                        .unwrap_or(0.0);
+                    total_turns = event
+                        .get("num_turns")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(0);
+                    result_text = event
+                        .get("result")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string());
+                    tracing::debug!(
+                        source = "claude",
+                        cost = format_args!("${:.4}", total_cost),
+                        turns = total_turns,
+                        "Claude finished",
+                    );
+                }
+                _ => {}
+            }
+        }
+    }
+
+    (result_text, total_cost, total_turns)
 }
 
 #[async_trait]
@@ -58,6 +272,14 @@ impl Executor for ClaudeCodeExecutor {
         working_dir: &Path,
         line_sink: Option<LineSink>,
     ) -> Result<ExecutionResult> {
+        // If SSH target is configured, run remotely on user's VM
+        if let Some(ref ssh) = self.ssh_target {
+            tracing::info!(host = %ssh.host, port = ssh.port, "executing claude via SSH on user VM");
+            return self.execute_ssh(prompt, working_dir, line_sink, ssh).await;
+        }
+
+        tracing::warn!("no SSH target — running claude locally (will fail in container without claude CLI)");
+        // Local execution
         let args = self.build_args();
 
         let mut child = Command::new("claude")
@@ -93,102 +315,10 @@ impl Executor for ClaudeCodeExecutor {
             }
         });
 
-        // Stream stdout JSON events to tracing, capture result
+        // Stream stdout JSON events
         let stdout = child.stdout.take().expect("stdout piped");
         let stdout_handle = tokio::spawn(async move {
-            let mut result_text: Option<String> = None;
-            let mut total_cost: f64 = 0.0;
-            let mut total_turns: u64 = 0;
-
-            let reader = BufReader::new(stdout);
-            let mut lines = reader.lines();
-            while let Ok(Some(line)) = lines.next_line().await {
-                if line.is_empty() {
-                    continue;
-                }
-
-                // Forward line to sink if provided
-                if let Some(ref sink) = line_sink {
-                    sink(line.clone());
-                }
-
-                if let Ok(event) = serde_json::from_str::<serde_json::Value>(&line) {
-                    let event_type = event
-                        .get("type")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("unknown");
-                    match event_type {
-                        "system" => {
-                            tracing::debug!(source = "claude", "Session initialized");
-                        }
-                        "assistant" => {
-                            if let Some(content) = event
-                                .get("message")
-                                .and_then(|m| m.get("content"))
-                                .and_then(|c| c.as_array())
-                            {
-                                for block in content {
-                                    let block_type = block
-                                        .get("type")
-                                        .and_then(|v| v.as_str())
-                                        .unwrap_or("");
-                                    match block_type {
-                                        "tool_use" => {
-                                            let tool = block
-                                                .get("name")
-                                                .and_then(|v| v.as_str())
-                                                .unwrap_or("?");
-                                            tracing::debug!(
-                                                source = "claude",
-                                                tool,
-                                                "Tool: {}",
-                                                tool,
-                                            );
-                                        }
-                                        "text" => {
-                                            let text_len = block
-                                                .get("text")
-                                                .and_then(|v| v.as_str())
-                                                .map(|t| t.len())
-                                                .unwrap_or(0);
-                                            tracing::debug!(
-                                                source = "claude",
-                                                len = text_len,
-                                                "Text output ({} chars)",
-                                                text_len,
-                                            );
-                                        }
-                                        _ => {}
-                                    }
-                                }
-                            }
-                        }
-                        "result" => {
-                            total_cost = event
-                                .get("total_cost_usd")
-                                .and_then(|v| v.as_f64())
-                                .unwrap_or(0.0);
-                            total_turns = event
-                                .get("num_turns")
-                                .and_then(|v| v.as_u64())
-                                .unwrap_or(0);
-                            result_text = event
-                                .get("result")
-                                .and_then(|v| v.as_str())
-                                .map(|s| s.to_string());
-                            tracing::debug!(
-                                source = "claude",
-                                cost = format_args!("${:.4}", total_cost),
-                                turns = total_turns,
-                                "Claude finished",
-                            );
-                        }
-                        _ => {}
-                    }
-                }
-            }
-
-            (result_text, total_cost, total_turns)
+            parse_stream_json(stdout, line_sink).await
         });
 
         let status = match timeout(PROCESS_TIMEOUT, child.wait()).await {
@@ -269,5 +399,20 @@ mod tests {
         let args = executor.build_args();
         let fmt_idx = args.iter().position(|a| a == "--output-format").unwrap();
         assert_eq!(args[fmt_idx + 1], "stream-json");
+    }
+
+    #[test]
+    fn test_shell_escape() {
+        assert_eq!(shell_escape("hello"), "'hello'");
+        assert_eq!(shell_escape("O'Brien"), "'O'\\''Brien'");
+    }
+
+    #[test]
+    fn test_ssh_command_construction() {
+        let executor = ClaudeCodeExecutor::new(vec!["Bash".to_string()], None);
+        let cmd = executor.build_ssh_command(Path::new("/home/user/project"));
+        assert!(cmd.starts_with("cd '/home/user/project'"));
+        assert!(cmd.contains("claude"));
+        assert!(cmd.contains("--print"));
     }
 }

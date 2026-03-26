@@ -13,6 +13,10 @@ pub struct SessionConfig {
     pub session_id: Option<String>,
     pub resume: Option<String>,
     pub include_partial_messages: bool,
+    /// Anthropic API key for this session (sk-ant-api03-*).
+    pub api_key: Option<String>,
+    /// Claude OAuth token for this session (sk-ant-oat01-*).
+    pub oauth_token: Option<String>,
 }
 
 impl SessionConfig {

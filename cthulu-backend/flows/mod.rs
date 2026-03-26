@@ -1,3 +1,4 @@
+pub mod budget;
 pub mod events;
 pub mod file_repository;
 pub mod graph;

@@ -14,6 +14,7 @@ use tokio::process::Command;
 use tokio_stream::wrappers::LinesStream;
 use tokio_stream::StreamExt;
 use tower_http::cors::{Any, CorsLayer};
+use tower_http::services::{ServeDir, ServeFile};
 
 use super::middleware;
 use super::AppState;
@@ -33,11 +34,29 @@ pub fn build_router(state: AppState) -> Router {
         .allow_methods(Any)
         .allow_headers(vec![header::CONTENT_TYPE, header::AUTHORIZATION]);
 
-    Router::new()
+    let studio_dir = state.static_dir.join("studio");
+    let index_exists = studio_dir.join("index.html").exists();
+    tracing::info!(
+        studio_dir = %studio_dir.display(),
+        index_exists,
+        "SPA static file check"
+    );
+
+    let mut router = Router::new()
         .nest("/health", health_routes)
         .route("/claude", post(run_claude))
-        .nest("/api", api_router())
-        .fallback(not_found)
+        .nest("/api", api_router());
+
+    if index_exists {
+        router = router.fallback_service(
+            ServeDir::new(&studio_dir)
+                .not_found_service(ServeFile::new(studio_dir.join("index.html"))),
+        );
+    } else {
+        router = router.fallback(not_found);
+    }
+
+    router
         .with_state(state)
         .layer(cors)
         .layer(axum::middleware::from_fn(middleware::strip_trailing_slash))
@@ -57,6 +76,7 @@ fn api_router() -> Router<AppState> {
         .merge(super::changes::router())
         .merge(super::hooks::router())
         .merge(super::dashboard::router())
+        .merge(super::teams::router())
         .merge(super::local_auth::router())
 }
 

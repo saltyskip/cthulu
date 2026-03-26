@@ -8,9 +8,23 @@ use crate::tasks::sinks::notion::NotionSink;
 use crate::tasks::sinks::slack::{SlackApiSink, SlackWebhookSink};
 use crate::tasks::sources::ContentItem;
 
+/// Resolve env var or direct value: if the value looks like a URL, use it directly.
+/// Otherwise treat it as an env var name — check user_env first, then system env.
+fn resolve_env(name_or_value: &str, user_env: &std::collections::HashMap<String, String>) -> Result<String> {
+    // If it looks like a URL or token, use it directly (user pasted the value, not the env var name)
+    if name_or_value.starts_with("http://") || name_or_value.starts_with("https://") || name_or_value.starts_with("xoxb-") {
+        return Ok(name_or_value.to_string());
+    }
+    if let Some(val) = user_env.get(name_or_value) {
+        return Ok(val.clone());
+    }
+    std::env::var(name_or_value).with_context(|| format!("env var {name_or_value} not set. Set it in your profile under VM settings."))
+}
+
 pub fn resolve_sinks(
     configs: &[SinkConfig],
     http_client: &Arc<reqwest::Client>,
+    user_env: &std::collections::HashMap<String, String>,
 ) -> Result<Vec<Arc<dyn Sink>>> {
     let mut sinks: Vec<Arc<dyn Sink>> = Vec::with_capacity(configs.len());
 
@@ -22,9 +36,7 @@ pub fn resolve_sinks(
                 channel,
             } => {
                 if let Some(token_env) = bot_token_env {
-                    let bot_token = std::env::var(token_env).with_context(|| {
-                        format!("sink requires env var {token_env} but it is not set")
-                    })?;
+                    let bot_token = resolve_env(token_env, user_env)?;
                     let channel = channel.as_ref().with_context(|| {
                         "slack bot_token_env requires a channel to be set"
                     })?;
@@ -34,9 +46,7 @@ pub fn resolve_sinks(
                         channel.clone(),
                     )));
                 } else if let Some(webhook_env) = webhook_url_env {
-                    let webhook_url = std::env::var(webhook_env).with_context(|| {
-                        format!("sink requires env var {webhook_env} but it is not set")
-                    })?;
+                    let webhook_url = resolve_env(webhook_env, user_env)?;
                     sinks.push(Arc::new(SlackWebhookSink::new(
                         Arc::clone(http_client),
                         webhook_url,
@@ -49,7 +59,7 @@ pub fn resolve_sinks(
                 token_env,
                 database_id,
             } => {
-                let token = std::env::var(token_env).with_context(|| {
+                let token = resolve_env(token_env, user_env).with_context(|| {
                     format!("sink requires env var {token_env} but it is not set")
                 })?;
                 sinks.push(Arc::new(NotionSink::new(

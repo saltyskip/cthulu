@@ -146,6 +146,7 @@ export interface AgentSummary {
   permissions: string[];
   subagent_only?: boolean;
   subagent_count?: number;
+  team_id?: string;
   created_at: string;
   updated_at: string;
 }

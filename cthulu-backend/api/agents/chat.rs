@@ -14,7 +14,6 @@ use crate::agent_sdk::config::SessionConfig;
 use crate::api::AppState;
 use crate::api::FlowSessions;
 use crate::api::InteractSession;
-use crate::api::LiveClaudeProcess;
 use crate::flows::{Edge, Flow, Node, NodeType};
 use tokio::sync::broadcast;
 
@@ -68,14 +67,6 @@ fn process_key(agent_id: &str, session_id: &str) -> String {
     format!("agent::{agent_id}::session::{session_id}")
 }
 
-/// Check if the Agent SDK integration is enabled via AGENT_SDK_ENABLED env var.
-/// When enabled, new chat sessions use `AgentSession` (SDK) instead of `LiveClaudeProcess`.
-fn agent_sdk_enabled() -> bool {
-    std::env::var("AGENT_SDK_ENABLED")
-        .map(|v| matches!(v.to_lowercase().as_str(), "1" | "true" | "yes"))
-        .unwrap_or(false)
-}
-
 /// Maximum number of interactive sessions per agent.
 const MAX_INTERACTIVE_SESSIONS: usize = 5;
 
@@ -94,7 +85,6 @@ pub(crate) async fn list_sessions(
     let key = agent_key(&id);
     let sessions = state.interact_sessions.read().await;
     if let Some(flow_sessions) = sessions.get(&key) {
-        let mut pool = state.live_processes.lock().await;
         let sdk_pool = state.sdk_sessions.lock().await;
         let interactive_count = flow_sessions.sessions.iter()
             .filter(|s| s.kind == "interactive")
@@ -105,14 +95,8 @@ pub(crate) async fn list_sessions(
             .iter()
             .map(|s| {
                 let proc_k = process_key(&id, &s.session_id);
-                // Check both legacy and SDK process pools
-                let process_alive = if let Some(proc) = pool.get_mut(&proc_k) {
-                    !matches!(proc.child.try_wait(), Ok(Some(_)))
-                } else if let Some(sdk_session) = sdk_pool.get(&proc_k) {
-                    sdk_session.is_connected()
-                } else {
-                    false
-                };
+                let process_alive = sdk_pool.get(&proc_k)
+                    .map_or(false, |session| session.is_connected());
                 let mut v = json!({
                     "session_id": s.session_id,
                     "summary": s.summary,
@@ -196,7 +180,7 @@ pub(crate) async fn new_session(
 
     let mut all_sessions = state.interact_sessions.write().await;
     let flow_sessions = all_sessions
-        .entry(key)
+        .entry(key.clone())
         .or_insert_with(|| FlowSessions {
             flow_name: agent.name.clone(),
             active_session: String::new(),
@@ -232,9 +216,10 @@ pub(crate) async fn new_session(
     });
     flow_sessions.active_session = new_id.clone();
 
+    let fs_clone = flow_sessions.clone();
     let sessions_snapshot = all_sessions.clone();
     drop(all_sessions);
-    state.save_sessions_to_disk(&sessions_snapshot);
+    state.save_session_or_all(&key, &fs_clone, &sessions_snapshot);
 
     Ok(Json(json!({ "session_id": new_id, "created_at": now })))
 }
@@ -245,13 +230,6 @@ pub(crate) async fn delete_session(
     Path((id, session_id)): Path<(String, String)>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let key = agent_key(&id);
-
-    // Remove per-session live process (Drop impl will kill it)
-    {
-        let mut pool = state.live_processes.lock().await;
-        let proc_k = process_key(&id, &session_id);
-        pool.remove(&proc_k);
-    }
 
     // Disconnect SDK session if present
     {
@@ -308,9 +286,14 @@ pub(crate) async fn delete_session(
         flow_sessions.active_session.clone()
     };
 
+    let fs_clone = all_sessions.get(&key).cloned();
     let sessions_snapshot = all_sessions.clone();
     drop(all_sessions);
-    state.save_sessions_to_disk(&sessions_snapshot);
+    if let Some(ref fs) = fs_clone {
+        state.save_session_or_all(&key, fs, &sessions_snapshot);
+    } else {
+        state.save_sessions_to_disk(&sessions_snapshot);
+    }
 
     Ok(Json(json!({
         "deleted": true,
@@ -333,15 +316,6 @@ pub(crate) async fn stop_chat(
     };
 
     let sid = target_sid.clone().unwrap_or_default();
-
-    // Remove the persistent process from the pool (Drop impl will kill it)
-    {
-        let mut pool = state.live_processes.lock().await;
-        let proc_key = process_key(&id, &sid);
-        pool.remove(&proc_key);
-        // Also try legacy agent-level key for backward compat
-        pool.remove(&key);
-    }
 
     // Disconnect SDK session if present
     {
@@ -384,15 +358,9 @@ pub(crate) async fn session_status(
     })?;
 
     let proc_k = process_key(&id, &session_id);
-    let mut pool = state.live_processes.lock().await;
     let sdk_pool = state.sdk_sessions.lock().await;
-    let process_alive = if let Some(proc) = pool.get_mut(&proc_k) {
-        !matches!(proc.child.try_wait(), Ok(Some(_)))
-    } else if let Some(sdk_session) = sdk_pool.get(&proc_k) {
-        sdk_session.is_connected()
-    } else {
-        false
-    };
+    let process_alive = sdk_pool.get(&proc_k)
+        .map_or(false, |session| session.is_connected());
 
     Ok(Json(json!({
         "session_id": session_id,
@@ -433,14 +401,7 @@ pub(crate) async fn kill_session(
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let key = agent_key(&id);
 
-    // Remove live process (Drop impl sends SIGKILL)
-    {
-        let mut pool = state.live_processes.lock().await;
-        let proc_k = process_key(&id, &session_id);
-        pool.remove(&proc_k);
-    }
-
-    // Disconnect SDK session if present
+    // Disconnect SDK session
     {
         let mut sdk_pool = state.sdk_sessions.lock().await;
         let proc_k = process_key(&id, &session_id);
@@ -463,14 +424,20 @@ pub(crate) async fn kill_session(
         }
     }
 
+    let fs_clone = all_sessions.get(&key).cloned();
     let sessions_snapshot = all_sessions.clone();
     drop(all_sessions);
-    state.save_sessions_to_disk(&sessions_snapshot);
+    if let Some(ref fs) = fs_clone {
+        state.save_session_or_all(&key, fs, &sessions_snapshot);
+    } else {
+        state.save_sessions_to_disk(&sessions_snapshot);
+    }
 
     Ok(Json(json!({ "status": "killed" })))
 }
 
 #[derive(Deserialize)]
+#[allow(dead_code)] // Fields used for deserialization; SDK image support pending
 pub(crate) struct ImageAttachment {
     pub media_type: String,
     pub data: String, // base64-encoded
@@ -498,6 +465,7 @@ fn build_sdk_config(
     working_dir: &str,
     is_new: bool,
     system_prompt: Option<&str>,
+    creds: crate::api::local_auth::ResolvedCredentials,
 ) -> SessionConfig {
     let permission_mode = if agent.permissions.is_empty() {
         Some("bypassPermissions".to_string())
@@ -513,10 +481,12 @@ fn build_sdk_config(
         session_id: if is_new { Some(session_id.to_string()) } else { None },
         resume: if !is_new { Some(session_id.to_string()) } else { None },
         include_partial_messages: true,
+        api_key: creds.api_key,
+        oauth_token: creds.oauth_token,
     }
 }
 
-/// SDK-based chat stream. Used when AGENT_SDK_ENABLED=1.
+/// Chat stream — runs Claude Code CLI on the user's dedicated VM via SSH.
 fn chat_sdk_stream(
     state: AppState,
     id: String,
@@ -526,67 +496,188 @@ fn chat_sdk_stream(
     working_dir: String,
     system_prompt: Option<String>,
     agent: crate::agents::Agent,
+    user_id: String,
 ) -> impl Stream<Item = Result<Event, Infallible>> {
     async_stream::stream! {
         let key_for_stream = agent_key(&id);
         let proc_key = process_key(&id, &target_session_id);
         let sessions_ref = state.interact_sessions.clone();
         let sessions_path = state.sessions_path.clone();
-        let sdk_sessions = state.sdk_sessions.clone();
         let session_streams = state.session_streams.clone();
         let chat_event_buffers = state.chat_event_buffers.clone();
         let data_dir = state.data_dir.clone();
 
-        // Create or get the SDK session
-        let needs_create = {
-            let pool = sdk_sessions.lock().await;
-            !pool.contains_key(&proc_key) || !pool.get(&proc_key).map_or(false, |s| s.is_connected())
+        // Resolve user's VM SSH port
+        let ssh_port = {
+            let store = state.user_store.read().await;
+            store.users.values()
+                .find(|u| u.id == user_id)
+                .and_then(|u| u.ssh_port)
         };
 
-        if needs_create {
-            let config = build_sdk_config(
-                &agent,
-                &target_session_id,
-                &working_dir,
-                is_new,
-                system_prompt.as_deref(),
-            );
-
-            match crate::agent_sdk::AgentSession::create(
-                config,
-                &id,
-                &target_session_id,
-            ).await {
-                Ok(session) => {
-                    let mut pool = sdk_sessions.lock().await;
-                    // Remove old disconnected session if present
-                    pool.remove(&proc_key);
-                    pool.insert(proc_key.clone(), session);
-
-                    yield Ok(Event::default().event("system").data(
-                        serde_json::to_string(&json!({"message": "Session started (SDK)"})).unwrap()
-                    ));
-                }
-                Err(e) => {
-                    tracing::error!(error = %e, "failed to create AgentSession");
-                    let mut all_sessions = sessions_ref.write().await;
-                    if let Some(fs) = all_sessions.get_mut(&key_for_stream) {
-                        if let Some(s) = fs.get_session_mut(&target_session_id) {
-                            s.busy = false;
-                            s.busy_since = None;
-                        }
-                    }
-                    yield Ok(Event::default().event("error").data(
-                        serde_json::to_string(&json!({"message": format!("failed to create SDK session: {e}")})).unwrap()
-                    ));
-                    return;
+        let Some(ssh_port) = ssh_port else {
+            yield Ok(Event::default().event("error").data(
+                serde_json::to_string(&json!({"message": "No VM provisioned. Set your OAuth token in profile settings to create a VM."})).unwrap()
+            ));
+            // Clear busy flag
+            let mut all_sessions = sessions_ref.write().await;
+            if let Some(fs) = all_sessions.get_mut(&key_for_stream) {
+                if let Some(s) = fs.get_session_mut(&target_session_id) {
+                    s.busy = false;
+                    s.busy_since = None;
                 }
             }
+            return;
+        };
+
+        let vm_client = crate::vm_manager::VmManagerClient::new((*state.http_client).clone());
+
+        // Build claude CLI command with all agent options
+        let escaped_prompt = prompt.replace('\'', "'\\''");
+        let mut claude_args = vec![
+            "claude".to_string(),
+            "-p".to_string(),
+            format!("'{escaped_prompt}'"),
+            "--output-format".to_string(),
+            "stream-json".to_string(),
+            "--verbose".to_string(),
+        ];
+
+        // Session management
+        if is_new {
+            claude_args.push("--session-id".to_string());
+            claude_args.push(target_session_id.clone());
         } else {
-            yield Ok(Event::default().event("system").data(
-                serde_json::to_string(&json!({"message": "Ready (SDK)"})).unwrap()
-            ));
+            claude_args.push("--resume".to_string());
+            claude_args.push(target_session_id.clone());
         }
+
+        // System prompt
+        if let Some(ref sys_prompt) = system_prompt {
+            let escaped_sys = sys_prompt.replace('\'', "'\\''");
+            claude_args.push("--append-system-prompt".to_string());
+            claude_args.push(format!("'{escaped_sys}'"));
+        }
+
+        // Model
+        if let Some(ref model) = agent.model {
+            claude_args.push("--model".to_string());
+            claude_args.push(model.clone());
+        }
+
+        // Effort level
+        if let Some(ref effort) = agent.effort {
+            claude_args.push("--effort".to_string());
+            claude_args.push(effort.clone());
+        }
+
+        // Budget limit
+        if let Some(budget) = agent.max_budget_usd {
+            claude_args.push("--max-budget-usd".to_string());
+            claude_args.push(format!("{:.2}", budget));
+        }
+
+        // Turn limit
+        if let Some(turns) = agent.max_turns {
+            claude_args.push("--max-turns".to_string());
+            claude_args.push(turns.to_string());
+        }
+
+        // Permission mode
+        if let Some(ref mode) = agent.permission_mode {
+            claude_args.push("--permission-mode".to_string());
+            claude_args.push(mode.clone());
+        }
+
+        // Allowed tools (auto-approved)
+        if !agent.allowed_tools.is_empty() {
+            claude_args.push("--allowedTools".to_string());
+            claude_args.push(agent.allowed_tools.join(","));
+        } else if !agent.permissions.is_empty() {
+            claude_args.push("--allowedTools".to_string());
+            claude_args.push(agent.permissions.join(","));
+        }
+
+        // Disallowed tools
+        if !agent.disallowed_tools.is_empty() {
+            claude_args.push("--disallowedTools".to_string());
+            claude_args.push(agent.disallowed_tools.join(","));
+        }
+
+        // Restrict available tools
+        if !agent.tools.is_empty() {
+            claude_args.push("--tools".to_string());
+            claude_args.push(agent.tools.join(","));
+        }
+
+        // Additional directories
+        for dir in &agent.add_dirs {
+            claude_args.push("--add-dir".to_string());
+            claude_args.push(dir.clone());
+        }
+
+        // Sub-agents
+        if !agent.subagents.is_empty() {
+            if let Ok(agents_json) = serde_json::to_string(&agent.subagents) {
+                let escaped = agents_json.replace('\'', "'\\''");
+                claude_args.push("--agents".to_string());
+                claude_args.push(format!("'{escaped}'"));
+            }
+        }
+
+        // MCP servers
+        if let Some(ref mcp) = agent.mcp_config {
+            if let Ok(mcp_json) = serde_json::to_string(mcp) {
+                let escaped = mcp_json.replace('\'', "'\\''");
+                claude_args.push("--mcp-config".to_string());
+                claude_args.push(format!("'{escaped}'"));
+            }
+        }
+
+        // Git worktree isolation
+        if agent.use_worktree {
+            claude_args.push("-w".to_string());
+        }
+
+        // Custom settings
+        if let Some(ref settings) = agent.custom_settings {
+            if let Ok(settings_json) = serde_json::to_string(settings) {
+                let escaped = settings_json.replace('\'', "'\\''");
+                claude_args.push("--settings".to_string());
+                claude_args.push(format!("'{escaped}'"));
+            }
+        }
+
+        let ssh_command = claude_args.join(" ");
+        tracing::info!(
+            ssh_port,
+            session_id = %target_session_id,
+            "running claude on user VM via SSH"
+        );
+
+        yield Ok(Event::default().event("system").data(
+            serde_json::to_string(&json!({"message": "Running on your VM..."})).unwrap()
+        ));
+
+        // Spawn SSH process to user's VM
+        let child_result = vm_client.ssh_stream(ssh_port, &ssh_command).await;
+        let mut child = match child_result {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::error!(error = %e, "SSH to user VM failed");
+                let mut all_sessions = sessions_ref.write().await;
+                if let Some(fs) = all_sessions.get_mut(&key_for_stream) {
+                    if let Some(s) = fs.get_session_mut(&target_session_id) {
+                        s.busy = false;
+                        s.busy_since = None;
+                    }
+                }
+                yield Ok(Event::default().event("error").data(
+                    serde_json::to_string(&json!({"message": format!("VM connection failed: {e}")})).unwrap()
+                ));
+                return;
+            }
+        };
 
         // Create broadcast channel + event buffer for reconnection support
         let (bc_tx, _) = broadcast::channel::<String>(1024);
@@ -603,9 +694,9 @@ fn chat_sdk_stream(
         let _ = std::fs::create_dir_all(&logs_dir);
         let log_path = logs_dir.join(format!("{target_session_id}.jsonl"));
 
+        // Background task: read SSH stdout (stream-json from claude CLI) and broadcast
         {
             let bc_tx = bc_tx.clone();
-            let sdk_sessions = sdk_sessions.clone();
             let sessions_ref = sessions_ref.clone();
             let session_streams = session_streams.clone();
             let chat_event_buffers = chat_event_buffers.clone();
@@ -614,8 +705,11 @@ fn chat_sdk_stream(
             let sid_for_bg = target_session_id.clone();
             let sessions_path = sessions_path.clone();
             let log_path = log_path.clone();
+            let mongo_db_bg = state.mongo_db.clone();
 
             tokio::spawn(async move {
+                use tokio::io::{AsyncBufReadExt, BufReader};
+
                 let mut session_cost: f64 = 0.0;
 
                 let append_log = |line: &str| {
@@ -629,90 +723,82 @@ fn chat_sdk_stream(
                     }
                 };
                 append_log(&format!("user:{}", serde_json::to_string(&json!({"text": prompt})).unwrap_or_default()));
-                let result = {
-                    let mut pool = sdk_sessions.lock().await;
-                    if let Some(session) = pool.get_mut(&proc_key) {
-                        match session.send_message(&prompt).await {
-                            Ok(mut rx) => {
-                                drop(pool);
-                                loop {
-                                    match rx.recv().await {
-                                        Ok(sse_event) => {
-                                            let event_str = format!("{}:{}", sse_event.event_type,
-                                                serde_json::to_string(&sse_event.data).unwrap_or_default());
 
-                                            if sse_event.event_type == "result" {
-                                                session_cost = sse_event.data.get("cost")
-                                                    .and_then(|v| v.as_f64())
-                                                    .unwrap_or(0.0);
-                                            }
+                // Read stdout line by line (stream-json from claude CLI)
+                if let Some(stdout) = child.stdout.take() {
+                    let reader = BufReader::new(stdout);
+                    let mut lines = reader.lines();
 
-                                            let _ = bc_tx.send(event_str.clone());
-                                            append_log(&event_str);
-                                            {
-                                                let mut buffers = chat_event_buffers.lock().await;
-                                                if let Some(buf) = buffers.get_mut(&proc_key) {
-                                                    buf.push(event_str);
+                    while let Ok(Some(line)) = lines.next_line().await {
+                        if line.is_empty() { continue; }
+
+                        // Parse stream-json output from claude CLI
+                        if let Ok(json_val) = serde_json::from_str::<serde_json::Value>(&line) {
+                            let event_type = json_val.get("type").and_then(|v| v.as_str()).unwrap_or("unknown");
+
+                            let sse_event = match event_type {
+                                "content_block_delta" => {
+                                    if let Some(text) = json_val.pointer("/delta/text").and_then(|v| v.as_str()) {
+                                        if !text.is_empty() {
+                                            Some(format!("text:{}", serde_json::to_string(&json!({"text": text})).unwrap()))
+                                        } else { None }
+                                    } else { None }
+                                }
+                                "content_block_start" => {
+                                    if json_val.pointer("/content_block/type").and_then(|v| v.as_str()) == Some("tool_use") {
+                                        let tool = json_val.pointer("/content_block/name").and_then(|v| v.as_str()).unwrap_or("?");
+                                        Some(format!("tool_use:{}", serde_json::to_string(&json!({"tool": tool, "input": ""})).unwrap()))
+                                    } else { None }
+                                }
+                                "result" => {
+                                    session_cost = json_val.get("total_cost_usd").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                                    let result_text = json_val.get("result").and_then(|v| v.as_str()).unwrap_or("");
+                                    let turns = json_val.get("num_turns").and_then(|v| v.as_u64()).unwrap_or(0);
+                                    Some(format!("result:{}", serde_json::to_string(&json!({"text": result_text, "cost": session_cost, "turns": turns})).unwrap()))
+                                }
+                                "assistant" => {
+                                    // Full assistant message — extract text blocks
+                                    if let Some(content) = json_val.pointer("/message/content").and_then(|c| c.as_array()) {
+                                        for block in content {
+                                            if block.get("type").and_then(|v| v.as_str()) == Some("text") {
+                                                if let Some(text) = block.get("text").and_then(|v| v.as_str()) {
+                                                    let event_str = format!("text:{}", serde_json::to_string(&json!({"text": text})).unwrap());
+                                                    let _ = bc_tx.send(event_str.clone());
+                                                    append_log(&event_str);
+                                                    let mut buffers = chat_event_buffers.lock().await;
+                                                    if let Some(buf) = buffers.get_mut(&proc_key) { buf.push(event_str); }
                                                 }
                                             }
-
-                                            if sse_event.event_type == "done" {
-                                                break;
-                                            }
-                                        }
-                                        Err(broadcast::error::RecvError::Lagged(n)) => {
-                                            tracing::warn!(skipped = n, "SDK event receiver lagged");
-                                        }
-                                        Err(broadcast::error::RecvError::Closed) => {
-                                            break;
                                         }
                                     }
+                                    None
                                 }
-                                Ok(())
-                            }
-                            Err(e) => {
-                                drop(pool);
-                                Err(e)
-                            }
-                        }
-                    } else {
-                        Err(anyhow::anyhow!("SDK session not found in pool"))
-                    }
-                };
+                                _ => None,
+                            };
 
-                if let Err(e) = result {
-                    tracing::error!(error = %e, "SDK send_message failed");
-                    let error_event = format!("error:{}", serde_json::to_string(&json!({"message": e.to_string()})).unwrap_or_default());
-                    let _ = bc_tx.send(error_event.clone());
-                    append_log(&error_event);
-                    {
-                        let mut buffers = chat_event_buffers.lock().await;
-                        if let Some(buf) = buffers.get_mut(&proc_key) {
-                            buf.push(error_event);
-                        }
-                    }
-                }
-
-                // Send git snapshot after completion
-                {
-                    let sessions = sessions_ref.read().await;
-                    if let Some(fs) = sessions.get(&key_for_bg) {
-                        if let Some(s) = fs.get_session(&sid_for_bg) {
-                            if let Some(ref wt_meta) = s.worktree_group {
-                                let snapshot = crate::git::snapshot_from_meta(wt_meta);
-                                if let Ok(snap_json) = serde_json::to_string(&snapshot) {
-                                    let git_event = format!("git_snapshot:{snap_json}");
-                                    let _ = bc_tx.send(git_event.clone());
-                                    append_log(&git_event);
+                            if let Some(event_str) = sse_event {
+                                let is_result = event_str.starts_with("result:");
+                                let _ = bc_tx.send(event_str.clone());
+                                append_log(&event_str);
+                                {
                                     let mut buffers = chat_event_buffers.lock().await;
-                                    if let Some(buf) = buffers.get_mut(&proc_key) {
-                                        buf.push(git_event);
-                                    }
+                                    if let Some(buf) = buffers.get_mut(&proc_key) { buf.push(event_str); }
                                 }
+                                if is_result { break; }
                             }
+                        } else {
+                            // Non-JSON line — send as text
+                            let event_str = format!("text:{}", serde_json::to_string(&json!({"text": line})).unwrap());
+                            let _ = bc_tx.send(event_str.clone());
+                            append_log(&event_str);
+                            let mut buffers = chat_event_buffers.lock().await;
+                            if let Some(buf) = buffers.get_mut(&proc_key) { buf.push(event_str); }
                         }
                     }
                 }
+
+                // Wait for SSH process to exit
+                let _ = child.wait().await;
 
                 // Send done event
                 let done_data = serde_json::to_string(&json!({"exit_code": 0})).unwrap();
@@ -721,9 +807,7 @@ fn chat_sdk_stream(
                 append_log(&done_event);
                 {
                     let mut buffers = chat_event_buffers.lock().await;
-                    if let Some(buf) = buffers.get_mut(&proc_key) {
-                        buf.push(done_event);
-                    }
+                    if let Some(buf) = buffers.get_mut(&proc_key) { buf.push(done_event); }
                 }
 
                 // Update session state
@@ -737,9 +821,18 @@ fn chat_sdk_stream(
                             s.total_cost += session_cost;
                         }
                     }
-                    let sessions_snapshot = all_sessions.clone();
+                    if let Some(ref db) = mongo_db_bg {
+                        if let Some(fs) = all_sessions.get(&key_for_bg) {
+                            let db = db.clone();
+                            let key = key_for_bg.clone();
+                            let fs = fs.clone();
+                            tokio::spawn(async move { db.save_session(&key, &fs).await; });
+                        }
+                    } else {
+                        let sessions_snapshot = all_sessions.clone();
+                        crate::api::save_sessions(&sessions_path, &sessions_snapshot);
+                    }
                     drop(all_sessions);
-                    crate::api::save_sessions(&sessions_path, &sessions_snapshot);
                 }
 
                 // Cleanup after delay
@@ -781,6 +874,7 @@ fn chat_sdk_stream(
 
 /// POST /agents/{id}/chat — SSE stream for agent chat
 pub(crate) async fn chat(
+    auth: crate::api::local_auth::AuthUser,
     State(state): State<AppState>,
     Path(id): Path<String>,
     Json(body): Json<ChatRequest>,
@@ -801,7 +895,6 @@ pub(crate) async fn chat(
         ));
     }
 
-    let permissions = agent.permissions.clone();
     let append_system_prompt = agent.append_system_prompt.clone();
 
     let default_working_dir = agent.working_dir.clone().unwrap_or_else(|| {
@@ -910,25 +1003,17 @@ pub(crate) async fn chat(
         };
 
         if session.busy {
-            // Check for stale busy — process might be dead
+            // Check for stale busy — SDK session might be disconnected
             let proc_k = process_key(&id, &session.session_id);
             let is_stale = {
-                let mut pool = state.live_processes.lock().await;
-                if let Some(proc) = pool.get_mut(&proc_k) {
-                    // Process exists — check if it's actually dead
-                    matches!(proc.child.try_wait(), Ok(Some(_)))
+                let sdk_pool = state.sdk_sessions.lock().await;
+                if let Some(sdk_session) = sdk_pool.get(&proc_k) {
+                    !sdk_session.is_connected()
                 } else {
-                    // Check SDK sessions
-                    let sdk_pool = state.sdk_sessions.lock().await;
-                    if let Some(sdk_session) = sdk_pool.get(&proc_k) {
-                        // SDK session exists — it's stale if disconnected
-                        !sdk_session.is_connected()
-                    } else {
-                        // No process in any pool — check if it's been busy too long
-                        session.busy_since
-                            .map(|since| chrono::Utc::now().signed_duration_since(since).to_std().unwrap_or_default() > STALE_BUSY_TIMEOUT)
-                            .unwrap_or(true) // No timestamp = definitely stale
-                    }
+                    // No session in pool — check if it's been busy too long
+                    session.busy_since
+                        .map(|since| chrono::Utc::now().signed_duration_since(since).to_std().unwrap_or_default() > STALE_BUSY_TIMEOUT)
+                        .unwrap_or(true) // No timestamp = definitely stale
                 }
             };
 
@@ -937,12 +1022,7 @@ pub(crate) async fn chat(
                     session_id = %session.session_id,
                     "auto-recovering stale busy session"
                 );
-                // Clean up dead process
                 let proc_k = process_key(&id, &session.session_id);
-                let mut pool = state.live_processes.lock().await;
-                pool.remove(&proc_k);
-                drop(pool);
-                // Also clean up SDK session
                 let mut sdk_pool = state.sdk_sessions.lock().await;
                 sdk_pool.remove(&proc_k);
                 drop(sdk_pool);
@@ -970,9 +1050,10 @@ pub(crate) async fn chat(
 
         flow_sessions.active_session = sid.clone();
 
+        let fs_clone = flow_sessions.clone();
         let sessions_snapshot = all_sessions.clone();
         drop(all_sessions);
-        state.save_sessions_to_disk(&sessions_snapshot);
+        state.save_session_or_all(&key, &fs_clone, &sessions_snapshot);
 
         (sid, is_new, wdir)
     };
@@ -1120,9 +1201,14 @@ pub(crate) async fn chat(
                         s.skills_dir = Some(skills_dir.to_string_lossy().to_string());
                     }
                 }
+                let fs_clone = all_sessions.get(&key).cloned();
                 let sessions_snapshot = all_sessions.clone();
                 drop(all_sessions);
-                state.save_sessions_to_disk(&sessions_snapshot);
+                if let Some(ref fs) = fs_clone {
+                    state.save_session_or_all(&key, fs, &sessions_snapshot);
+                } else {
+                    state.save_sessions_to_disk(&sessions_snapshot);
+                }
             }
 
             // 4. Build scoped system prompt for flow executor agents
@@ -1175,588 +1261,22 @@ pub(crate) async fn chat(
         None
     };
 
-    // -----------------------------------------------------------------------
-    // SDK path: when AGENT_SDK_ENABLED=1, use AgentSession instead of
-    // LiveClaudeProcess. Returns early with the SDK stream.
-    // -----------------------------------------------------------------------
-    if agent_sdk_enabled() {
-        let stream = chat_sdk_stream(
-            state,
-            id,
-            prompt,
-            target_session_id,
-            is_new,
-            working_dir,
-            system_prompt,
-            agent,
-        );
-        let boxed: BoxSseStream = Box::pin(stream);
-        return Ok(Sse::new(boxed).keep_alive(
-            KeepAlive::new().interval(std::time::Duration::from_secs(15)),
-        ));
-    }
-
-    // -----------------------------------------------------------------------
-    // Legacy path: LiveClaudeProcess (stdin/stdout subprocess)
-    // -----------------------------------------------------------------------
-
-    let key_for_stream = key.clone();
-    let proc_key_for_stream = process_key(&id, &target_session_id);
-    let session_id_for_stream = target_session_id.clone();
-    let sessions_ref = state.interact_sessions.clone();
-    let sessions_path = state.sessions_path.clone();
-    let live_processes = state.live_processes.clone();
-    let session_streams = state.session_streams.clone();
-    let chat_event_buffers = state.chat_event_buffers.clone();
-
-    let stream = async_stream::stream! {
-        use std::process::Stdio;
-        use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-        use tokio::process::Command;
-
-        // Check if we have a live persistent process for this session.
-        // Hold the lock across check + spawn + insert to prevent TOCTOU races.
-        let spawn_result = {
-            let mut pool = live_processes.lock().await;
-            if pool.contains_key(&proc_key_for_stream) {
-                None // Already exists, no spawn needed
-            } else {
-                // Spawn inside the lock — Command::spawn() is synchronous (forks immediately)
-                let mut args = vec![
-                    "--verbose".to_string(),
-                    "--output-format".to_string(),
-                    "stream-json".to_string(),
-                    "--input-format".to_string(),
-                    "stream-json".to_string(),
-                ];
-
-                if !permissions.is_empty() {
-                    // Agent has explicit allowedTools — use them.
-                    // Tools NOT in this list trigger Claude's permission model,
-                    // which fires the PermissionRequest hook.
-                    args.push("--allowedTools".to_string());
-                    args.push(permissions.join(","));
-                }
-                // When no explicit permissions: Claude's default permission model
-                // kicks in and fires PermissionRequest hooks (configured in
-                // .claude/settings.local.json) for tools that need approval.
-
-                // Pass sub-agent definitions via Claude Code's native --agents flag.
-                // This lets the parent session delegate to specialized sub-agents.
-                if !agent.subagents.is_empty() {
-                    if let Ok(agents_json) = serde_json::to_string(&agent.subagents) {
-                        args.push("--agents".to_string());
-                        args.push(agents_json);
-                        tracing::info!(
-                            agent_id = %id,
-                            subagent_count = agent.subagents.len(),
-                            "passing sub-agents to claude CLI"
-                        );
-                    }
-                }
-
-                if is_new {
-                    args.push("--session-id".to_string());
-                    args.push(session_id_for_stream.clone());
-                    if let Some(ref sys_prompt) = system_prompt {
-                        args.push("--system-prompt".to_string());
-                        args.push(sys_prompt.clone());
-                    }
-                } else {
-                    args.push("--resume".to_string());
-                    args.push(session_id_for_stream.clone());
-                }
-
-                tracing::info!(
-                    key = %proc_key_for_stream,
-                    session_id = %session_id_for_stream,
-                    is_new,
-                    "spawning persistent claude for agent chat"
-                );
-
-                match Command::new("claude")
-                    .args(&args)
-                    .current_dir(&working_dir)
-                    .env_remove("CLAUDECODE")
-                    .env("CLAUDECODE", "")
-                    .stdin(Stdio::piped())
-                    .stdout(Stdio::piped())
-                    .stderr(Stdio::piped())
-                    .spawn()
-                {
-                    Ok(mut child) => {
-                        if let Some(pid) = child.id() {
-                            let mut all_sessions = sessions_ref.write().await;
-                            if let Some(fs) = all_sessions.get_mut(&key_for_stream) {
-                                if let Some(s) = fs.get_session_mut(&session_id_for_stream) {
-                                    s.active_pid = Some(pid);
-                                }
-                            }
-                        }
-
-                        let child_stdin = child.stdin.take().expect("stdin piped");
-
-                        let stdout = child.stdout.take().expect("stdout piped");
-                        let (stdout_tx, stdout_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
-                        tokio::spawn(async move {
-                            let reader = BufReader::new(stdout);
-                            let mut lines = reader.lines();
-                            while let Ok(Some(line)) = lines.next_line().await {
-                                if stdout_tx.send(line).is_err() {
-                                    break;
-                                }
-                            }
-                        });
-
-                        let stderr = child.stderr.take().expect("stderr piped");
-                        let (stderr_tx, stderr_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
-                        tokio::spawn(async move {
-                            let reader = BufReader::new(stderr);
-                            let mut lines = reader.lines();
-                            while let Ok(Some(line)) = lines.next_line().await {
-                                if !line.is_empty() {
-                                    let _ = stderr_tx.send(line);
-                                }
-                            }
-                        });
-
-                        let live_proc = LiveClaudeProcess {
-                            stdin: child_stdin,
-                            stdout_lines: stdout_rx,
-                            stderr_lines: stderr_rx,
-                            child,
-                            busy: false,
-                        };
-
-                        pool.insert(proc_key_for_stream.clone(), live_proc);
-                        Some(Ok(()))
-                    }
-                    Err(e) => Some(Err(e)),
-                }
-            }
-        };
-
-        match spawn_result {
-            Some(Err(e)) => {
-                tracing::error!(error = %e, "failed to spawn claude for agent chat");
-                let mut all_sessions = sessions_ref.write().await;
-                if let Some(fs) = all_sessions.get_mut(&key_for_stream) {
-                    if let Some(s) = fs.get_session_mut(&session_id_for_stream) {
-                        s.busy = false;
-                        s.busy_since = None;
-                    }
-                }
-                yield Ok(Event::default().event("error").data(
-                    serde_json::to_string(&json!({"message": format!("failed to spawn claude: {e}")})).unwrap()
-                ));
-                return;
-            }
-            Some(Ok(())) => {
-                yield Ok(Event::default().event("system").data(
-                    serde_json::to_string(&json!({"message": "Session started"})).unwrap()
-                ));
-            }
-            None => {
-                yield Ok(Event::default().event("system").data(
-                    serde_json::to_string(&json!({"message": "Ready"})).unwrap()
-                ));
-            }
-        }
-
-        // Write the prompt to the persistent process's stdin as stream-json
-        {
-            let mut pool = live_processes.lock().await;
-            if let Some(proc) = pool.get_mut(&proc_key_for_stream) {
-                // Build content: plain string when no images, content block array when images present
-                let content = if images.is_empty() {
-                    json!(prompt)
-                } else {
-                    let mut blocks: Vec<Value> = Vec::new();
-                    if !prompt.trim().is_empty() {
-                        blocks.push(json!({ "type": "text", "text": prompt }));
-                    }
-                    for img in &images {
-                        blocks.push(json!({
-                            "type": "image",
-                            "source": {
-                                "type": "base64",
-                                "media_type": img.media_type,
-                                "data": img.data,
-                            }
-                        }));
-                    }
-                    json!(blocks)
-                };
-                let input_msg = serde_json::to_string(&json!({
-                    "type": "user",
-                    "message": {
-                        "role": "user",
-                        "content": content,
-                    }
-                })).unwrap();
-                let write_result = proc.stdin.write_all(format!("{input_msg}\n").as_bytes()).await;
-                if let Err(e) = write_result {
-                    tracing::error!(error = %e, "failed to write to persistent claude stdin");
-                    pool.remove(&proc_key_for_stream);
-                    let mut all_sessions = sessions_ref.write().await;
-                    if let Some(fs) = all_sessions.get_mut(&key_for_stream) {
-                        if let Some(s) = fs.get_session_mut(&session_id_for_stream) {
-                            s.busy = false;
-                            s.busy_since = None;
-                            s.active_pid = None;
-                        }
-                    }
-                    yield Ok(Event::default().event("error").data(
-                        serde_json::to_string(&json!({"message": format!("stdin write failed: {e}. Session will restart on next message.")})).unwrap()
-                    ));
-                    return;
-                }
-                proc.busy = true;
-            } else {
-                yield Ok(Event::default().event("error").data(
-                    serde_json::to_string(&json!({"message": "process not found in pool"})).unwrap()
-                ));
-                return;
-            }
-        }
-
-        // Create broadcast channel + event buffer, then spawn background reader task.
-        let (bc_tx, _) = broadcast::channel::<String>(1024);
-        {
-            let mut streams = session_streams.lock().await;
-            streams.insert(proc_key_for_stream.clone(), bc_tx.clone());
-            tracing::info!(
-                proc_key = %proc_key_for_stream,
-                total_streams = streams.len(),
-                "[RECONNECT-DEBUG] Created broadcast channel and inserted into session_streams"
-            );
-        }
-        {
-            let mut buffers = chat_event_buffers.lock().await;
-            buffers.insert(proc_key_for_stream.clone(), Vec::new());
-            tracing::info!(
-                proc_key = %proc_key_for_stream,
-                "[RECONNECT-DEBUG] Created event buffer"
-            );
-        }
-
-        // Spawn the background reader task
-        {
-            let bc_tx = bc_tx.clone();
-            let live_processes = live_processes.clone();
-            let sessions_ref = sessions_ref.clone();
-            let session_streams = session_streams.clone();
-            let chat_event_buffers = chat_event_buffers.clone();
-            let proc_key = proc_key_for_stream.clone();
-            let key_for_bg = key_for_stream.clone();
-            let sid_for_bg = session_id_for_stream.clone();
-            let sessions_path = sessions_path.clone();
-            let data_dir_for_bg = data_dir.clone();
-            let prompt_for_log = prompt.clone();
-
-            tokio::spawn(async move {
-                tracing::info!(
-                    proc_key = %proc_key,
-                    "[RECONNECT-DEBUG] Background reader task STARTED"
-                );
-                let mut session_cost: f64 = 0.0;
-                let mut event_count: u64 = 0;
-
-                // Set up JSONL log file for session history persistence
-                let logs_dir = data_dir_for_bg.join("session_logs");
-                let _ = std::fs::create_dir_all(&logs_dir);
-                let log_path = logs_dir.join(format!("{sid_for_bg}.jsonl"));
-
-                let append_log = |line: &str| {
-                    use std::io::Write;
-                    if let Ok(mut f) = std::fs::OpenOptions::new()
-                        .create(true)
-                        .append(true)
-                        .open(&log_path)
-                    {
-                        let _ = writeln!(f, "{}", line);
-                    }
-                };
-
-                // Log the user prompt that initiated this turn
-                append_log(&format!("user:{}", serde_json::to_string(&json!({"text": prompt_for_log})).unwrap_or_default()));
-
-                loop {
-                    let (line, stderr_batch) = {
-                        let mut pool = live_processes.lock().await;
-                        if let Some(proc) = pool.get_mut(&proc_key) {
-                            let mut errs = Vec::new();
-                            while let Ok(err_line) = proc.stderr_lines.try_recv() {
-                                errs.push(err_line);
-                            }
-                            let stdout_line = proc.stdout_lines.try_recv().ok();
-                            (stdout_line, errs)
-                        } else {
-                            break;
-                        }
-                    };
-
-                    for err_line in stderr_batch {
-                        tracing::debug!(stderr = %err_line, "claude stderr");
-                        let event = format!("stderr:{err_line}");
-                        let _ = bc_tx.send(event.clone());
-                        append_log(&event);
-                        let mut buffers = chat_event_buffers.lock().await;
-                        if let Some(buf) = buffers.get_mut(&proc_key) {
-                            buf.push(event);
-                        }
-                    }
-
-                    if let Some(line) = line {
-                        if line.is_empty() {
-                            continue;
-                        }
-
-                        let events = parse_claude_line_to_sse_events(&line);
-                        let mut is_result = false;
-
-                        for (event_type, data_json) in &events {
-                            if event_type == "result" {
-                                is_result = true;
-                                if let Ok(val) = serde_json::from_str::<serde_json::Value>(data_json) {
-                                    session_cost = val.get("cost").and_then(|v| v.as_f64()).unwrap_or(0.0);
-                                }
-                            }
-                            let event_str = format!("{event_type}:{data_json}");
-                            event_count += 1;
-                            let receivers = bc_tx.send(event_str.clone());
-                            tracing::debug!(
-                                proc_key = %proc_key,
-                                event_type = %event_type,
-                                event_count,
-                                receivers = ?receivers,
-                                "[RECONNECT-DEBUG] Background task broadcast event"
-                            );
-                            append_log(&event_str);
-                            let mut buffers = chat_event_buffers.lock().await;
-                            if let Some(buf) = buffers.get_mut(&proc_key) {
-                                buf.push(event_str);
-                            }
-                        }
-
-                        if is_result {
-                            // Send git snapshot after result (before done)
-                            {
-                                let sessions = sessions_ref.read().await;
-                                if let Some(fs) = sessions.get(&key_for_bg) {
-                                    if let Some(s) = fs.get_session(&sid_for_bg) {
-                                        if let Some(ref wt_meta) = s.worktree_group {
-                                            let snapshot = crate::git::snapshot_from_meta(wt_meta);
-                                            if let Ok(snap_json) = serde_json::to_string(&snapshot) {
-                                                let git_event = format!("git_snapshot:{snap_json}");
-                                                let _ = bc_tx.send(git_event.clone());
-                                                append_log(&git_event);
-                                                let mut buffers = chat_event_buffers.lock().await;
-                                                if let Some(buf) = buffers.get_mut(&proc_key) {
-                                                    buf.push(git_event);
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                            break;
-                        }
-                    } else {
-                        tokio::time::sleep(tokio::time::Duration::from_millis(20)).await;
-
-                        let mut pool = live_processes.lock().await;
-                        if let Some(proc) = pool.get_mut(&proc_key) {
-                            if let Ok(Some(_status)) = proc.child.try_wait() {
-                                pool.remove(&proc_key);
-                                break;
-                            }
-                        } else {
-                            break;
-                        }
-                    }
-                }
-
-                // Mark session as not busy, update stats
-                {
-                    let mut pool = live_processes.lock().await;
-                    if let Some(proc) = pool.get_mut(&proc_key) {
-                        proc.busy = false;
-                    }
-                }
-                {
-                    let mut all_sessions = sessions_ref.write().await;
-                    if let Some(fs) = all_sessions.get_mut(&key_for_bg) {
-                        if let Some(s) = fs.get_session_mut(&sid_for_bg) {
-                            s.busy = false;
-                            s.busy_since = None;
-                            s.message_count += 1;
-                            s.total_cost += session_cost;
-                        }
-                    }
-                    let sessions_snapshot = all_sessions.clone();
-                    drop(all_sessions);
-                    crate::api::save_sessions(&sessions_path, &sessions_snapshot);
-                }
-
-                // Send done event, then clean up broadcast/buffer
-                tracing::info!(
-                    proc_key = %proc_key,
-                    event_count,
-                    "[RECONNECT-DEBUG] Background reader task DONE, sending done event"
-                );
-                let done_data = serde_json::to_string(&json!({"exit_code": 0})).unwrap();
-                let done_event = format!("done:{done_data}");
-                let _ = bc_tx.send(done_event.clone());
-                append_log(&done_event);
-                {
-                    let mut buffers = chat_event_buffers.lock().await;
-                    if let Some(buf) = buffers.get_mut(&proc_key) {
-                        buf.push(done_event);
-                    }
-                }
-
-                // Clean up broadcast channel after a delay to allow reconnects to catch the done event
-                tracing::info!(
-                    proc_key = %proc_key,
-                    "[RECONNECT-DEBUG] Waiting 5s before cleanup..."
-                );
-                tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
-                {
-                    let mut streams = session_streams.lock().await;
-                    streams.remove(&proc_key);
-                    tracing::info!(
-                        proc_key = %proc_key,
-                        remaining_streams = streams.len(),
-                        "[RECONNECT-DEBUG] Cleaned up broadcast channel"
-                    );
-                }
-                {
-                    let mut buffers = chat_event_buffers.lock().await;
-                    buffers.remove(&proc_key);
-                    tracing::info!(
-                        proc_key = %proc_key,
-                        "[RECONNECT-DEBUG] Cleaned up event buffer. Background task EXIT."
-                    );
-                }
-            });
-        }
-
-        // Subscribe to the broadcast channel and yield events as SSE
-        let mut rx = bc_tx.subscribe();
-        loop {
-            match rx.recv().await {
-                Ok(event_str) => {
-                    if let Some((event_type, data)) = event_str.split_once(':') {
-                        yield Ok(Event::default().event(event_type).data(data));
-                        if event_type == "done" {
-                            break;
-                        }
-                    }
-                }
-                Err(broadcast::error::RecvError::Lagged(n)) => {
-                    tracing::warn!(skipped = n, "agent chat broadcast subscriber lagged");
-                    continue;
-                }
-                Err(broadcast::error::RecvError::Closed) => {
-                    break;
-                }
-            }
-        }
-    };
-
+    // Use Agent SDK for chat streaming
+    let stream = chat_sdk_stream(
+        state,
+        id,
+        prompt,
+        target_session_id,
+        is_new,
+        working_dir,
+        system_prompt,
+        agent,
+        auth.user_id,
+    );
     let boxed: BoxSseStream = Box::pin(stream);
-    Ok(Sse::new(boxed).keep_alive(KeepAlive::new().interval(std::time::Duration::from_secs(15))))
-}
-
-/// Parse a raw Claude stdout line into a list of (event_type, data_json) pairs
-/// for broadcasting. Same parsing logic as the old inline read loop.
-fn parse_claude_line_to_sse_events(line: &str) -> Vec<(String, String)> {
-    let mut events = Vec::new();
-
-    if let Ok(json_val) = serde_json::from_str::<serde_json::Value>(line) {
-        let event_type = json_val.get("type").and_then(|v| v.as_str()).unwrap_or("unknown");
-
-        match event_type {
-            "system" => {
-                // Skip system events on resume
-            }
-            "content_block_delta" => {
-                if let Some(delta) = json_val.get("delta") {
-                    let delta_type = delta.get("type").and_then(|v| v.as_str()).unwrap_or("");
-                    if delta_type == "text_delta" {
-                        let text = delta.get("text").and_then(|v| v.as_str()).unwrap_or("");
-                        if !text.is_empty() {
-                            events.push((
-                                "text".to_string(),
-                                serde_json::to_string(&json!({"text": text})).unwrap(),
-                            ));
-                        }
-                    }
-                }
-            }
-            "content_block_start" => {
-                if let Some(content_block) = json_val.get("content_block") {
-                    let block_type = content_block.get("type").and_then(|v| v.as_str()).unwrap_or("");
-                    if block_type == "tool_use" {
-                        let tool = content_block.get("name").and_then(|v| v.as_str()).unwrap_or("?");
-                        events.push((
-                            "tool_use".to_string(),
-                            serde_json::to_string(&json!({"tool": tool, "input": ""})).unwrap(),
-                        ));
-                    }
-                }
-            }
-            "assistant" => {
-                if let Some(content) = json_val.get("message").and_then(|m| m.get("content")).and_then(|c| c.as_array()) {
-                    for block in content {
-                        let block_type = block.get("type").and_then(|v| v.as_str()).unwrap_or("");
-                        match block_type {
-                            "tool_use" => {
-                                let tool = block.get("name").and_then(|v| v.as_str()).unwrap_or("?");
-                                let input = block.get("input").map(|v| {
-                                    if v.is_string() {
-                                        v.as_str().unwrap_or("").to_string()
-                                    } else {
-                                        serde_json::to_string(v).unwrap_or_default()
-                                    }
-                                }).unwrap_or_default();
-                                events.push((
-                                    "tool_use".to_string(),
-                                    serde_json::to_string(&json!({"tool": tool, "input": input})).unwrap(),
-                                ));
-                            }
-                            "tool_result" => {
-                                let result_content = block.get("content").and_then(|v| v.as_str()).unwrap_or("");
-                                events.push((
-                                    "tool_result".to_string(),
-                                    serde_json::to_string(&json!({"content": result_content})).unwrap(),
-                                ));
-                            }
-                            _ => {}
-                        }
-                    }
-                }
-            }
-            "result" => {
-                let cost = json_val.get("total_cost_usd").and_then(|v| v.as_f64()).unwrap_or(0.0);
-                let turns = json_val.get("num_turns").and_then(|v| v.as_u64()).unwrap_or(0);
-                let result_text = json_val.get("result").and_then(|v| v.as_str()).unwrap_or("");
-                events.push((
-                    "result".to_string(),
-                    serde_json::to_string(&json!({"text": result_text, "cost": cost, "turns": turns})).unwrap(),
-                ));
-            }
-            _ => {}
-        }
-    } else {
-        events.push((
-            "text".to_string(),
-            serde_json::to_string(&json!({"text": line})).unwrap(),
-        ));
-    }
-
-    events
+    Ok(Sse::new(boxed).keep_alive(
+        KeepAlive::new().interval(std::time::Duration::from_secs(15)),
+    ))
 }
 
 // ---------------------------------------------------------------------------

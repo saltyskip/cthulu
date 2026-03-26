@@ -90,14 +90,14 @@ pub(crate) async fn refresh_token(State(state): State<AppState>) -> impl IntoRes
                 *guard = Some(token.clone());
             }
 
-            // Kill all live Claude processes so the next request spawns fresh ones.
-            // The old processes are authenticated with the expired token — they must die.
-            let killed = {
-                let mut pool = state.live_processes.lock().await;
+            // Disconnect all SDK sessions so the next request creates fresh ones.
+            // The old sessions are authenticated with the expired token — they must be replaced.
+            let disconnected = {
+                let mut pool = state.sdk_sessions.lock().await;
                 let count = pool.len();
-                for (key, mut proc) in pool.drain() {
-                    tracing::info!(key = %key, "killing stale claude process on token refresh");
-                    let _ = proc.child.kill().await;
+                for (key, mut session) in pool.drain() {
+                    tracing::info!(key = %key, "disconnecting stale SDK session on token refresh");
+                    let _ = session.disconnect().await;
                 }
                 count
             };
@@ -113,12 +113,12 @@ pub(crate) async fn refresh_token(State(state): State<AppState>) -> impl IntoRes
                 }
             }
 
-            tracing::info!(killed_processes = killed, "OAuth token refreshed successfully");
+            tracing::info!(disconnected_sessions = disconnected, "OAuth token refreshed successfully");
             Json(json!({
                 "ok": true,
                 "message": format!(
-                    "Token refreshed. {} local session(s) cleared.",
-                    killed
+                    "Token refreshed. {} session(s) cleared.",
+                    disconnected
                 )
             }))
         }
@@ -129,6 +129,70 @@ pub(crate) async fn refresh_token(State(state): State<AppState>) -> impl IntoRes
                 "message": "No token found in Keychain or CLAUDE_CODE_OAUTH_TOKEN env. Run `claude` in your terminal to re-authenticate, then try again."
             }))
         }
+    }
+}
+
+/// POST /api/auth/refresh-jwt — issue a new JWT with extended expiry.
+/// For cloud deployments where the frontend needs to refresh tokens without
+/// re-authenticating (prevents hard 24h logout).
+pub(crate) async fn refresh_jwt(
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
+) -> impl IntoResponse {
+    // Extract existing JWT from Authorization header
+    let token = headers
+        .get("authorization")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "));
+
+    let Some(token) = token else {
+        return (
+            hyper::StatusCode::UNAUTHORIZED,
+            Json(json!({ "error": "missing Authorization header" })),
+        );
+    };
+
+    // Validate existing token
+    let decoding_key = jsonwebtoken::DecodingKey::from_secret(state.jwt_secret.as_bytes());
+    let mut validation = jsonwebtoken::Validation::default();
+    validation.validate_exp = false; // Allow expired tokens to be refreshed
+
+    let claims = match jsonwebtoken::decode::<serde_json::Value>(token, &decoding_key, &validation) {
+        Ok(data) => data.claims,
+        Err(_) => {
+            return (
+                hyper::StatusCode::UNAUTHORIZED,
+                Json(json!({ "error": "invalid token" })),
+            );
+        }
+    };
+
+    // Issue a new token with fresh expiry (24h)
+    let sub = claims.get("sub").and_then(|v| v.as_str()).unwrap_or("unknown");
+    let now = chrono::Utc::now().timestamp() as usize;
+    let new_claims = json!({
+        "sub": sub,
+        "iat": now,
+        "exp": now + 86400, // 24 hours
+    });
+
+    let encoding_key = jsonwebtoken::EncodingKey::from_secret(state.jwt_secret.as_bytes());
+    match jsonwebtoken::encode(
+        &jsonwebtoken::Header::default(),
+        &new_claims,
+        &encoding_key,
+    ) {
+        Ok(new_token) => (
+            hyper::StatusCode::OK,
+            Json(json!({
+                "token": new_token,
+                "expires_in": 86400,
+            })),
+        ),
+        Err(e) => (
+            hyper::StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": format!("failed to issue token: {e}") })),
+        ),
     }
 }
 

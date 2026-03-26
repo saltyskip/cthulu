@@ -10,4 +10,5 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/auth/token-status", get(handlers::token_status))
         .route("/auth/refresh-token", post(handlers::refresh_token))
+        .route("/auth/refresh-jwt", post(handlers::refresh_jwt))
 }

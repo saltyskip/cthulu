@@ -1,6 +1,7 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useContext } from "react";
 import * as api from "../api/client";
 import { log } from "../api/logger";
+import { AuthContext } from "./AuthGate";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -233,22 +234,225 @@ export default function TopBar({
         />
       </div>
 
-      {tokenOk === false && (
-        <button
-          className="topbar-token-btn expired"
-          onClick={handleRefreshToken}
-          disabled={refreshing || !connected}
-          title="OAuth token expired — click to refresh"
-        >
-          {refreshing ? "Refreshing…" : "⚠ Token Expired"}
-        </button>
-      )}
-
       <ThemeSelector />
 
       <Button variant="ghost" size="sm" onClick={onSettingsClick}>
         Settings
       </Button>
+
+      <ProfileMenu />
+    </div>
+  );
+}
+
+function VmEnvSetter({ vmId }: { vmId: number }) {
+  const [webhookInput, setWebhookInput] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  const handleSave = async () => {
+    if (!webhookInput.trim()) return;
+    setSaving(true);
+    setSaved(false);
+    try {
+      const token = localStorage.getItem("cthulu_auth_token") || "";
+      await fetch("/api/auth/vm-env", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+        body: JSON.stringify({ env: { SLACK_WEBHOOK_URL: webhookInput.trim() } }),
+      });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 3000);
+    } catch { /* logged */ }
+    setSaving(false);
+  };
+
+  return (
+    <div style={{ marginTop: 6 }}>
+      <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 4 }}>Slack Webhook → VM{vmId}</div>
+      <div style={{ display: "flex", gap: 4 }}>
+        <input
+          value={webhookInput}
+          onChange={(e) => setWebhookInput(e.target.value)}
+          placeholder="https://hooks.slack.com/..."
+          className="profile-name-input"
+          style={{ flex: 1, fontSize: 11 }}
+        />
+        <button
+          className="profile-menu-btn"
+          onClick={handleSave}
+          disabled={saving || !webhookInput.trim()}
+        >
+          {saving ? "..." : saved ? "Saved" : "Set"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ProfileMenu() {
+  const auth = useContext(AuthContext);
+  const [open, setOpen] = useState(false);
+  const [profile, setProfile] = useState<api.UserProfile | null>(null);
+  const [teams, setTeams] = useState<api.TeamSummary[]>([]);
+  const [editingName, setEditingName] = useState(false);
+  const [nameInput, setNameInput] = useState("");
+  const [editingKey, setEditingKey] = useState(false);
+  const [keyInput, setKeyInput] = useState("");
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    api.getProfile().then(setProfile).catch(() => {});
+    api.listTeams().then((r) => setTeams(r.teams)).catch(() => {});
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [open]);
+
+  const handleSaveName = async () => {
+    if (!nameInput.trim()) return;
+    try {
+      const updated = await api.updateProfile({ name: nameInput.trim() });
+      setProfile(updated);
+      setEditingName(false);
+    } catch { /* logged */ }
+  };
+
+  const handleSaveKey = async () => {
+    try {
+      const updated = await api.updateProfile({ anthropic_api_key: keyInput });
+      setProfile(updated);
+      setEditingKey(false);
+      setKeyInput("");
+    } catch { /* logged */ }
+  };
+
+  const handleCreateTeam = async () => {
+    const name = prompt("Team name:");
+    if (!name?.trim()) return;
+    try {
+      await api.createTeam(name.trim());
+      const r = await api.listTeams();
+      setTeams(r.teams);
+    } catch { /* logged */ }
+  };
+
+  if (!auth) return null;
+
+  return (
+    <div className="profile-menu-container" ref={menuRef}>
+      <button
+        className="profile-menu-trigger"
+        onClick={() => setOpen(!open)}
+        title={profile?.email || "Profile"}
+      >
+        {profile?.name?.[0]?.toUpperCase() || profile?.email?.[0]?.toUpperCase() || "?"}
+      </button>
+
+      {open && (
+        <div className="profile-menu-dropdown">
+          <div className="profile-menu-header">
+            {editingName ? (
+              <div style={{ display: "flex", gap: 4 }}>
+                <input
+                  value={nameInput}
+                  onChange={(e) => setNameInput(e.target.value)}
+                  placeholder="Your name"
+                  className="profile-name-input"
+                  autoFocus
+                  onKeyDown={(e) => e.key === "Enter" && handleSaveName()}
+                />
+                <button className="profile-menu-btn" onClick={handleSaveName}>Save</button>
+              </div>
+            ) : (
+              <>
+                <div className="profile-menu-name">
+                  {profile?.name || profile?.email || "..."}
+                </div>
+                <div className="profile-menu-email">{profile?.email}</div>
+                <button
+                  className="profile-menu-btn"
+                  onClick={() => { setNameInput(profile?.name || ""); setEditingName(true); }}
+                >
+                  Edit name
+                </button>
+              </>
+            )}
+          </div>
+
+          {/* VM Status + Env Vars */}
+          <div className="profile-menu-section">
+            <div className="profile-menu-section-header"><span>VM</span></div>
+            {profile?.vm_id != null ? (
+              <>
+                <div style={{ fontSize: 12, color: "var(--success)", fontWeight: 600, marginBottom: 8 }}>
+                  VM{profile.vm_id} connected — running Claude Code
+                </div>
+                <VmEnvSetter vmId={profile.vm_id} />
+              </>
+            ) : (
+              <span style={{ fontSize: 12, color: "var(--muted)" }}>No VM assigned</span>
+            )}
+          </div>
+
+          <div className="profile-menu-section">
+            <div className="profile-menu-section-header">
+              <span>API Key</span>
+            </div>
+            {editingKey ? (
+              <div style={{ display: "flex", gap: 4 }}>
+                <input
+                  value={keyInput}
+                  onChange={(e) => setKeyInput(e.target.value)}
+                  placeholder="sk-ant-..."
+                  type="password"
+                  className="profile-name-input"
+                  autoFocus
+                  onKeyDown={(e) => e.key === "Enter" && handleSaveKey()}
+                />
+                <button className="profile-menu-btn" onClick={handleSaveKey}>Save</button>
+                <button className="profile-menu-btn" onClick={() => setEditingKey(false)}>Cancel</button>
+              </div>
+            ) : (
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <span style={{ fontSize: 12, color: profile?.has_api_key ? "var(--success)" : "var(--muted)" }}>
+                  {profile?.has_api_key ? "Key set" : "No personal key (using server key)"}
+                </span>
+                <button className="profile-menu-btn" onClick={() => setEditingKey(true)}>
+                  {profile?.has_api_key ? "Change" : "Set key"}
+                </button>
+              </div>
+            )}
+          </div>
+
+          <div className="profile-menu-section">
+            <div className="profile-menu-section-header">
+              <span>Teams</span>
+              <button className="profile-menu-btn" onClick={handleCreateTeam}>+ New</button>
+            </div>
+            {teams.length === 0 ? (
+              <div className="profile-menu-empty">No teams yet</div>
+            ) : (
+              teams.map((t) => (
+                <div key={t.id} className="profile-menu-team">
+                  {t.name} <span style={{ opacity: 0.5, fontSize: 11 }}>({t.member_count})</span>
+                </div>
+              ))
+            )}
+          </div>
+
+          <button className="profile-menu-logout" onClick={auth.logout}>
+            Log out
+          </button>
+        </div>
+      )}
     </div>
   );
 }

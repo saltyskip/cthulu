@@ -219,6 +219,7 @@ pub(crate) struct TriggerFlowRequest {
 }
 
 pub(crate) async fn trigger_flow(
+    auth: crate::api::local_auth::AuthUser,
     State(state): State<AppState>,
     Path(id): Path<String>,
     body: String,
@@ -264,6 +265,27 @@ pub(crate) async fn trigger_flow(
         data_dir: state.data_dir.clone(),
         session_streams: state.session_streams.clone(),
     };
+    // Look up user's VM for remote execution
+    let (user_ssh_port, user_vm_host, user_env) = {
+        let store = state.user_store.read().await;
+        let user = store.users.values().find(|u| u.id == auth.user_id);
+        let ssh_port = user.and_then(|u| u.ssh_port);
+        let env_vars = user.map(|u| u.env_vars.clone()).unwrap_or_default();
+        tracing::info!(
+            user_id = %auth.user_id,
+            ssh_port = ?ssh_port,
+            env_keys = ?env_vars.keys().collect::<Vec<_>>(),
+            "flow trigger: resolved user VM + env"
+        );
+        let vm_host = if ssh_port.is_some() {
+            let vm_client = crate::vm_manager::VmManagerClient::new((*state.http_client).clone());
+            Some(vm_client.ssh_host())
+        } else {
+            None
+        };
+        (ssh_port, vm_host, env_vars)
+    };
+
     let runner = crate::flows::runner::FlowRunner {
         http_client: state.http_client.clone(),
         github_client: state.github_client.clone(),
@@ -271,6 +293,9 @@ pub(crate) async fn trigger_flow(
         sandbox_provider: Some(state.sandbox_provider.clone()),
         agent_repo: Some(state.agent_repo.clone()),
         session_bridge: Some(session_bridge),
+        ssh_port: user_ssh_port,
+        vm_host: user_vm_host,
+        user_env,
     };
 
     let flow_repo = state.flow_repo.clone();
